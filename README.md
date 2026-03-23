@@ -6,7 +6,7 @@ multiOTP open source is OATH certified for HOTP/TOTP
 (c) 2010-2026 SysCo systemes de communication sa  
 https://www.multiotp.net/
 
-Current build: 5.10.1.2 (2026-01-05)
+Current build: 5.10.2.1 (2026-03-23)
 
 Binary download: https://download.multiotp.net/ (including virtual appliance image, docker and full release notes)
 
@@ -22,7 +22,10 @@ PATH/TO/FREERADIUS/LOG/VOLUME:/var/log/freeradius
 
 The **multiotp/multiotp-open-source** docker is working on Synology devices !  
 
-Binary download of the multiOTP open source Credential Provider for Windows 7/8/8.1/10/11/2012(R2)/2016/2019/2022 : https://download.multiotp.net/credential-provider/
+It's strongly recommended to read the whole README file.  
+That said, if you're in a hurry: the default RADIUS secret for subnet 0.0.0.0/0 is `myfirstpass`.
+
+Binary download of the multiOTP open source Credential Provider for Windows 7/8/8.1/10/11/2012(R2)/2016/2019/2022/2025 : https://download.multiotp.net/credential-provider/
 
 [![Donate via PayPal](https://img.shields.io/badge/donate-paypal-87ceeb.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&currency_code=USD&business=paypal@sysco.ch&item_name=Donation%20for%20multiOTP%20project)
 *Please consider supporting this project by making a donation via [PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&currency_code=USD&business=paypal@sysco.ch&item_name=Donation%20for%20multiOTP%20project)*
@@ -47,6 +50,7 @@ appliances including more features like:
  - Full Web GUI interface
  - Automated provisioning of new account (based on Active Directory)
  - High Availability master-slave support (Enterprise Edition)
+ - Push token using free multiOTP token App (Enterprise Edition)
  - Web API support (Enterprise Edition)
  - free virtual appliances available, including a free lifetime one user licence
  - online demo of the full Web GUI interface
@@ -54,6 +58,13 @@ appliances including more features like:
 
 
 The multiOTP class supports currently the following algorithms and RFC's:
+- OATH/HOTP or OATH/TOTP, base32/hex/raw seed, QRcode provisioning
+  (multiOTP token App, FreeOTP, Google Authenticator, ...)
+- Yubico OTP (http://yubico.com/yubikey)
+- mOTP (http://motp.sourceforge.net)
+- SMS tokens (using Afilnet, aspsms, Clickatell, eCall, IntelliSMS, Nexmo, NowSMS,
+  SMSEagle, SMSGateway, Spryng, Swisscom, Telnyx, any custom provider, your own script)
+- TAN (emergency scratch passwords)
 - RFC1994 CHAP (Challenge Handshake Authentication Protocol)
 - RFC2433 MS-CHAP (Microsoft PPP CHAP Extensions)
 - RFC2487 SMTP Service Extension for Secure SMTP over TLS
@@ -63,13 +74,6 @@ The multiOTP class supports currently the following algorithms and RFC's:
 - RFC5424 Syslog Protocol (client)
 - RFC6030 PSKC (Additional Portable Symmetric Key Container Algorithm Profiles)
 - RFC6238 OATH/TOTP (TOTP: Time-Based One-Time Password Algorithm)
-- Yubico OTP (http://yubico.com/yubikey)
-- mOTP (http://motp.sourceforge.net)
-- OATH/HOTP or OATH/TOTP, base32/hex/raw seed, QRcode provisioning
-  (FreeOTP, Google Authenticator, ...)
-- SMS tokens (using Afilnet, aspsms, Clickatell, eCall, IntelliSMS, Nexmo, NowSMS,
-  SMSEagle, SMSGateway, Spryng, Swisscom, Telnyx, any custom provider, your own script)
-- TAN (emergency scratch passwords)
 
 This package was initially published here : http://syscoal.users.phpclasses.org/package/6373.html
 For more PHP classes, have a look on [PHPclasses.org](http://syscoal.users.phpclasses.org/browse/), where a lot of authors are sharing their classes for free.
@@ -155,6 +159,16 @@ WHAT'S NEW IN THIS 5.10.x RELEASE
 CHANGE LOG OF RELEASED VERSIONS
 ===============================
 ```
+2026-03-23 5.10.2.1 FIX: Changing notification options (SMTP server and SysLog options) was not always possible
+                    FIX: SMSEagle v2 implementation was not always able to send to international countries
+                    FIX: websocketCore.php was missing in the sources
+                    ENH: Template updated to propose the free "multiOTP token app" by default for Android and iOS
+                    ENH: Embedded Windows PHP edition updated to version 8.4.16 x64 (from 8.4.14 x86)
+                    ENH: Embedded Windows nginx edition updated to version 1.29.6
+                    ENH: Updated environment detection, like docker detection
+                    ENH: Updated Linux helper, for the future new web interface
+                    ENH: For Windows, WMIC dependencies has been removed and replaced by Powershell commands
+2026-01-23 5.10.1.5 ENH: For Docker installation, configuration files are copied automatically in the external volumes if missing
 2026-01-05 5.10.1.2 FIX: Locked and delayed status handled before push status
 2025-12-23 5.10.1.1 ENH: New SendEmail implementation with internal smtp stack (using smtp parameters)
                     ENH: Better Docker integration
@@ -932,6 +946,13 @@ Provisioning will be done simply by flashing a QRcode.
     - YubiKey Nano
     - YubiKey Neo
     - YubiKey Neo-N
+    
+The YubiKey CSV import is based on the .CSV created by the legacy Yubikey Personalization Tools, which is, the following lines in a file called for example **yubico_log.csv**:
+
+```
+LOGGING START,2025-05-04T03:02:01
+Yubico OTP,2025-05-04T03:02:01,1,vvcccdjkllvd,sde2c13f6a65,c6d293cbf190e4eb13f45b3913edea7b,,,0,0,0,0,0,0,0,0,0,0
+```
 
 If you want to use software tokens with Apps like Google Authenticator, you can
 create a QRcode provisioning in two EASY steps with the command line tool:
@@ -1969,7 +1990,7 @@ MULTIOTP COMMAND LINE TOOL
 ==========================
 
 ``` 
-multiOTP 5.10.1.2 (2026-01-05)
+multiOTP 5.10.2.1 (2026-03-23)
 (c) 2010-2026 SysCo systemes de communication sa
 http://www.multiOTP.net   (you can try the [Donate] button ;-)
 
@@ -2504,8 +2525,8 @@ Visit https://forum.multiotp.net/ for additional support
 ``` 
  
 ``` 
-Hash verification for multiotp_5.10.1.2.zip 
-SHA256:3e2cf1e4704695b30b823df1b3952614342c203a1260350a21bce699c79431fc 
-SHA1:b67317fd8bc32ba8e8f0d6cbae9005b673cc2ad2 
-MD5:c0e70540ccf2b8c6d48d822ba201840c 
+Hash verification for multiotp_5.10.2.1.zip 
+SHA256:61f69686dd814dcca83fbe03629f7db2979be89136ef4d26a714051fa24a99df 
+SHA1:755072a5aa8a909564a32ec184fbfd51427f5696 
+MD5:c1a63cd5d8ec69771c0854acf4301dd3 
 ``` 
