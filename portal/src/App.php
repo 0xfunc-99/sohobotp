@@ -89,7 +89,26 @@ final class App
         if (!empty($this->admin['must_change_password']) && !in_array($route, ['password', 'logout'], true)) {
             $this->redirect('password');
         }
+        $users = new UsersController($this->admin, $this->audit, $this->view);
+        $tokens = new TokensController($this->admin, $this->audit, $this->view);
+        $directory = new DirectoryController($this->admin, $this->audit, $this->view);
         match ($route) {
+            'users'          => $users->index(),
+            'user-new'       => $users->create(),
+            'user'           => $users->show(),
+            'user-action'    => $users->action(),
+            'user-bulk'      => $users->bulk(),
+            'tokens'         => $tokens->index(),
+            'token-import'   => $tokens->import(),
+            'token-action'   => $tokens->action(),
+            'directory'      => $directory->index(),
+            'directory-save' => $directory->save(),
+            'directory-test' => $directory->test(),
+            'directory-run'  => $directory->run(),
+            'jobs'           => $directory->jobs(),
+            'job'            => $directory->job(),
+            'job-status'     => $directory->jobStatus(),
+            'job-cancel'     => $directory->cancel(),
             'logout'       => $this->logout(),
             'password'     => $this->changePassword(),
             'account'      => $this->account(),
@@ -368,12 +387,25 @@ final class App
         }
         $admins = $this->admins->all();
         $recent = Roles::can($this->admin['role'], 'audit.view') ? $this->audit->search([], 1, 8)['entries'] : [];
+        $directoryState = (new Directory())->state();
+        $directorySettings = null;
+        try {
+            $directorySettings = (new Directory())->settings();
+        } catch (\Throwable $error) {
+            error_log('multiOTP portal dashboard directory: ' . $error);
+        }
         $this->view->render('dashboard', [
             'title'       => 'Dashboard',
             'stats'       => $stats,
             'adminCount'  => count(array_filter($admins, static fn (array $a): bool => 'active' === $a['status'])),
             'lockedAdmins'=> count(array_filter($admins, [AdminRepository::class, 'isLocked'])),
             'recent'      => $recent,
+            'directory'   => [
+                'enabled'  => (bool) ($directorySettings['enabled'] ?? false),
+                'schedule' => $directoryState['schedule'] ?? null,
+                'last'     => $directoryState['last_sync'] ?? null,
+                'active'   => Jobs::latest('directory.sync'),
+            ],
         ]);
     }
 
@@ -641,7 +673,7 @@ final class App
 
     private function sendSecurityHeaders(): void
     {
-        header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+        header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
         header('X-Content-Type-Options: nosniff');
         header('X-Frame-Options: DENY');
         header('Referrer-Policy: same-origin');

@@ -33,13 +33,25 @@ final class View
     private static function navigation(string $role): array
     {
         $items = [
-            ['route' => 'dashboard', 'label' => 'Dashboard', 'permission' => 'dashboard.view'],
-            ['route' => 'admins', 'label' => 'Administrators', 'permission' => 'admins.manage'],
-            ['route' => 'audit', 'label' => 'Audit trail', 'permission' => 'audit.view'],
-            ['route' => 'account', 'label' => 'My account', 'permission' => null],
+            ['route' => 'dashboard', 'label' => 'Dashboard', 'permission' => ['dashboard.view']],
+            ['route' => 'users', 'label' => 'Users', 'permission' => ['users.view']],
+            ['route' => 'tokens', 'label' => 'Hardware tokens', 'permission' => ['tokens.view']],
+            ['route' => 'directory', 'label' => 'Directory (AD/LDAP)', 'permission' => ['settings.view', 'sync.view', 'directory.manage']],
+            ['route' => 'admins', 'label' => 'Administrators', 'permission' => ['admins.manage']],
+            ['route' => 'audit', 'label' => 'Audit trail', 'permission' => ['audit.view']],
+            ['route' => 'account', 'label' => 'My account', 'permission' => []],
         ];
-        return array_values(array_filter($items, static fn (array $item): bool =>
-            null === $item['permission'] || Roles::can($role, $item['permission'])));
+        return array_values(array_filter($items, static function (array $item) use ($role): bool {
+            if ([] === $item['permission']) {
+                return true;
+            }
+            foreach ($item['permission'] as $permission) {
+                if (Roles::can($role, $permission)) {
+                    return true;
+                }
+            }
+            return false;
+        }));
     }
 
     private static function capture(string $__file, array $__vars): string

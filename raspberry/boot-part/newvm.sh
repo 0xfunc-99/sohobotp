@@ -723,6 +723,17 @@ else
   cp -af /var/log/multiotp/* /var/multiotp-temp/log/multiotp
   cp -af /var/log/freeradius/* /var/multiotp-temp/log/freeradius
 
+  # multiOTP portal background worker (directory sync, previews, scheduled jobs),
+  # run as www-data like PHP-FPM, restarted if it ever stops
+  if [ -e /usr/local/bin/multiotp/portal/bin/worker.php ] ; then
+    (
+      while true; do
+        su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/bin/worker.php --loop" >> /var/log/multiotp/portal-worker.log 2>&1
+        sleep 10
+      done
+    ) &
+  fi
+
   # Keep container running
   while true;
     do sleep 30;

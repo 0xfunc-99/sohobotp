@@ -22,7 +22,7 @@ final class Roles
             'description' => 'Manages users, tokens, directory sync, RADIUS and endpoints. Cannot manage administrators.',
             'permissions' => [
                 'dashboard.view', 'users.view', 'users.manage', 'tokens.view', 'tokens.manage',
-                'sync.view', 'sync.run', 'radius.view', 'radius.manage',
+                'sync.view', 'sync.run', 'directory.manage', 'radius.view', 'radius.manage',
                 'endpoints.view', 'endpoints.manage', 'audit.view', 'settings.view',
             ],
         ],

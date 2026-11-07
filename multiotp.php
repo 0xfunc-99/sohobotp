@@ -28318,7 +28318,7 @@ class MultiotpAdLdap {
             if (array_key_exists("use_ssl",$options)){ $this->_use_ssl=$options["use_ssl"]; }
             if (array_key_exists("recursive_groups",$options)){ $this->_recursive_groups=$options["recursive_groups"]; }
             if (array_key_exists("ldap_server_type",$options)){ $this->_ldap_server_type=$options["ldap_server_type"]; }
-            if (array_key_exists("ldap_filter ",$options)){ $this->_ldap_filter=$options["ldap_filter"]; }
+            if (array_key_exists("ldap_filter",$options)){ $this->_ldap_filter=$options["ldap_filter"]; } // Fixed (portal stage 2): the key had a trailing space, so the LDAP filter was never applied
             if (array_key_exists("cache_support",$options)){ $this->_cache_support=$options["cache_support"]; }
             if (array_key_exists("cache_folder",$options)){ $this->_cache_folder=$options["cache_folder"]; }
             if (array_key_exists("expired_password_valid",$options)){ $this->_expired_password_valid=(TRUE == $options["expired_password_valid"]); }

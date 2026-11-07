@@ -1273,6 +1273,29 @@ WantedBy=multi-user.target
 EOL
 
   systemctl enable multiotp.service
+
+  # multiOTP portal background worker (directory sync, previews, scheduled jobs)
+  cat >/etc/systemd/system/multiotp-portal-worker.service <<EOL
+[Unit]
+Description=multiOTP portal background worker
+After=local-fs.target network-online.target
+ConditionPathExists=/usr/local/bin/multiotp/portal/bin/worker.php
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/usr/local/bin/multiotp/portal/
+ExecStart=/usr/bin/php /usr/local/bin/multiotp/portal/bin/worker.php --loop
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+  systemctl enable multiotp-portal-worker.service
 fi
 
 
