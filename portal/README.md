@@ -15,9 +15,14 @@ in those folders also refuses to run on its own.
 |---|---|---|
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
 | 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (real AD not yet tested) |
-| 3 | FreeRADIUS clients, shared secrets, validation, reloads, diagnostics | next |
-| 4 | Endpoint (multiOTP Credential Provider) enrolment, inventory, policies | |
-| 5 | Integration testing on test systems | |
+| 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user directory-password prefix | in progress |
+| 4 | Endpoint (multiOTP Credential Provider) enrolment, inventory, **endpoint groups** and policies | |
+| 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
+| 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
+| 7 | Raspberry Pi / virtual appliance image with the portal and worker | |
+| 8 | Integration testing on test systems (real AD, RADIUS clients, Credential Provider) | |
+
+Deferred: push notifications (need a phone app and a push service; revisit after stage 8).
 
 The visual design is interim and will follow the supplied mockup.
 
