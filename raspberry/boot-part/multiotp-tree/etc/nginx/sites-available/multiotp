@@ -44,6 +44,12 @@ server {
         expires -1;
     }
 
+    # multiOTP management portal: only portal/index.php and portal/assets/ are public
+    location ~ ^/portal/(src|templates|bin|tests)(/|$) {
+      deny all;
+      return 404;
+    }
+
     location ~ /(config|log|users|tokens|devices|groups|radius|webservice) {
       deny all;
       return 404;

@@ -158,13 +158,17 @@ header("Cache-Control: no-store, no-cache, must-revalidate");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-  header("Access-Control-Allow-Origin: {$_SERVER['HTTP_ORIGIN']}");
-} else {
-  header("Access-Control-Allow-Origin: *");
+// Security (portal stage 1): the request Origin used to be reflected together
+// with Access-Control-Allow-Credentials, so any website could drive an admin
+// session cross-site. CORS is now only granted to origins explicitly listed in
+// the MULTIOTP_CORS_ORIGINS environment variable (comma separated, exact match).
+$cors_allowed_origins = array_filter(array_map('trim', explode(',', (string) getenv('MULTIOTP_CORS_ORIGINS'))));
+if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $cors_allowed_origins, true)) {
+  header("Access-Control-Allow-Origin: ".$_SERVER['HTTP_ORIGIN']);
+  header('Access-Control-Allow-Credentials: true');
+  header('Access-Control-Max-Age: 86400');
 }
-header('Access-Control-Allow-Credentials: true');
-header('Access-Control-Max-Age: 86400');
+header('Vary: Origin');
 
 // Access-Control headers are received during OPTIONS requests
 if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {

@@ -25394,13 +25394,21 @@ EOL;
 
     if ('admin' == $username) {
       $result = $this->CheckAdminPasswordHashWithRandomSalt($hashedPassword);
-    } elseif ($this->ReadUserData($username)) {
-      if ($this->IsUserAdminWithOtp()) {
-        $result = (0 === $this->CheckToken($password));
+    } elseif (('' != $username) && (FALSE !== $this->SetUser($username))) {
+      // Fixed (portal stage 1): the OTP was read from an undefined $password,
+      // and the user was never selected before CheckToken().
+      // without2FA users can never be console administrators.
+      if ($this->IsUserAdminWithOtp() && ('without2fa' != $this->GetUserAlgorithm())) {
+        $otp = mb_substr(empty($data_array['password']) ? '' : $data_array['password'], 0, 255);
+        $result = (('' != $otp) && (0 === $this->CheckToken($otp)));
       }
     }
     
     if ($result) {
+      // Issue a new session id once authenticated (session fixation protection)
+      if (PHP_SESSION_ACTIVE == session_status()) {
+        session_regenerate_id(true);
+      }
       $_SESSION['authenticated']       = true;
       $_SESSION['authenticated_admin'] = true;
       $_SESSION['authenticated_user']  = $username;
@@ -25467,28 +25475,21 @@ EOL;
     $cookie_secure = (!$this->IsDebugOption()) && (!$this->IsDeveloperMode() && ('DVP' != $this->GetHardwareType()));
     $cookie_httponly = true;
     
-    session_set_cookie_params(
-      $params["lifetime"],
-      $params["path"], $params["domain"],
-      $cookie_secure, $cookie_httponly
-    );
+    session_set_cookie_params([
+      'lifetime' => $params["lifetime"],
+      'path'     => $params["path"],
+      'domain'   => $params["domain"],
+      'secure'   => $cookie_secure,
+      'httponly' => $cookie_httponly,
+      'samesite' => 'Strict',
+    ]);
 
-    // Restore session id
-    if (!empty($data)) {
-      $data_array = json_decode($data, true);
-      $sid = $data_array['sid'] ?? null;
-      if ($sid && preg_match('/^[a-zA-Z0-9,-]{1,128}$/', $sid)) {
-        session_id($sid);
-      }
-    }
-
-    // Restore session id if sent by POST (for example from a form)
-    if (empty($sid)) {
-      $sid = $_POST['sid'] ?? null;
-      if ($sid && preg_match('/^[a-zA-Z0-9,-]{1,128}$/', $sid)) {
-        session_id($sid);
-      }
-    }
+    // Security (portal stage 1): client-supplied session ids ("sid" in the JSON
+    // body or in POST) are no longer adopted, as this allowed session fixation.
+    // The session id travels only in the HttpOnly cookie, and strict mode makes
+    // PHP refuse uninitialised ids presented by the client.
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
 
     $previous_session_name = session_name("cookid");
     session_start();
@@ -78060,13 +78061,17 @@ header("Cache-Control: no-store, no-cache, must-revalidate");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-  header("Access-Control-Allow-Origin: {$_SERVER['HTTP_ORIGIN']}");
-} else {
-  header("Access-Control-Allow-Origin: *");
+// Security (portal stage 1): the request Origin used to be reflected together
+// with Access-Control-Allow-Credentials, so any website could drive an admin
+// session cross-site. CORS is now only granted to origins explicitly listed in
+// the MULTIOTP_CORS_ORIGINS environment variable (comma separated, exact match).
+$cors_allowed_origins = array_filter(array_map('trim', explode(',', (string) getenv('MULTIOTP_CORS_ORIGINS'))));
+if (isset($_SERVER['HTTP_ORIGIN']) && in_array($_SERVER['HTTP_ORIGIN'], $cors_allowed_origins, true)) {
+  header("Access-Control-Allow-Origin: ".$_SERVER['HTTP_ORIGIN']);
+  header('Access-Control-Allow-Credentials: true');
+  header('Access-Control-Max-Age: 86400');
 }
-header('Access-Control-Allow-Credentials: true');
-header('Access-Control-Max-Age: 86400');
+header('Vary: Origin');
 
 // Access-Control headers are received during OPTIONS requests
 if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
