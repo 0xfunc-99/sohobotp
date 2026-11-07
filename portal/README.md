@@ -191,6 +191,32 @@ a seed checked by the multiOTP engine, recovery codes, disable/unlock, bulk acti
 import and assignment, directory test/preview/sync through the worker, out-of-scope users
 being disabled, and the helpdesk limits.
 
+## Active Directory tests
+
+```sh
+MULTIOTP_TEST_AD=1 sh portal/tests/run-in-docker.sh
+```
+
+Adds a disposable Samba AD DC (`EXAMPLE.TEST`) after the normal OpenLDAP tests.
+The AD suite uses a separate PHP container, trusted self-signed LDAPS certificate,
+portal `Directory` settings and real worker jobs. It checks preview/sync, user
+attributes, direct/multiple/nested group scopes, disabled and re-enabled accounts,
+out-of-scope disabling, directory password + TOTP, and service-password storage.
+TLS checks include `never`, trusted `demand`, and rejection of an untrusted certificate.
+The default run does not build or start Samba.
+
+See [the Samba fixture](tests/docker/samba/README.md) for public test credentials,
+xattr requirements and the test-only `SYS_ADMIN` capability. No host ports are
+published. The first optional run downloads a Debian image and Samba packages;
+do not run it when downloads are prohibited. If buildx settings are unwritable,
+set `BUILDX_CONFIG` to a writable temporary directory.
+
+**Validation status:** the default suite passed (64 unit and 119 end-to-end checks).
+The Samba image download was stopped at the user's request; the AD suite has not
+run, so AD group filtering, lifecycle, LDAPS and password + OTP results remain
+unverified. No new engine bug has been confirmed or fixed by this work. The known
+generic-LDAP group-list limitation and portal guard remain unchanged.
+
 ## Local preview
 
 ```sh
