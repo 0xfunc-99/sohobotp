@@ -37,6 +37,7 @@ final class View
             ['route' => 'users', 'label' => 'Users', 'permission' => ['users.view']],
             ['route' => 'tokens', 'label' => 'Hardware tokens', 'permission' => ['tokens.view']],
             ['route' => 'directory', 'label' => 'Directory (AD/LDAP)', 'permission' => ['settings.view', 'sync.view', 'directory.manage']],
+            ['route' => 'radius', 'label' => 'RADIUS servers', 'permission' => ['radius.view']],
             ['route' => 'admins', 'label' => 'Administrators', 'permission' => ['admins.manage']],
             ['route' => 'audit', 'label' => 'Audit trail', 'permission' => ['audit.view']],
             ['route' => 'account', 'label' => 'My account', 'permission' => []],

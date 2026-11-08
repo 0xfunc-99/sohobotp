@@ -92,7 +92,7 @@ final class UsersController extends Controller
         $op = $this->post('op', 32);
         $permission = match ($op) {
             'unlock'                        => 'users.unlock',
-            'enable', 'disable', 'delete', 'save' => 'users.manage',
+            'enable', 'disable', 'delete', 'save', 'login-format' => 'users.manage',
             'enroll', 'recovery-codes'      => 'tokens.enroll',
             'resync'                        => 'tokens.resync',
             'assign-token', 'remove-token'  => 'tokens.manage',
@@ -121,6 +121,16 @@ final class UsersController extends Controller
                     }
                     $changes = $users->update($name, $fields);
                     $this->done('user.update', $name, [] === $changes ? 'Nothing changed.' : 'User updated.', ['changes' => $changes]);
+                case 'login-format':
+                    $format = $this->post('format', 16);
+                    $pin = $users->setLoginFormat($name, $format);
+                    $this->audit->record('user.login_format', 'success', $name, ['format' => $format]);
+                    if (null !== $pin) {
+                        $this->view->render('user-pin', ['title' => 'PIN for ' . $name, 'name' => $name, 'pin' => $pin]);
+                        exit;
+                    }
+                    Session::flash('success', 'Login format changed to: ' . Users::LOGIN_FORMATS[$format] . '.');
+                    $this->redirect('user', ['u' => $name]);
                 case 'enroll':
                     $uri = $users->enrollSoftwareToken($name);
                     $this->audit->record('user.token_enrolled', 'success', $name, ['type' => 'software TOTP']);

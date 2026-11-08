@@ -108,6 +108,17 @@ function run_job(array $job, Directory $directory): void
                 log_line("preview {$job['id']} " . ($result['ok'] ? 'done' : 'failed'));
                 break;
 
+            case 'radius.apply':
+                Jobs::progress($job['id'], 'Checking and applying the FreeRADIUS configuration');
+                $result = (new Portal\Radius())->apply();
+                $error = $result['ok'] ? null : ($result['available']
+                    ? 'FreeRADIUS refused the configuration; the previous one is still active.'
+                    : 'The FreeRADIUS helper is not available on this system.');
+                Jobs::finish($job['id'], $result['ok'] ? 'succeeded' : 'failed', ['log' => explode("\n", $result['output'])], $error);
+                $audit->record('radius.apply', $result['ok'] ? 'success' : 'failure', '', ['job' => $job['id']]);
+                log_line("radius apply {$job['id']} " . ($result['ok'] ? 'applied' : 'failed'));
+                break;
+
             default:
                 Jobs::finish($job['id'], 'failed', null, 'Unknown job type.');
         }

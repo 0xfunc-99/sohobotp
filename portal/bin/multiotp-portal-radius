@@ -1,0 +1,148 @@
+#!/bin/sh
+# multiOTP portal - FreeRADIUS helper (runs as root through sudo).
+#
+# Installed as /usr/local/sbin/multiotp-portal-radius (root:root 0755). The web server user
+# may run it with a single fixed command and no other argument:
+#
+#   apply                   validate the portal's candidate client file, install it,
+#                           check the whole FreeRADIUS configuration, restart FreeRADIUS;
+#                           roll back if the check fails
+#   check                   check the FreeRADIUS configuration (freeradius -C)
+#   status                  print freeradius=running|stopped and default_client=active|inactive
+#   restart                 restart FreeRADIUS
+#   disable-default-client  comment out the install-time catch-all client
+#                           (0.0.0.0/0, secret "myfirstpass"), then check and restart
+#
+# The candidate file is never trusted: every line must match the generated grammar.
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+CANDIDATE=/etc/multiotp/portal/radius/clients.candidate.conf
+if [ -d /etc/freeradius/3.0 ]; then RADDB=/etc/freeradius/3.0; else RADDB=/etc/freeradius; fi
+TARGET="$RADDB/multiotp-portal-clients.conf"
+CLIENTS="$RADDB/clients.conf"
+INCLUDE_LINE="\$INCLUDE $TARGET"
+MARKER="# multiotp my-first-network"
+
+say() { printf '%s\n' "$*"; }
+fail() { say "ERROR: $*"; exit 1; }
+
+radius_group() {
+  if getent group freerad >/dev/null 2>&1; then echo freerad; else echo root; fi
+}
+
+check_config() {
+  if ! command -v freeradius >/dev/null 2>&1; then
+    say "freeradius is not installed"
+    return 1
+  fi
+  out=$(freeradius -C 2>&1)
+  rc=$?
+  printf '%s\n' "$out" | tail -n 40
+  return $rc
+}
+
+restart_radius() {
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl restart freeradius 2>&1
+  elif [ -x /etc/init.d/freeradius ]; then
+    /etc/init.d/freeradius restart 2>&1 || { /etc/init.d/freeradius stop >/dev/null 2>&1; /etc/init.d/freeradius start 2>&1; }
+  else
+    service freeradius restart 2>&1
+  fi
+  i=0
+  while [ $i -lt 10 ]; do
+    if pidof freeradius >/dev/null 2>&1; then say "freeradius=running"; return 0; fi
+    sleep 1; i=$((i + 1))
+  done
+  say "freeradius=stopped"
+  return 1
+}
+
+validate_candidate() {
+  [ -f "$CANDIDATE" ] || fail "no candidate file ($CANDIDATE)"
+  size=$(wc -c < "$CANDIDATE")
+  [ "$size" -lt 2000000 ] || fail "candidate file too large"
+  patterns=$(mktemp)
+  cat > "$patterns" <<'EOF'
+^$
+^# [ -~]*$
+^client [a-z0-9-]{1,80} \{$
+^	ipaddr = [0-9a-fA-F:.]{2,45}/[0-9]{1,3}$
+^	secret = "[]A-Za-z0-9!#&'()*+,./:;<=>?@^_`{|}~[-]{16,128}"$
+^	shortname = [a-z0-9-]{1,80}$
+^	nastype = (other|cisco|juniper)$
+^	require_message_authenticator = (yes|no)$
+^\}$
+EOF
+  bad=$(grep -Evn -f "$patterns" "$CANDIDATE" | head -n 5)
+  rm -f "$patterns"
+  [ -z "$bad" ] || fail "candidate file rejected, unexpected content at line(s): $(printf '%s' "$bad" | cut -d: -f1 | tr '\n' ' ')"
+}
+
+ensure_include() {
+  if ! grep -qxF "$INCLUDE_LINE" "$CLIENTS" 2>/dev/null; then
+    cp -p "$CLIENTS" "$CLIENTS.portal-bak" 2>/dev/null || true
+    printf '\n# Clients managed by the multiOTP management portal\n%s\n' "$INCLUDE_LINE" >> "$CLIENTS"
+    say "added include to $CLIENTS"
+  fi
+}
+
+case "${1:-}" in
+  apply)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    validate_candidate
+    [ -f "$TARGET" ] && cp -p "$TARGET" "$TARGET.bak"
+    [ -f "$CLIENTS" ] && cp -p "$CLIENTS" "$CLIENTS.bak-portal-apply"
+    install -o root -g "$(radius_group)" -m 0640 "$CANDIDATE" "$TARGET" || fail "cannot install $TARGET"
+    ensure_include
+    say "== freeradius -C"
+    if ! check_config; then
+      say "configuration check FAILED: previous configuration restored"
+      if [ -f "$TARGET.bak" ]; then mv -f "$TARGET.bak" "$TARGET"; else rm -f "$TARGET"; fi
+      [ -f "$CLIENTS.bak-portal-apply" ] && mv -f "$CLIENTS.bak-portal-apply" "$CLIENTS"
+      exit 2
+    fi
+    rm -f "$TARGET.bak" "$CLIENTS.bak-portal-apply"
+    say "== restart"
+    restart_radius || exit 3
+    say "applied $(grep -c '^client ' "$TARGET") client(s)"
+    ;;
+  check)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    check_config
+    ;;
+  status)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    if pidof freeradius >/dev/null 2>&1; then say "freeradius=running"; else say "freeradius=stopped"; fi
+    if grep -E '^[^#]*client[[:space:]]+0\.0\.0\.0/0' "$CLIENTS" >/dev/null 2>&1 || grep -E '^[^#]*secret[[:space:]]*=[[:space:]]*"?myfirstpass' "$CLIENTS" >/dev/null 2>&1; then
+      say "default_client=active"
+    else
+      say "default_client=inactive"
+    fi
+    if grep -qxF "$INCLUDE_LINE" "$CLIENTS" 2>/dev/null; then say "portal_clients=included"; else say "portal_clients=not-included"; fi
+    ;;
+  restart)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    restart_radius
+    ;;
+  disable-default-client)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    grep -qF "$MARKER" "$CLIENTS" || fail "no install-time default client found in $CLIENTS"
+    cp -p "$CLIENTS" "$CLIENTS.bak-portal-default"
+    sed -i "/$MARKER/{/^#disabled-by-portal# /!s/^/#disabled-by-portal# /}" "$CLIENTS"
+    say "== freeradius -C"
+    if ! check_config; then
+      mv -f "$CLIENTS.bak-portal-default" "$CLIENTS"
+      say "configuration check FAILED: default client kept"
+      exit 2
+    fi
+    rm -f "$CLIENTS.bak-portal-default"
+    restart_radius || exit 3
+    say "default client disabled"
+    ;;
+  *)
+    fail "usage: multiotp-portal-radius apply|check|status|restart|disable-default-client"
+    ;;
+esac

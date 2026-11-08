@@ -161,5 +161,62 @@ check('linked user replay refused', !$mfa->verify($linked, $code));
 check('without2fa never verifies', !$mfa->verify(['id' => 'y', 'mfa_mode' => 'multiotp', 'mfa_user' => 'unit-nomfa'], ''));
 check('unenrolled never verifies', !$mfa->verify(['id' => 'z', 'mfa_mode' => null], '123456'));
 
+// --- RADIUS: addresses, secrets, generated FreeRADIUS file
+use Portal\Radius;
+use Portal\RadiusClient;
+
+check('address host becomes /32', '10.0.0.5/32' === Radius::normaliseAddress('10.0.0.5'));
+check('address network is aligned', '10.0.0.0/24' === Radius::normaliseAddress('10.0.0.77/24'));
+check('ipv6 network aligned', '2001:db8::/64' === Radius::normaliseAddress('2001:db8::1234/64'));
+check('catch-all network refused', throws(static fn () => Radius::normaliseAddress('0.0.0.0/0'), ValidationException::class));
+check('/7 refused', throws(static fn () => Radius::normaliseAddress('10.0.0.0/7'), ValidationException::class));
+check('host name refused', throws(static fn () => Radius::normaliseAddress('vpn.example.com'), ValidationException::class));
+check('localhost reserved', throws(static fn () => Radius::normaliseAddress('127.0.0.1'), ValidationException::class));
+check('generated secret 24 chars', 1 === preg_match('/^[A-Za-z2-9]{24}$/', Radius::newSecret()));
+check('custom secret with quote refused', throws(static fn () => Radius::validSecret('abcdefghijklmnop"q'), ValidationException::class));
+check('custom secret with $ refused', throws(static fn () => Radius::validSecret('abcdefghijklmnop${x}'), ValidationException::class));
+check('custom secret too short refused', throws(static fn () => Radius::validSecret('short'), ValidationException::class));
+check('custom secret accepted', 'Abc-def_ghi.jkl:mno!' === Radius::validSecret('Abc-def_ghi.jkl:mno!'));
+
+@unlink(Config::dataDir() . '/unit-radius.json');
+$radius = new Radius(new Portal\JsonStore(Config::dataDir() . '/unit-radius.json'));
+$vpn = $radius->saveGroup(null, ['name' => 'VPN gateways', 'challenge_response' => '1', 'cache_timeout' => '3600']);
+check('group created', 'VPN gateways' === $vpn['name'] && true === $vpn['policy']['challenge_response']);
+check('duplicate group refused', throws(static fn () => $radius->saveGroup(null, ['name' => 'vpn gateways', 'cache_timeout' => '3600']), ValidationException::class));
+[$fw, $fwSecret] = $radius->createClient(['name' => 'fw-paris', 'address' => '192.0.2.10', 'group_id' => $vpn['id'], 'nas_type' => 'other', 'require_message_authenticator' => '1']);
+check('client created with secret', '192.0.2.10/32' === $fw['address'] && 24 === strlen($fwSecret) && !isset($fw['secret']));
+check('duplicate address refused', throws(static fn () => $radius->createClient(['name' => 'fw-other', 'address' => '192.0.2.10/32', 'group_id' => $vpn['id']]), ValidationException::class));
+check('secret sealed in radius.json', !str_contains((string) file_get_contents(Config::dataDir() . '/unit-radius.json'), $fwSecret));
+Portal\MultiotpService::reset();
+$device = Portal\MultiotpService::get();
+check('engine device written', $device->ReadDeviceData($fw['id'], false, true) && Radius::shortname($fw) === $device->GetDeviceShortname() && 1 === (int) $device->GetDeviceChallengeEnabled());
+$radius->saveGroup($vpn['id'], ['name' => 'VPN gateways', 'challenge_response' => '', 'cache_result' => '1', 'cache_timeout' => '600']);
+Portal\MultiotpService::reset();
+$device = Portal\MultiotpService::get();
+$device->ReadDeviceData($fw['id'], false, true);
+check('group policy change reaches device', 0 === (int) $device->GetDeviceChallengeEnabled() && 1 === (int) $device->GetDeviceCacheResultEnabled() && 600 === (int) $device->GetDeviceCacheTimeout());
+check('group with servers cannot be deleted', throws(static fn () => $radius->deleteGroup($vpn['id']), ValidationException::class));
+$rendered = $radius->render();
+check('rendered file has client and secret', str_contains($rendered, 'client fw-paris-' . $fw['id'] . ' {') && str_contains($rendered, "secret = \"$fwSecret\"") && str_contains($rendered, 'ipaddr = 192.0.2.10/32'));
+check('rendered file has diagnostics client', str_contains($rendered, 'ipaddr = 127.0.0.2/32'));
+$newSecret = $radius->rotateSecret($fw['id']);
+check('secret rotated', $newSecret !== $fwSecret && str_contains($radius->render(), $newSecret));
+file_put_contents(sys_get_temp_dir() . '/unit-radius-candidate.conf', $radius->render());
+
+// RADIUS PAP hiding (RFC 2865 5.2) round trip
+$authenticator = random_bytes(16);
+$hidden = RadiusClient::hidePassword('secret-password-longer-than-16', 'shared', $authenticator);
+$plain = '';
+$previous = $authenticator;
+foreach (str_split($hidden, 16) as $block) {
+    $plain .= $block ^ md5('shared' . $previous, true);
+    $previous = $block;
+}
+check('PAP password hiding reversible', 'secret-password-longer-than-16' === rtrim($plain, "\0") && 0 === strlen($hidden) % 16);
+
+$radius->deleteClient($fw['id']);
+Portal\MultiotpService::reset();
+check('client delete removes engine device', !Portal\MultiotpService::get()->ReadDeviceData($fw['id'], false, true));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

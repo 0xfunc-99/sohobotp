@@ -15,7 +15,7 @@ in those folders also refuses to run on its own.
 |---|---|---|
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
 | 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (real AD not yet tested) |
-| 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user directory-password prefix | in progress |
+| 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
 | 4 | Endpoint (multiOTP Credential Provider) enrolment, inventory, **endpoint groups** and policies | |
 | 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
 | 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
@@ -105,6 +105,48 @@ Known engine limits:
 - Fixed in this stage: the LDAP filter option was never applied (the engine looked up the key
   `"ldap_filter "` with a trailing space). Fixed in `contrib/MultiotpAdLdap.php` and every bundle.
 
+## RADIUS servers (FreeRADIUS)
+
+**Server groups** (e.g. VPN, firewalls, Wi-Fi) hold the login policy; every server in a group
+inherits it:
+- **challenge-response**: the user types the password or PIN, FreeRADIUS answers with an
+  Access-Challenge, the user types the code (optionally sent by SMS); custom challenge texts;
+- **result caching** for devices that re-authenticate often (weakens 2FA, off by default);
+- ignore PIN / directory-password prefixes (code only) for these servers;
+- do not send the user's multiOTP group in the reply.
+
+**Servers** (RADIUS clients): name, IP address or network (host names refused, nothing larger
+than /8, network addresses aligned), group, device type, "require Message-Authenticator"
+(on by default, against BlastRADIUS). The **shared secret** is generated (24 random characters)
+or entered, shown **once**, sealed in `radius.json`, and can be rotated.
+
+Each server is written to the engine as a multiOTP *device* (short name `<name>-<id>`, which
+FreeRADIUS passes to multiOTP), so the engine applies the group policy at login.
+
+**Apply** (background job): the portal writes a candidate client file and runs the root helper
+`/usr/local/sbin/multiotp-portal-radius apply` through sudo. The helper
+- accepts only fixed commands, no arguments (sudoers lists each exact command line);
+- re-validates **every line** of the candidate against the generated grammar (so `$INCLUDE`,
+  modules or anything else is refused);
+- installs it as `/etc/freeradius/3.0/multiotp-portal-clients.conf` (root, mode 0640), adds one
+  `$INCLUDE` line to `clients.conf`, runs `freeradius -C`, and restarts FreeRADIUS;
+- restores the previous files if the check fails, so a bad change never stops RADIUS.
+
+The helper is installed root-owned outside the web-writable `/usr/local/bin/multiotp` tree by
+`install.sh` (the copy in `portal/bin/` is never run through sudo).
+
+**Diagnostics** page: FreeRADIUS running or not, pending changes, last apply output, a warning
+and a one-click fix when the install-time catch-all client (`0.0.0.0/0`, secret
+`myfirstpass`) is still active, a **test login** that sends a real Access-Request through
+FreeRADIUS (from 127.0.0.2 with its own secret), and the recent accepted/rejected logins from
+the multiOTP log.
+
+**Per-user login format** (user page): code only, PIN + code (a random 6-digit PIN shown once),
+or directory password + code (users synced from AD/LDAP only).
+
+Not yet possible: restricting which user groups may sign in through a server group (needs an
+engine change; planned).
+
 ## Background worker
 
 `portal/bin/worker.php` runs queued jobs and the scheduled sync. One worker at a time (lock
@@ -176,6 +218,14 @@ Environment variables (all optional): `MULTIOTP_PORTAL_DATA`, `MULTIOTP_ETC_DIR`
 These are applied to every copy: `multiotp.class.php`, the generated `multiotp.php`, and
 the appliance bundles under `raspberry/boot-part/multiotp-tree/usr/local/bin/multiotp/`.
 
+### Engine fixes in stage 3 (all copies)
+
+- `CheckUserLdapPassword()` wrapped every login DN without `cn=` as `CN=<dn>,<base DN>`, so
+  "directory password + code" never worked with generic LDAP (`uid=...` DNs). Only bare account
+  names are wrapped now.
+- `CheckToken()` never read the device's challenge-response settings, so per-server challenge
+  mode had no effect (only the global setting worked). It now uses them.
+
 ## Tests
 
 ```sh
@@ -190,6 +240,18 @@ revocation, TOTP replay, the audit trail, the legacy CORS/session fixes, user cr
 a seed checked by the multiOTP engine, recovery codes, disable/unlock, bulk actions, token
 import and assignment, directory test/preview/sync through the worker, out-of-scope users
 being disabled, and the helpdesk limits.
+
+**Production image test** (real nginx, PHP-FPM, FreeRADIUS, sudo helper, worker):
+
+```sh
+sh portal/tests/run-appliance-test.sh
+```
+
+Builds the root `Dockerfile` and checks HTTPS behind nginx (headers, `__Host-` cookie, HSTS,
+internal paths refused, HTTP redirect), the worker running as `www-data`, and, through real
+FreeRADIUS: apply with config check and restart, accept/reject, per-server secrets, unknown
+sources ignored, secret rotation, challenge-response per group, PIN + code, and disabling the
+catch-all client. The first build downloads the Debian stack (slow); later builds are cached.
 
 ## Local preview
 

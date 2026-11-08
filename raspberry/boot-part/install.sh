@@ -925,6 +925,14 @@ chown -R www-data:www-data /var/log/multiotp
 chown -R www-data:www-data /var/www
 chown root:root /etc/sudoers.d/www-data-authorized
 
+# multiOTP portal FreeRADIUS helper: root-owned copy outside the web-writable tree
+# (the copy under /usr/local/bin/multiotp is writable by www-data and is never run by sudo)
+if [ -e /usr/local/bin/multiotp/portal/bin/multiotp-portal-radius ] ; then
+  install -o root -g root -m 0755 /usr/local/bin/multiotp/portal/bin/multiotp-portal-radius /usr/local/sbin/multiotp-portal-radius
+  mkdir -p /etc/multiotp/portal/radius
+  chown -R www-data:www-data /etc/multiotp/portal
+fi
+
 if [ -e /etc/logrotate.d/multiotp ] ; then
   chmod 644 /etc/logrotate.d/multiotp
   chown root:root /etc/logrotate.d/multiotp

@@ -7,7 +7,11 @@
   };
   $active = in_array($job['status'], Portal\Jobs::ACTIVE, true);
 ?>
+<?php if (str_starts_with($job['type'], 'radius.')): ?>
+<p><a href="<?= e(route('radius')) ?>">← RADIUS servers</a> · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
+<?php else: ?>
 <p><a href="<?= e(route('directory')) ?>">← Directory</a> · <a href="<?= e(route('jobs')) ?>">All jobs</a></p>
+<?php endif; ?>
 
 <section class="panel"<?= $active ? ' data-job-poll="' . e(route('job-status', ['id' => $job['id']])) . '"' : '' ?>>
   <dl class="details">

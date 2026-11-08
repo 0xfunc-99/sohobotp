@@ -26,7 +26,22 @@
       <dt>Last synced</dt><dd><?= e(format_time($user['synced_time'])) ?></dd>
     <?php endif; ?>
     <dt>Token</dt><dd><?= '' !== $user['token_serial'] ? 'Hardware token <code>' . e($user['token_serial']) . '</code>' : 'Software (' . e(strtoupper($user['algorithm'] ?: '—')) . ')' ?></dd>
-    <dt>Login format</dt><dd><?= $user['ldap_password'] ? 'Directory password + code' : ($user['prefix_pin'] ? 'PIN + code' : 'Code only') ?></dd>
+    <dt>Login format</dt>
+    <dd>
+      <?= e(Portal\Users::LOGIN_FORMATS[$user['login_format']]) ?>
+      <?php if ($perm['manage']): ?>
+        <form method="post" action="<?= e(route('user-action')) ?>" class="inline" data-confirm="Change how <?= e($user['user']) ?> signs in? Tell the user before they next log in.">
+          <?= csrf_field() ?><input type="hidden" name="u" value="<?= e($user['user']) ?>"><input type="hidden" name="op" value="login-format">
+          <select name="format" aria-label="Login format">
+            <?php foreach (Portal\Users::LOGIN_FORMATS as $value => $label): ?>
+              <?php if ('directory' === $value && !$user['synchronized']) { continue; } ?>
+              <option value="<?= e($value) ?>"<?= $user['login_format'] === $value ? ' selected' : '' ?>><?= e($label) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <button type="submit" class="button-small">Change</button>
+        </form>
+      <?php endif; ?>
+    </dd>
     <dt>Recovery codes left</dt><dd><?= (int) $user['recovery_codes'] ?></dd>
     <dt>Failed attempts</dt><dd><?= (int) $user['error_counter'] ?></dd>
     <dt>Last login</dt><dd><?= e(format_time($user['last_login'])) ?></dd>

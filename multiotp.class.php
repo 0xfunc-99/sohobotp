@@ -15156,7 +15156,9 @@ class Multiotp
       // DistinguishedName must be encoded in UTF-8
       $ldap_bind_dn = encode_utf8_if_needed($ldap_username);
       
-      if (("" != $ldap_username) && (FALSE === mb_strpos(mb_strtolower($ldap_bind_dn,'UTF-8'), 'cn='))) {
+      // Fixed (portal stage 3): only a bare account name becomes "CN=<name>,<base DN>". A full DN
+      // such as uid=alice,ou=people,dc=example,dc=test (generic LDAP) was wrapped too, so the bind always failed.
+      if (("" != $ldap_username) && (FALSE === mb_strpos($ldap_bind_dn, '='))) {
           $ldap_bind_dn = 'CN='.$ldap_bind_dn.','.$this->GetLdapBaseDn();
       }
 
@@ -18111,6 +18113,14 @@ class Multiotp
               $cache_result_enabled = $this->IsDeviceCacheResultEnabled();
               $force_no_prefix_pin = $this->IsDeviceForceNoPrefixEnabled();
               $device_description = $this->GetDeviceDescription();
+              // Added (portal stage 3): per-device challenge-response (server groups in the portal).
+              // The device fields existed but were never read at login, so only the global setting worked.
+              if (1 == intval($this->GetDeviceChallengeEnabled())) {
+                  $challenge_response_enabled = 1;
+                  $sms_challenge_enabled = (1 == intval($this->GetDeviceSmsChallengeEnabled())) ? 1 : 0;
+                  $text_sms_challenge = $this->GetDeviceTextSmsChallenge();
+                  $text_token_challenge = $this->GetDeviceTextTokenChallenge();
+              }
           }
       }
 

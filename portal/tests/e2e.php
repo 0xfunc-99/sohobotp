@@ -518,5 +518,81 @@ foreach (['user.create', 'user.recovery_codes', 'user.token_assigned', 'token.im
 check('audit never contains seeds, codes or the service password', !str_contains($auditText, trim(Totp::base32($eveSecret))) && !str_contains($auditText, $recovery) && !str_contains($auditText, 'sync-test-password'));
 check('audit records the scheduler or admin as sync actor', str_contains($auditText, '"actor":"root","role":"","ip":"local","action":"directory.sync"'));
 
+
+// =================================================================== STAGE 3
+echo "\n-- stage 3: RADIUS servers, groups, login formats\n";
+
+$admin->get('/portal/index.php?r=radius');
+check('RADIUS page served', 200 === $admin->status && str_contains($admin->body, 'Server groups'));
+$admin->get('/portal/index.php?r=radius-client');
+check('adding a server without a group redirects to group creation', 303 === $admin->status && str_contains($admin->location(), 'r=radius-group'));
+$admin->get('/portal/index.php?r=radius-group');
+$admin->post('/portal/index.php?r=radius-group', ['name' => 'VPN gateways', 'description' => '<b>Remote</b> access', 'challenge_response' => '1', 'text_token_challenge' => 'Code?', 'cache_timeout' => '3600']);
+check('server group created', 303 === $admin->status);
+$admin->get('/portal/index.php?r=radius');
+check('group listed and escaped', str_contains($admin->body, 'VPN gateways') && str_contains($admin->body, '&lt;b&gt;Remote&lt;/b&gt; access') && str_contains($admin->body, 'Challenge-response'));
+preg_match('/r=radius-client&amp;group=([0-9a-f]{12})/', $admin->body, $m);
+$groupId = $m[1] ?? '';
+$admin->get('/portal/index.php?r=radius-client&group=' . $groupId);
+$admin->post('/portal/index.php?r=radius-client', ['name' => 'fw-paris', 'description' => 'Paris firewall', 'address' => '192.0.2.10', 'group_id' => $groupId, 'nas_type' => 'other', 'require_message_authenticator' => '1', 'secret' => '']);
+preg_match('/<p class="secret"><code>([A-Za-z0-9]{24})<\/code>/', $admin->body, $m);
+$fwSecret = $m[1] ?? '';
+check('server added, secret shown once', '' !== $fwSecret);
+$admin->get('/portal/index.php?r=radius');
+check('server listed, secret not shown again', str_contains($admin->body, '192.0.2.10/32') && !str_contains($admin->body, $fwSecret));
+check('pending changes banner', str_contains($admin->body, 'not yet active on FreeRADIUS'));
+$admin->post('/portal/index.php?r=radius-client', ['name' => 'fw-bad', 'address' => '0.0.0.0/0', 'group_id' => $groupId, 'nas_type' => 'other', 'secret' => '']);
+check('catch-all address refused', str_contains($admin->body, 'larger than /8'));
+$admin->get('/portal/index.php?r=radius-client');
+$admin->post('/portal/index.php?r=radius-client', ['name' => 'fw-quote', 'address' => '192.0.2.11', 'group_id' => $groupId, 'nas_type' => 'other', 'secret' => 'abcdefghijklmnop"; exec'] );
+check('unsafe custom secret refused', str_contains($admin->body, 'Custom secrets need'));
+$admin->get('/portal/index.php?r=radius');
+$admin->post('/portal/index.php?r=radius-apply', []);
+$applyId = job_id($admin);
+check('apply runs in the worker', in_array(wait_job($admin, $applyId), ['succeeded', 'failed'], true));
+$admin->get('/portal/index.php?r=job&id=' . $applyId);
+check('apply without FreeRADIUS reports the missing helper', str_contains($admin->body, 'helper is not available') || str_contains($admin->body, 'Finished'));
+$admin->get('/portal/index.php?r=radius-diagnostics');
+check('diagnostics page served', 200 === $admin->status && str_contains($admin->body, 'Test login'));
+$help->get('/portal/index.php?r=radius');
+check('helpdesk has no RADIUS access', 403 === $help->status);
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('audit has RADIUS changes, never the secret', str_contains($auditText, '"action":"radius.client_create"') && str_contains($auditText, '"action":"radius.group_create"') && !str_contains($auditText, $fwSecret));
+
+// per-user login format: PIN + code for a local user
+$admin->get('/portal/index.php?r=user&u=contractor.eve');
+$admin->post('/portal/index.php?r=user-action', ['u' => 'contractor.eve', 'op' => 'enable']);
+// removing the hardware token earlier gave eve a new seed: enrol again to know it
+$admin->get('/portal/index.php?r=user&u=contractor.eve');
+$admin->post('/portal/index.php?r=user-action', ['u' => 'contractor.eve', 'op' => 'enroll']);
+preg_match('/<p class="secret"><code>([A-Z2-7 ]+)<\/code>/', $admin->body, $m);
+$eveSecret = base32_decode($m[1] ?? '');
+$eveStep = null;
+$admin->get('/portal/index.php?r=user&u=contractor.eve');
+$admin->post('/portal/index.php?r=user-action', ['u' => 'contractor.eve', 'op' => 'login-format', 'format' => 'pin']);
+preg_match('/<p class="secret"><code>(\d{6})<\/code>/', $admin->body, $m);
+$evePin = $m[1] ?? '';
+check('PIN shown once', '' !== $evePin);
+$code = next_code($eveSecret, $eveStep);
+check('code alone refused when a PIN is required', 0 !== engine_check('contractor.eve', $code));
+check('PIN + code accepted', 0 === engine_check('contractor.eve', $evePin . next_code($eveSecret, $eveStep)));
+$admin->get('/portal/index.php?r=user&u=contractor.eve');
+$admin->post('/portal/index.php?r=user-action', ['u' => 'contractor.eve', 'op' => 'login-format', 'format' => 'directory']);
+$admin->get('/portal/index.php?r=user&u=contractor.eve');
+check('directory format refused for a local user', str_contains($admin->body, 'Only users synchronised from the directory'));
+
+// directory password + code for a synced user
+$admin->post('/portal/index.php?r=user-action', ['u' => 'alice', 'op' => 'enroll']);
+preg_match('/<p class="secret"><code>([A-Z2-7 ]+)<\/code>/', $admin->body, $m);
+$aliceSecret = base32_decode($m[1] ?? '');
+$aliceStep = null;
+$admin->get('/portal/index.php?r=user&u=alice');
+$admin->post('/portal/index.php?r=user-action', ['u' => 'alice', 'op' => 'login-format', 'format' => 'directory']);
+$admin->get('/portal/index.php?r=user&u=alice');
+check('directory format set for synced user', str_contains($admin->body, '<option value="directory" selected'));
+$directoryResult = engine_check('alice', 'alice-test-password' . next_code($aliceSecret, $aliceStep));
+check('directory password + code accepted (generic LDAP)', 0 === $directoryResult, 'engine result ' . $directoryResult);
+check('wrong directory password refused', 0 !== engine_check('alice', 'wrong-password' . next_code($aliceSecret, $aliceStep)));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -141,6 +141,7 @@ final class DirectoryController extends Controller
         return match ($type) {
             'directory.sync'    => 'Directory sync',
             'directory.preview' => 'Sync preview',
+            'radius.apply'      => 'RADIUS configuration',
             default             => $type,
         };
     }

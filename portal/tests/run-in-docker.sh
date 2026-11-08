@@ -27,6 +27,19 @@ docker run --rm --network "$RUN" -v "$REPO":/src:ro multiotp-portal-php sh -euc 
   echo "== unit checks"
   php portal/tests/unit.php
 
+  echo "== FreeRADIUS helper: candidate file whitelist"
+  mkdir -p /etc/multiotp/portal/radius /etc/freeradius/3.0 && touch /etc/freeradius/3.0/clients.conf
+  cp /tmp/unit-radius-candidate.conf /etc/multiotp/portal/radius/clients.candidate.conf
+  OUT=$(sh portal/bin/multiotp-portal-radius apply 2>&1 || true)
+  if echo "$OUT" | grep -q "candidate file rejected"; then echo "FAIL generated file rejected by the helper: $OUT"; exit 1; fi
+  echo "$OUT" | grep -q "configuration check FAILED" && echo "ok   generated file accepted, rollback when FreeRADIUS is missing"
+  [ ! -f /etc/freeradius/3.0/multiotp-portal-clients.conf ] && echo "ok   nothing left installed after rollback"
+  printf "\$INCLUDE /etc/shadow\n" >> /etc/multiotp/portal/radius/clients.candidate.conf
+  OUT=$(sh portal/bin/multiotp-portal-radius apply 2>&1 || true)
+  if echo "$OUT" | grep -q "candidate file rejected"; then echo "ok   injected \$INCLUDE line rejected"; else echo "FAIL injected line accepted: $OUT"; exit 1; fi
+  OUT=$(sh portal/bin/multiotp-portal-radius apply extra 2>&1 || true)
+  if echo "$OUT" | grep -q "no extra arguments"; then echo "ok   extra arguments refused"; else echo "FAIL extra arguments accepted"; exit 1; fi
+
   echo "== end-to-end checks"
   rm -rf /tmp/portal/* /tmp/etc/users/* && mkdir -p /tmp/portal
   TEMP=$(php portal/bin/portal-admin.php create --username=root --role=superadmin | sed -n "s/^Temporary password.*: //p")

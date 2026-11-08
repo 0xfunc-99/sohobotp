@@ -14,6 +14,11 @@ defined('PORTAL_ROOT') || exit;
 final class Users
 {
     public const STATUSES = ['' => 'All', 'enabled' => 'Enabled', 'disabled' => 'Disabled', 'locked' => 'Locked', 'synced' => 'From directory', 'local' => 'Local only'];
+    public const LOGIN_FORMATS = [
+        'code'      => 'Code only',
+        'pin'       => 'PIN + code',
+        'directory' => 'Directory password + code',
+    ];
     private const RECOVERY_CODES = 10;
     private const RECOVERY_DIGITS = 8;
 
@@ -87,7 +92,45 @@ final class Users
             'recovery_codes'  => count($e->GetUserScratchPasswordsArray()),
             'ldap_password'   => (bool) $e->IsUserRequestLdapPasswordEnabled(),
             'prefix_pin'      => (bool) $e->IsUserPrefixPin(),
+            'login_format'    => $e->IsUserPrefixPin() ? ($e->IsUserRequestLdapPasswordEnabled() ? 'directory' : 'pin') : 'code',
         ];
+    }
+
+    /**
+     * What the user types at a RADIUS / Windows login. The engine checks a prefix (PIN or
+     * directory password) only when request_prefix_pin is on; with request_ldap_pwd the
+     * prefix is verified by binding to the directory as the user.
+     * @return ?string a new random PIN to show once (format "pin"), otherwise null
+     */
+    public function setLoginFormat(string $user, string $format): ?string
+    {
+        if (!isset(self::LOGIN_FORMATS[$format])) {
+            throw new ValidationException('Unknown login format.');
+        }
+        $e = $this->engine;
+        $e->SetUser($user);
+        $pin = null;
+        switch ($format) {
+            case 'code':
+                $e->SetUserPrefixPin(0);
+                $e->SetUserRequestLdapPassword(0);
+                break;
+            case 'pin':
+                $pin = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $e->SetUserPin($pin);
+                $e->SetUserPrefixPin(1);
+                $e->SetUserRequestLdapPassword(0);
+                break;
+            case 'directory':
+                if ('' === (string) $e->GetUserSynchronizedDn()) {
+                    throw new ValidationException('Only users synchronised from the directory can sign in with their directory password.');
+                }
+                $e->SetUserPrefixPin(1);
+                $e->SetUserRequestLdapPassword(1);
+                break;
+        }
+        $this->write();
+        return $pin;
     }
 
     /**
