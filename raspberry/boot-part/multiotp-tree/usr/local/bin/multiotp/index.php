@@ -16733,6 +16733,13 @@ class Multiotp
                                           if ($result) {
                                               $this->SyncUserModified(TRUE, $account);
                                               $ldap_created_counter++;
+                                              // FastCreateUser() has no display name parameter: store it now,
+                                              // otherwise new users only get it on the next synchronization.
+                                              if ("" != $ldap_display_name) {
+                                                  $this->SetUser($account);
+                                                  $this->SetUserDisplayName($ldap_display_name);
+                                                  $this->WriteUserData(TRUE, FALSE); // $automatically = TRUE, $update_last_change = FALSE
+                                              }
                                           }
                                       } else {
                                       // User already exists
@@ -28400,8 +28407,8 @@ class MultiotpAdLdap {
                     }
 
                     //bind as a domain admin if they've set it up
-                    $this->_bind = @ldap_bind($this->_conn,$this->_ad_username.$this->_account_suffix,$this->_ad_password);
-                    $this->_bind_paged = @ldap_bind($this->_conn_paged,$this->_ad_username.$this->_account_suffix,$this->_ad_password);
+                    $this->_bind = @ldap_bind($this->_conn,$this->BindName($this->_ad_username),$this->_ad_password);
+                    $this->_bind_paged = @ldap_bind($this->_conn_paged,$this->BindName($this->_ad_username),$this->_ad_password);
                     if ($this->_bind) {
                       
                       
@@ -28632,19 +28639,27 @@ class MultiotpAdLdap {
         if ($this->_conn_paged) { ldap_close ($this->_conn_paged); }
     }
 
+    // Added (multiOTP portal): a full DN (CN=...,DC=...), a UPN (user@domain) or DOMAIN\user is
+    // used as is. Only a bare account name gets the account suffix. Appending the suffix to the
+    // synchronized DN made every directory password check fail with AD error 52e.
+    function BindName($username){
+        if ((FALSE !== strpos($username, '=')) || (FALSE !== strpos($username, '@')) || (FALSE !== strpos($username, '\\'))) { return $username; }
+        return $username.$this->_account_suffix;
+    }
+
     //validate a users login credentials
     function authenticate($username,$password,$prevent_rebind=false){
         if ($username==NULL || $password==NULL){ return (false); } //prevent null binding
         
         //bind as the user		
-        $this->_bind = @ldap_bind($this->_conn,$username.$this->_account_suffix,$password);
-        $this->_bind_paged = @ldap_bind($this->_conn_paged,$username.$this->_account_suffix,$password);
+        $this->_bind = @ldap_bind($this->_conn,$this->BindName($username),$password);
+        $this->_bind_paged = @ldap_bind($this->_conn_paged,$this->BindName($username),$password);
         if (!$this->_bind){ return (false); }
         
         //once we've checked their details, kick back into admin mode if we have it
         if ($this->_ad_username!=NULL && !$prevent_rebind){
-            $this->_bind = @ldap_bind($this->_conn,$this->_ad_username.$this->_account_suffix,$this->_ad_password);
-            $this->_bind_paged = @ldap_bind($this->_conn_paged,$this->_ad_username.$this->_account_suffix,$this->_ad_password);
+            $this->_bind = @ldap_bind($this->_conn,$this->BindName($this->_ad_username),$this->_ad_password);
+            $this->_bind_paged = @ldap_bind($this->_conn_paged,$this->BindName($this->_ad_username),$this->_ad_password);
             if (!$this->_bind){
                 // Modified by SysCo/al
                 $this->_error = TRUE;

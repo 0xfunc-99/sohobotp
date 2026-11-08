@@ -2,7 +2,7 @@
 FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends samba samba-ad-dc winbind ldap-utils openssl attr \
+ && apt-get install -y --no-install-recommends samba samba-ad-dc samba-ad-provision winbind ldap-utils openssl attr \
  && rm -rf /var/lib/apt/lists/* /etc/samba/smb.conf
 COPY entrypoint.sh /entrypoint.sh
 EXPOSE 636

@@ -16613,6 +16613,13 @@ class Multiotp
                                           if ($result) {
                                               $this->SyncUserModified(TRUE, $account);
                                               $ldap_created_counter++;
+                                              // FastCreateUser() has no display name parameter: store it now,
+                                              // otherwise new users only get it on the next synchronization.
+                                              if ("" != $ldap_display_name) {
+                                                  $this->SetUser($account);
+                                                  $this->SetUserDisplayName($ldap_display_name);
+                                                  $this->WriteUserData(TRUE, FALSE); // $automatically = TRUE, $update_last_change = FALSE
+                                              }
                                           }
                                       } else {
                                       // User already exists

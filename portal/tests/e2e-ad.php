@@ -17,10 +17,10 @@ const SERVICE_PASSWORD = 'Test-Service-Password-42!';
 const USER_PASSWORD = 'Test-User-Password-42!';
 const STAFF_DN = 'OU=Staff,DC=example,DC=test';
 
-function check(string $name, bool $ok): void
+function check(string $name, bool $ok, string $detail = ''): void
 {
-    echo ($ok ? 'ok   ' : 'FAIL ') . $name . "\n";
-    if (!$ok) { throw new RuntimeException($name); }
+    echo ($ok ? 'ok   ' : 'FAIL ') . $name . ($ok || '' === $detail ? '' : "  [$detail]") . "\n";
+    if (!$ok) { $GLOBALS['failures'] = ($GLOBALS['failures'] ?? 0) + 1; }
 }
 function saveSettings(array $changes = [], ?string $password = null): void
 {
@@ -101,8 +101,8 @@ check('sync creates exactly the Staff accounts (not service/admin accounts)', ['
 foreach (['alice', 'bob', 'carol', 'dave', 'erin'] as $name) {
     $engine = user($name);
     check("$name DN", 0 === strcasecmp("CN=$name," . STAFF_DN, $engine->GetUserSynchronizedDn()));
-    check("$name display name", "$name Example" === $engine->GetUserDisplayName());
-    check("$name email", "$name@example.test" === $engine->GetUserEmail());
+    check("$name display name", "$name Example" === $engine->GetUserDisplayName(), $engine->GetUserDisplayName());
+    check("$name email", "$name@example.test" === $engine->GetUserEmail(), $engine->GetUserEmail());
     check("$name synchronized via LDAP", $engine->IsUserSynchronized() && 'LDAP' === $engine->GetUserSynchronizedChannel());
 }
 check('disabled AD account erin is disabled locally', !enabled('erin'));
@@ -165,4 +165,8 @@ check('portal service password sealed at rest', !str_contains($sealed, SERVICE_P
 $audit = (string) file_get_contents(Config::dataDir() . '/audit.jsonl');
 check('audit contains real sync/preview events', str_contains($audit, 'directory.sync') && str_contains($audit, 'directory.preview'));
 check('service password absent from audit trail', !str_contains($audit, SERVICE_PASSWORD));
+if (!empty($GLOBALS['failures'])) {
+    echo $GLOBALS['failures'] . " Samba AD check(s) failed.\n";
+    exit(1);
+}
 echo "All Samba AD checks passed.\n";

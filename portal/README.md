@@ -14,9 +14,9 @@ in those folders also refuses to run on its own.
 | Stage | Content | State |
 |---|---|---|
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
-| 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (real AD not yet tested) |
+| 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (tested against Samba AD and OpenLDAP) |
 | 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
-| 4 | Endpoint (multiOTP Credential Provider) enrolment, inventory, **endpoint groups** and policies | |
+| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | designed |
 | 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
 | 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
 | 7 | Raspberry Pi / virtual appliance image with the portal and worker | |
@@ -225,6 +225,14 @@ the appliance bundles under `raspberry/boot-part/multiotp-tree/usr/local/bin/mul
   names are wrapped now.
 - `CheckToken()` never read the device's challenge-response settings, so per-server challenge
   mode had no effect (only the global setting worked). It now uses them.
+- `MultiotpAdLdap` appended the account suffix to every bind name, so a synchronized AD user
+  bound as `CN=alice,OU=...,DC=...@DOMAIN` and "AD password + code" was always refused
+  (AD error 52e). A DN, UPN or `DOMAIN\user` is now used as is (`BindName()`).
+- `SyncLdapUsers()` created new users without their display name (`FastCreateUser()` has no
+  such parameter); it is now stored at creation instead of on the next sync.
+- Portal: the engine only disables users whose `synchronized_time` is older than the sync
+  start (whole seconds), so the portal waits for the next second if the previous sync
+  finished in the current one.
 
 ## Tests
 
@@ -273,11 +281,11 @@ published. The first optional run downloads a Debian image and Samba packages;
 do not run it when downloads are prohibited. If buildx settings are unwritable,
 set `BUILDX_CONFIG` to a writable temporary directory.
 
-**Validation status:** the default suite passed (64 unit and 119 end-to-end checks).
-The Samba image download was stopped at the user's request; the AD suite has not
-run, so AD group filtering, lifecycle, LDAPS and password + OTP results remain
-unverified. No new engine bug has been confirmed or fixed by this work. The known
-generic-LDAP group-list limitation and portal guard remain unchanged.
+**Validation status (2026-11-08):** all 87 Samba AD checks pass, together with the
+default suite. Running them found three bugs, fixed in this stage (see below): the Samba
+image missed `samba-ad-provision`, new AD users had no display name until the second sync,
+and AD password + code always failed when an account suffix was set. A fourth issue
+(two syncs in the same second never disabled out-of-scope users) is handled in the portal.
 
 ## Local preview
 

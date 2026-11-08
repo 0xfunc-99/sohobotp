@@ -44,8 +44,9 @@ server {
         expires -1;
     }
 
-    # multiOTP management portal: only portal/index.php and portal/assets/ are public
-    location ~ ^/portal/(src|templates|bin|tests)(/|$) {
+    # multiOTP management portal: allowlist. Only /portal/, portal/index.php and portal/assets/
+    # are public; source, templates, CLI, tests, docs, task files and README are not.
+    location ~ ^/portal/(?!$|index\.php$|assets/) {
       deny all;
       return 404;
     }

@@ -1,0 +1,34 @@
+{
+    "note": "Test vectors for portal/docs/agent-protocol.md. All binary values are standard base64 with padding. Keys are derived from fixed seeds: NEVER use them outside tests.",
+    "portal_sign_seed": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+    "portal_sign_public": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+    "portal_key_pin": "34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+    "agent_sign_seed": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+    "agent_sign_public": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+    "agent_box_seed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+    "agent_box_public": "deJw3ylSxXuoNnuoYYwXj5/lDbJ5nTBOdOkY2YVoYUY=",
+    "agent_box_secret": "mK67sXilUYdr+vjh5TDaxqr2wuocj4QGo6s337QPvCU=",
+    "enroll": {
+        "token": "ENR-TEST-TOKEN-0123456789abcdef",
+        "message": "multiotp-agent-enroll-v1\nENR-TEST-TOKEN-0123456789abcdef\ngTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=\ndeJw3ylSxXuoNnuoYYwXj5/lDbJ5nTBOdOkY2YVoYUY=",
+        "proof": "kx0mGWMFKfcWekh6k4EfPH1U2M6O8r7kjOzt6RuAgx7aW68J9G/OXqDuOybIU6RJ05Bb2T8NlpjmJMWnTpCcDw=="
+    },
+    "request": {
+        "method": "POST",
+        "uri": "/portal/agent.php?a=checkin",
+        "time": "1794150000",
+        "nonce": "BAQEBAQEBAQEBAQEBAQEBA==",
+        "body": "{\"inventory\":{\"hostname\":\"lin-01\",\"os\":\"linux\"},\"applied\":{\"version\":3,\"status\":\"applied\",\"error\":\"\",\"at\":1794150000}}",
+        "body_sha256": "01d786d1106e7dc3626f4fb47488c503d78a75db220d4aa95685189321c2feb9",
+        "message": "multiotp-agent-v1\nPOST\n/portal/agent.php?a=checkin\n1794150000\nBAQEBAQEBAQEBAQEBAQEBA==\n01d786d1106e7dc3626f4fb47488c503d78a75db220d4aa95685189321c2feb9",
+        "signature": "Q7bBxFkTRFQ6KF4JtN8ptSd2MYrXYsA/rDXBaJqcX4ItnNeuLty/pBqQeoqfGCfV+IL8ODdNHgKTgQrvVEsgBA=="
+    },
+    "config": {
+        "envelope": {
+            "payload": "eyJlbmRwb2ludF9pZCI6ImU4ZjJjMWE5YjRkN2U2ZjVhM2MyIiwidmVyc2lvbiI6NCwiaXNzdWVkX2F0IjoxNzk0MTUwMDYwLCJvcyI6ImxpbnV4IiwicG9saWN5Ijp7ImVuYWJsZWQiOnRydWUsInJhZGl1c19zZXJ2ZXJzIjpbeyJob3N0IjoiMTAuMC4wLjUiLCJwb3J0IjoxODEyfV0sInRpbWVvdXQiOjUsInNlcnZpY2VzIjpbInNzaGQiLCJzdWRvIl0sImV4Y2x1ZGVkX3VzZXJzIjpbInJvb3QiXSwiZXhjbHVkZWRfZ3JvdXBzIjpbIm1mYS1icmVha2dsYXNzIl0sInNzaF9rZXlzX25lZWRfY29kZSI6dHJ1ZX0sInNlY3JldHMiOnsicmFkaXVzX3NlY3JldCI6IkhzWFAxSXhlN0MyWU5BanMyY1R3Z2FiRjNvWm92RTRTVklIQStxaDRlMWltSHFzeTJZanErTjNucncrN2diZGZjMmhHNnErZWJPWVdOUjk3elNtUFdBbTlUcmM3cWc2b2FDamVIUT09In19",
+            "signature": "zS7GSRC9W4uccZfMeaj7Q/IetHCVTv0CBtvGRI9Wb+qAp62UQ9ph9ap9qybksf68pm6QKgfGprI0nKzK1NOPDA=="
+        },
+        "payload_json": "{\"endpoint_id\":\"e8f2c1a9b4d7e6f5a3c2\",\"version\":4,\"issued_at\":1794150060,\"os\":\"linux\",\"policy\":{\"enabled\":true,\"radius_servers\":[{\"host\":\"10.0.0.5\",\"port\":1812}],\"timeout\":5,\"services\":[\"sshd\",\"sudo\"],\"excluded_users\":[\"root\"],\"excluded_groups\":[\"mfa-breakglass\"],\"ssh_keys_need_code\":true},\"secrets\":{\"radius_secret\":\"HsXP1Ixe7C2YNAjs2cTwgabF3oZovE4SVIHA+qh4e1imHqsy2Yjq+N3nrw+7gbdfc2hG6q+ebOYWNR97zSmPWAm9Trc7qg6oaCjeHQ==\"}}",
+        "radius_secret_plain": "Radius-Secret-For-lin-01-XYZ"
+    }
+}

@@ -38,10 +38,12 @@ docker exec "$NAME" php -r '
   $check("security headers through nginx", (bool) preg_match("/content-security-policy/i", $headers));
   $check("__Host- session cookie over HTTPS", (bool) preg_match("/set-cookie: __Host-motp_portal/i", $headers));
   $check("HSTS header", (bool) preg_match("/strict-transport-security/i", $headers));
-  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php"] as $p) {
+  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md"] as $p) {
     [$c] = $get("https://localhost" . $p);
     $check("$p refused by nginx ($c)", 404 === $c);
   }
+  [$c, , $b] = $get("https://localhost/portal/assets/portal.css");
+  $check("portal assets still served ($c)", 200 === $c && "" !== $b);
   [$c] = $get("http://localhost/portal/");
   $check("plain HTTP redirected to HTTPS ($c)", 301 === $c);
   exit($failed > 0 ? 1 : 0);

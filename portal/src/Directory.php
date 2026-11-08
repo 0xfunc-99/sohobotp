@@ -251,8 +251,18 @@ final class Directory
         $before = self::snapshot();
         $engine = $this->engineWithPassword();
         $capture = new EngineLog($engine);
+        // The engine treats a synced user as "no longer in the directory" only when its
+        // synchronized_time (whole seconds) is older than this sync's start. A sync started in
+        // the same second as the previous one would keep out-of-scope users enabled.
+        $marker = Config::dataDir() . '/directory-last-sync';
+        $last = is_file($marker) ? (int) @file_get_contents($marker) : 0;
+        $until = microtime(true) + 2.0;
+        while (time() <= $last && microtime(true) < $until) {
+            usleep(100_000);
+        }
         // Engine progress is written to its lock file every 2 seconds
         $ok = (bool) $engine->SyncLdapUsers('*', true, false, 2, true);
+        @file_put_contents($marker, (string) time(), LOCK_EX);
         $error = (bool) $engine->IsLdapError();
         $engine->SetLdapServerPassword('');
         $log = $capture->lines();
