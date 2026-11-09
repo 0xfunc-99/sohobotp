@@ -28,8 +28,8 @@
 
 using namespace std;
 
-const wstring Configuration::registryPath = L"CLSID\\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}\\";
-const wstring Configuration::registryRealmPath = L"CLSID\\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}\\realm-mapping";
+const wstring Configuration::registryPath = L"CLSID\\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}\\";
+const wstring Configuration::registryRealmPath = L"CLSID\\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}\\realm-mapping";
 
 Configuration::Configuration()
 {
@@ -51,7 +51,7 @@ Configuration::Configuration()
 	showDomainHint = rr.getBoolRegistry(L"show_domain_hint");
 	// Custom field texts: check if set, otherwise use defaults (from header)
 	wstring tmp = rr.getRegistry(L"login_text");
-	loginText = tmp.empty() ? L"privacyIDEA Login" : tmp;
+	loginText = tmp.empty() ? L"SohobOTP" : tmp;
 
 	otpFieldText = rr.getRegistry(L"otp_text");
 	newConfirmPassFieldText = rr.getRegistry(L"confirm_new_password_text");

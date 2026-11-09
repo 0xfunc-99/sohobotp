@@ -4,20 +4,20 @@
     <UI>
       <TextStyle Id="WixUI_Font_Normal_Italic" FaceName="Tahoma" Size="8" Italic="yes" />
       <Dialog Id="multiOTPSettingsa" Width="370" Height="288" Title="[ProductName] Setup" NoMinimize="yes">
-        <Control Id="LoginTitleLabel" Type="Text" X="20" Y="63" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}multiOTP Login Title"/>
+        <Control Id="LoginTitleLabel" Type="Text" X="20" Y="63" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}SohobOTP Login Title"/>
         <Control Id="LoginTitle" Type="Edit" X="20" Y="75" Width="300" Height="18" Property="MULTIOTP_LOGINTEXT" Text="{80}" />
-        <Control Id="multiOTPUrlLabel" Type="Text" X="20" Y="100" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}URL of your multiOTP server(s), separated by semi-colons"/>
+        <Control Id="multiOTPUrlLabel" Type="Text" X="20" Y="100" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}URL of your SohobOTP server(s), separated by semi-colons"/>
         <Control Id="multiOTPUrlExample" Type="Text" X="20" Y="112" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Normal_Italic}Example: https://192.168.1.88;http://ip.address.of.server:8112" />
         <Control Id="multiOTPUrl" Type="Edit" X="20" Y="124" Width="300" Height="18" Property="MULTIOTP_URL" Text="{200}" />
 
-        <Control Id="multiOTPLocalServerOnly" Type="CheckBox" X="20" Y="144" Width="320" Height="18" Property="MULTIOTP_LOCALSERVERONLY" CheckBoxValue="1" Text="No remote server, local multiOTP only" />
+        <Control Id="multiOTPLocalServerOnly" Type="CheckBox" X="20" Y="144" Width="320" Height="18" Property="MULTIOTP_LOCALSERVERONLY" CheckBoxValue="1" Text="No remote server, local SohobOTP only" />
         
         <Control Id="multiOTPTimeoutLabel" Type="Text" X="20" Y="171" Width="270" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}Timeout (in seconds) before switching to the next server :" />
         <Control Id="multiOTPTimeout" Type="Edit" X="290" Y="169" Width="20" Height="18" Property="MULTIOTP_TIMEOUT" Integer="yes"/>
 
-        <Control Id="multiOTPSecretLabel" Type="Text" X="20" Y="194" Width="200" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}Secret shared with multiOTP server(s):" />
+        <Control Id="multiOTPSecretLabel" Type="Text" X="20" Y="194" Width="200" Height="15" TabSkip="no" Text="{\WixUI_Font_Title}Secret shared with SohobOTP server(s):" />
         <Control Id="multiOTPSecret" Type="Edit" X="205" Y="192" Width="100" Height="18" Property="MULTIOTP_SECRET" Password="yes"/>
-        <Control Id="multiOTPSecretIndication1Label" Type="Text" X="20" Y="210" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Normal_Italic}On your multiOTP server, Menu Configuration/Devices, Edit/Add a device" />
+        <Control Id="multiOTPSecretIndication1Label" Type="Text" X="20" Y="210" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Normal_Italic}On your SohobOTP server, Menu Configuration/Devices, Edit/Add a device" />
         <Control Id="multiOTPSecretIndication2Label" Type="Text" X="20" Y="222" Width="350" Height="15" TabSkip="no" Text="{\WixUI_Font_Normal_Italic}that match the IP and subnet mask of this current Windows machine." />
         
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&amp;Back">
@@ -34,11 +34,11 @@
         </Control>
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
         <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes">
-          <Text>Type the needed multiOTP server information, then click Next.</Text>
+          <Text>Type the needed SohobOTP portal information, then click Next.</Text>
         </Control>
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes">
-          <Text>{\WixUI_Font_Title}multiOTP configuration</Text>
+          <Text>{\WixUI_Font_Title}SohobOTP Sign-in configuration</Text>
         </Control>
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
       </Dialog>
@@ -51,7 +51,7 @@
         </Control>
         <Control Id="Text" Type="Text" X="20" Y="15" Width="250" Height="30" TabSkip="no">
           <Text>
-            Please specify a hostname or activate local multiOTP only.
+            Please specify a hostname or activate local SohobOTP only.
           </Text>
         </Control>
       </Dialog>
@@ -77,12 +77,12 @@
         </Control>
         <Control Id="Text" Type="Text" X="20" Y="15" Width="250" Height="15" TabSkip="no">
           <Text>
-            You cannot use a remote multiOTP server and
+            You cannot use a remote SohobOTP server and
           </Text>
         </Control>
         <Control Id="Text2" Type="Text" X="20" Y="27" Width="250" Height="15" TabSkip="no">
           <Text>
-            activate the checkbox for local multiOTP only.
+            activate the checkbox for local SohobOTP only.
           </Text>
         </Control>
       </Dialog>

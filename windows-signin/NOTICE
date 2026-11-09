@@ -1,0 +1,18 @@
+SohobOTP Sign-in
+Copyright (c) 2026 Sohobcom
+
+This product is a modified version of the multiOTP Credential Provider
+(https://github.com/multiOTP/multiOTPCredentialProvider, version 5.10.4.1,
+commit 7ddc67a11227a6ace45087969cfb800d0ff61aa3), licensed under the
+Apache License, Version 2.0 (see LICENSE and ApacheLicense.txt).
+
+Original copyright notices:
+  Copyright (c) 2016-2026 SysCo systemes de communication sa
+  Copyright (c) 2017-2021 NetKnights GmbH (privacyIDEA Credential Provider)
+  Copyright (c) 2015-2016 ArcadeJust
+  Copyright (c) 2013-2015 Last Squirrel IT
+  Copyright 2012 Dominik Pretzsch
+
+Changes by Sohobcom (2026): product name, file names, CLSIDs, version
+information, installer names and texts, logos and default sign-in text;
+see the git history of this folder for the exact changes.
