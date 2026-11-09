@@ -2,9 +2,12 @@
 <!--
   SohobOTP Agent MSI (Group Policy: Computer Configuration > Software Installation, or
   msiexec /i sohobotp-agent.msi /qn PORTAL=https://portal.example.com TOKEN=... PIN=... [CAFILE=C:\path\ca.pem]).
-  Installs the agent and its service (LocalSystem, automatic). PORTAL/TOKEN/PIN/CAFILE are
-  written to HKLM\SOFTWARE\SohobOTP\Agent; the service enrols with them on first start and
-  deletes the token. Repair and upgrade keep the existing enrolment.
+  Installs the agent and its service (LocalSystem, automatic). PORTAL/PIN/CAFILE are written to
+  HKLM\SOFTWARE\SohobOTP\Agent. TOKEN is not (that key is readable by all users, and Windows
+  Installer logs registry-table values): the custom action SaveToken (added by build-msi.sh,
+  deferred, as SYSTEM, hidden from the log) runs "sohobotp-agent.exe save-token", which keeps it
+  in the agent's state folder (SYSTEM and Administrators only). The service enrols on first
+  start and deletes the token. Repair and upgrade keep the existing enrolment.
   Built with msitools (wixl): agent/packaging/windows/build-msi.sh
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
@@ -32,7 +35,6 @@
             <Component Id="AgentEnrolment" Guid="fe045dd2-8517-4de8-ada0-2fb63ab55e67" Win64="yes">
               <RegistryKey Root="HKLM" Key="SOFTWARE\SohobOTP\Agent">
                 <RegistryValue Name="Portal" Type="string" Value="[PORTAL]" KeyPath="yes"/>
-                <RegistryValue Name="Token" Type="string" Value="[TOKEN]"/>
                 <RegistryValue Name="Pin" Type="string" Value="[PIN]"/>
                 <RegistryValue Name="CAFile" Type="string" Value="[CAFILE]"/>
               </RegistryKey>

@@ -37,11 +37,11 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) { choco install wixtoolset --version 3.14.1 -y --no-progress }
-      - name: Spectre-mitigated libraries for the v142 toolset (the projects build with /Qspectre)
+      - name: ATL and Spectre-mitigated libraries for the v142 toolset (the projects use ATL and build with /Qspectre)
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $p = Start-Process -Wait -PassThru "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList "modify --installPath `"$vs`" --add Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64.Spectre --quiet --norestart --nocache"
+          $p = Start-Process -Wait -PassThru "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList "modify --installPath `"$vs`" --add Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64.Spectre --add Microsoft.VisualStudio.Component.VC.14.29.16.11.ATL --add Microsoft.VisualStudio.Component.VC.14.29.16.11.ATL.Spectre --quiet --norestart --nocache"
           Write-Host "vs_installer exit $($p.ExitCode)"
           if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
       - uses: microsoft/setup-msbuild@v2
@@ -86,12 +86,15 @@ jobs:
           $params = @{ AgentMsi = (Resolve-Path agent-out/sohobotp-agent.msi).Path; FakePortal = (Resolve-Path agent-out/fakeportal.exe).Path; Work = "$env:RUNNER_TEMP\sohobotp-e2e" }
           if ($signin) { $params.SignInMsi = $signin.FullName; Write-Host "with SohobOTP Sign-in: $($signin.Name)" } else { Write-Host "SohobOTP Sign-in not built: testing the agent with its registry key only" }
           & ./agent/tests/windows/e2e.ps1 @params
-          exit $LASTEXITCODE
+          $rc = $LASTEXITCODE
+          # upload-artifact needs the files under the workspace (the temp folder is on another drive)
+          New-Item -ItemType Directory -Force e2e-logs | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\sohobotp-e2e\*.log" e2e-logs -ErrorAction SilentlyContinue
+          Copy-Item "C:\ProgramData\SohobOTP\agent\agent.log" e2e-logs -ErrorAction SilentlyContinue
+          exit $rc
       - name: Logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-test-logs
-          path: |
-            ${{ runner.temp }}/sohobotp-e2e/*.log
-            C:/ProgramData/SohobOTP/agent/agent.log
+          path: e2e-logs/

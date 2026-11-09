@@ -60,7 +60,10 @@ $svc = Get-Service SohobOTPAgent -ErrorAction SilentlyContinue
 Check "service SohobOTPAgent exists, automatic" ($null -ne $svc -and $svc.StartType -eq "Automatic")
 Check "service running" (Wait-Until { (Get-Service SohobOTPAgent).Status -eq "Running" } 30)
 $log = Get-Content "$work\agent-install.log" -Raw -ErrorAction SilentlyContinue
-Check "token not written to the MSI log (MsiHiddenProperties)" (-not ($log -match [regex]::Escape($token)))
+$leaks = @(Get-Content "$work\agent-install.log" -ErrorAction SilentlyContinue | Where-Object { $_.Contains($token) } |
+  ForEach-Object { $_.Replace($token, "<TOKEN>") } | Select-Object -First 3)
+Check "token not written to the MSI log" ($leaks.Count -eq 0) ($leaks -join " | ")
+Check "token not in the registry (readable by all users)" ($null -eq (Get-ItemProperty "HKLM:\SOFTWARE\SohobOTP\Agent" -ErrorAction SilentlyContinue).Token)
 
 Write-Host "== enrolment and configuration"
 Check "agent enrolled and applied configuration 1" (Wait-Until {
@@ -79,7 +82,8 @@ Check "multiOTPCacheEnabled kept as its existing type, value 1" ($cp.multiOTPCac
 Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
 
 $boot = Get-ItemProperty "HKLM:\SOFTWARE\SohobOTP\Agent" -ErrorAction SilentlyContinue
-Check "enrolment token deleted from the registry" ($null -ne $boot -and $null -eq $boot.Token -and $boot.Portal -eq "https://127.0.0.1:8443")
+Check "installer values in the registry, without the token" ($null -ne $boot -and $null -eq $boot.Token -and $boot.Portal -eq "https://127.0.0.1:8443")
+Check "enrolment token deleted after enrolment" (-not (Test-Path "$env:ProgramData\SohobOTP\agent\enrol-token"))
 $stateFile = "$env:ProgramData\SohobOTP\agent\agent.json"
 $state = Get-Content $stateFile -Raw | ConvertFrom-Json
 Check "private keys sealed with DPAPI" ($state.sign_seed.StartsWith("dpapi:") -and $state.box_private.StartsWith("dpapi:"))

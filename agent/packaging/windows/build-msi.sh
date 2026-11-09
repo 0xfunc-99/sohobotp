@@ -22,7 +22,13 @@ docker run --rm -v "$REPO/agent":/agent -e VERSION="$VERSION" debian:bookworm-sl
     sed "s/\r\$//" "$ui/$t.rows" >> "$work/$t.idt"
     msibuild "$msi" -i "$work/$t.idt"
   done
+  # SaveToken: the enrolment token reaches the agent without the registry or the log (tables/README.md)
+  tables=/agent/packaging/windows/tables
+  cp "$tables/CustomAction.idt" "$work/CustomAction.idt" && msibuild "$msi" -i "$work/CustomAction.idt"
+  msiinfo export "$msi" InstallExecuteSequence | sed "s/\r\$//" > "$work/InstallExecuteSequence.idt"
+  sed "s/\r\$//" "$tables/InstallExecuteSequence.rows" >> "$work/InstallExecuteSequence.idt"
+  msibuild "$msi" -i "$work/InstallExecuteSequence.idt"
   echo "built agent/dist/sohobotp-agent.msi (with installer windows)"
-  for table in Component File ServiceInstall ServiceControl Registry Property InstallUISequence Dialog ControlCondition; do
+  for table in Component File ServiceInstall ServiceControl Registry CustomAction InstallExecuteSequence Property InstallUISequence Dialog ControlCondition; do
     echo "== $table"; msiinfo export /agent/dist/sohobotp-agent.msi "$table" | tail -n +4
   done'

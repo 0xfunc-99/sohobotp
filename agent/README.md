@@ -38,9 +38,11 @@ installs skip the windows:
 msiexec /i sohobotp-agent.msi /qn PORTAL=https://portal.example.com TOKEN=<TOKEN> PIN=<PIN> [CAFILE=C:\path\ca.pem]
 ```
 
-The MSI installs the agent and the `SohobOTPAgent` service and writes the values to
-`HKLM\SOFTWARE\SohobOTP\Agent`; the service enrols on its first start and **deletes the
-token**. `TOKEN` is hidden from MSI logs. Use an enrolment token with *Active Directory
+The MSI installs the agent and the `SohobOTPAgent` service and writes PORTAL, PIN and CAFILE
+to `HKLM\SOFTWARE\SohobOTP\Agent`. The token is **not** written there (every user can read
+that key, and Windows Installer logs registry values): a custom action hidden from the log
+runs `sohobotp-agent.exe save-token`, which keeps it in the agent's state folder (SYSTEM and
+Administrators only). The service enrols on its first start and **deletes the token**. Use an enrolment token with *Active Directory
 approval*: anyone can read a GPO's files, so a copied token must not admit unknown machines.
 Build: `sh agent/packaging/windows/build-msi.sh` (msitools in Docker; the installer windows
 are tables in `packaging/windows/ui/` added with msibuild). `check-msi-ui.sh` shows them under
@@ -144,10 +146,11 @@ Windows yet. Before production, on a Windows 11 / Server 2022 test machine:
 6. `services.msc`: SohobOTP Agent running, restarts after being killed; `uninstall` removes
    it.
 7. MSI by double-click: the setup window, Install disabled until filled, the finish window,
-   and `msiexec /i ... /l*v log.txt` does not contain the token (MsiHiddenProperties; Wine
-   ignores it, Windows should not). Silently: `msiexec /i sohobotp-agent.msi /qn PORTAL=...
+   and `msiexec /i ... /l*v log.txt` does not contain the token (MsiHiddenProperties and the
+   hidden SaveToken action; Wine ignores them, Windows does not). Silently: `msiexec /i sohobotp-agent.msi /qn PORTAL=...
    TOKEN=... PIN=...` enrols on its own;
-   `HKLM\SOFTWARE\SohobOTP\Agent` no longer has `Token` afterwards; the key fields in
+   `HKLM\SOFTWARE\SohobOTP\Agent` never has `Token`, and `enrol-token` is gone from
+   `C:\ProgramData\SohobOTP\agent` afterwards; the key fields in
    `agent.json` start with `dpapi:`.
 8. Self-update: set a newer signed version as the group's target; the service restarts on it.
 

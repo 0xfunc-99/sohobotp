@@ -49,6 +49,14 @@ func main() {
 		err = uninstall()
 	case "release":
 		err = releaseCmd(os.Args[2:])
+	case "save-token": // run by the Windows MSI (custom action hidden from the log)
+		if err = agent.RequireAdmin(); err == nil {
+			if len(os.Args) != 3 {
+				err = errors.New("usage: save-token TOKEN")
+			} else {
+				err = agent.SaveBootstrapToken(os.Args[2])
+			}
+		}
 	case "version":
 		fmt.Println("sohobotp-agent", inventory.Version)
 		if release.PublicKey == "" {

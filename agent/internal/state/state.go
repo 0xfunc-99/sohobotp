@@ -152,6 +152,10 @@ func (s *State) Save() error {
 	return os.Rename(tmp, path())
 }
 
+// EnsureDir creates the state folder with its restricted permissions (Windows: SYSTEM and
+// Administrators only).
+func EnsureDir() error { return ensureDir(Dir()) }
+
 // Remove deletes the state directory (uninstall).
 func Remove() error {
 	return os.RemoveAll(Dir())
