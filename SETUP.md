@@ -157,7 +157,7 @@ On a Windows 10/11 PC:
 3. The installer is `WixInstall\multiOTPCredentialProviderInstaller\bin\x64\Release\SohobOTPSignIn.msi`.
 
 Alternative: put `source` in a **private** GitHub repository; the included workflow
-(`.github/workflows/windows-signin.yml`) builds the MSI on GitHub and offers it for download
+(`.github/workflows/windows.yml`) builds the MSI on GitHub and offers it for download
 under *Actions*. The first build may need small fixes; keep the error output.
 
 ## Step 6 — Windows machine

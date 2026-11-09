@@ -1,0 +1,118 @@
+# SohobOTP Windows end-to-end test (run as Administrator, on a test machine or the CI runner).
+#
+#   .\e2e.ps1 -AgentMsi sohobotp-agent.msi -FakePortal fakeportal.exe [-SignInMsi SohobOTPSignIn.msi]
+#
+# Installs SohobOTP Sign-in (or, without -SignInMsi, creates its registry key like its
+# installer would), installs the agent MSI silently against a local test portal, then checks
+# enrolment, the registry values the agent writes, the service, DPAPI-sealed keys, the token
+# being deleted, restart after a crash, and uninstall. Exit code = number of failed checks.
+param(
+  [Parameter(Mandatory = $true)][string]$AgentMsi,
+  [Parameter(Mandatory = $true)][string]$FakePortal,
+  [string]$SignInMsi = "",
+  [string]$Work = (Join-Path $env:TEMP "sohobotp-e2e")
+)
+$ErrorActionPreference = "Continue"
+$script:failures = 0
+function Check([string]$name, [bool]$ok, [string]$detail = "") {
+  if ($ok) { Write-Host "ok   $name" } else { Write-Host "FAIL $name  [$detail]"; $script:failures++ }
+}
+function Wait-Until([scriptblock]$cond, [int]$seconds) {
+  $end = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $end) { if (& $cond) { return $true }; Start-Sleep -Seconds 2 }
+  return $false
+}
+
+$work = $Work
+Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $work | Out-Null
+$clsid = "{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}"
+New-PSDrive -Name HKCR -PSProvider Registry -Root HKEY_CLASSES_ROOT -ErrorAction SilentlyContinue | Out-Null
+$cpKey = "HKCR:\CLSID\$clsid"
+
+Write-Host "== SohobOTP Sign-in"
+if ($SignInMsi -ne "") {
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$SignInMsi`" /qn /l*v `"$work\signin-install.log`""
+  Check "SohobOTP Sign-in MSI installs (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+  Check "SohobOTP Sign-in DLL in System32" (Test-Path "$env:SystemRoot\System32\SohobOTPSignIn.dll")
+  Check "registered as a Windows credential provider" (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\$clsid")
+  Check "COM server registered" ((Get-ItemProperty "$cpKey\InprocServer32" -ErrorAction SilentlyContinue).'(default)' -like "*SohobOTPSignIn.dll")
+} else {
+  Write-Host "(no -SignInMsi: creating its registry key with the installer's value types)"
+  New-Item -Force $cpKey | Out-Null
+  New-ItemProperty -Force -Path $cpKey -Name multiOTPServerTimeout -PropertyType DWord -Value 5 | Out-Null
+  New-ItemProperty -Force -Path $cpKey -Name multiOTPCacheEnabled -PropertyType String -Value "0" | Out-Null
+  New-ItemProperty -Force -Path $cpKey -Name multiOTPServers -PropertyType String -Value "https://192.168.1.88" | Out-Null
+}
+
+Write-Host "== test portal"
+$portal = Start-Process -FilePath $FakePortal -ArgumentList "--dir `"$work\portal`" --addr 127.0.0.1:8443" -PassThru -WindowStyle Hidden `
+  -RedirectStandardError "$work\fakeportal.log"
+Check "test portal started" (Wait-Until { Test-Path "$work\portal\pin.txt" } 30)
+$token = (Get-Content "$work\portal\token.txt" -Raw).Trim()
+$pin = (Get-Content "$work\portal\pin.txt" -Raw).Trim()
+Copy-Item "$work\portal\ca.pem" "$work\ca.pem"
+
+Write-Host "== agent MSI (silent, as Group Policy would)"
+$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$AgentMsi`" /qn PORTAL=https://127.0.0.1:8443 TOKEN=$token PIN=$pin CAFILE=`"$work\ca.pem`" /l*v `"$work\agent-install.log`""
+Check "agent MSI installs (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+$svc = Get-Service SohobOTPAgent -ErrorAction SilentlyContinue
+Check "service SohobOTPAgent exists, automatic" ($null -ne $svc -and $svc.StartType -eq "Automatic")
+Check "service running" (Wait-Until { (Get-Service SohobOTPAgent).Status -eq "Running" } 30)
+$log = Get-Content "$work\agent-install.log" -Raw -ErrorAction SilentlyContinue
+Check "token not written to the MSI log (MsiHiddenProperties)" (-not ($log -match [regex]::Escape($token)))
+
+Write-Host "== enrolment and configuration"
+Check "agent enrolled and applied configuration 1" (Wait-Until {
+  if (-not (Test-Path "$work\portal\state.json")) { return $false }
+  $s = Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json
+  return ($s.applied.version -eq 1 -and $s.applied.status -eq "applied")
+} 120)
+$expected = Get-Content "$work\portal\expected.json" -Raw | ConvertFrom-Json
+$cp = Get-ItemProperty $cpKey
+foreach ($name in "multiOTPServers", "multiOTPSharedSecret", "cpus_logon", "cpus_unlock", "cpus_credui", "excluded_account", "login_text", "otp_text") {
+  Check "registry $name" ($cp.$name -eq $expected.$name) "got '$($cp.$name)'"
+}
+$k = Get-Item $cpKey
+Check "multiOTPServerTimeout kept as DWORD" ($k.GetValueKind("multiOTPServerTimeout") -eq "DWord")
+Check "multiOTPCacheEnabled kept as its existing type, value 1" ($cp.multiOTPCacheEnabled -eq 1 -or $cp.multiOTPCacheEnabled -eq "1")
+Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
+
+$boot = Get-ItemProperty "HKLM:\SOFTWARE\SohobOTP\Agent" -ErrorAction SilentlyContinue
+Check "enrolment token deleted from the registry" ($null -ne $boot -and $null -eq $boot.Token -and $boot.Portal -eq "https://127.0.0.1:8443")
+$stateFile = "$env:ProgramData\SohobOTP\agent\agent.json"
+$state = Get-Content $stateFile -Raw | ConvertFrom-Json
+Check "private keys sealed with DPAPI" ($state.sign_seed.StartsWith("dpapi:") -and $state.box_private.StartsWith("dpapi:"))
+$acl = (Get-Acl "$env:ProgramData\SohobOTP\agent").Access | ForEach-Object { $_.IdentityReference.Value }
+Check "state folder: no access for Users or Everyone" (-not ($acl -match "Users|Everyone|Authenticated")) ($acl -join ", ")
+$exe = "$env:ProgramFiles\SohobOTP\Agent\sohobotp-agent.exe"
+$status = & $exe status 2>&1 | Out-String
+Check "status shows the applied configuration" ($status -match "version 1, applied") $status
+$inv = (Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json).inventory
+Check "inventory reports Windows" ($inv.os -eq "windows" -and $inv.os_name -ne "") "$($inv.os_name)"
+
+Write-Host "== service recovery"
+$qf = (& sc.exe qfailure SohobOTPAgent) -join " "
+Check "service restarts after a failure" ($qf -match "RESTART") $qf
+$pid1 = (Get-CimInstance Win32_Service -Filter "Name='SohobOTPAgent'").ProcessId
+Stop-Process -Id $pid1 -Force -ErrorAction SilentlyContinue
+Check "service restarted after being killed" (Wait-Until {
+  $s = Get-CimInstance Win32_Service -Filter "Name='SohobOTPAgent'"
+  return ($s.State -eq "Running" -and $s.ProcessId -ne $pid1)
+} 60)
+
+Write-Host "== uninstall"
+$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$AgentMsi`" /qn /l*v `"$work\agent-uninstall.log`""
+Check "agent MSI uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+Check "service removed" ($null -eq (Get-Service SohobOTPAgent -ErrorAction SilentlyContinue))
+Check "agent program removed" (-not (Test-Path $exe))
+if ($SignInMsi -ne "") {
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$SignInMsi`" /qn"
+  Check "SohobOTP Sign-in uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+  Check "SohobOTP Sign-in unregistered" (-not (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\$clsid"))
+}
+
+Stop-Process -Id $portal.Id -Force -ErrorAction SilentlyContinue
+Write-Host ""
+if ($script:failures -eq 0) { Write-Host "All Windows checks passed." } else { Write-Host "$($script:failures) Windows check(s) failed." }
+exit $script:failures

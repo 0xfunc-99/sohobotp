@@ -8,15 +8,20 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-// RealRegistry is the Credential Provider key in HKEY_CLASSES_ROOT (64-bit view).
-type RealRegistry struct{}
+// RealRegistry is the SohobOTP Sign-in key in HKEY_CLASSES_ROOT (64-bit view). Path is
+// KeyPath when empty (tests use another key).
+type RealRegistry struct{ Path string }
 
-func open(access uint32) (registry.Key, error) {
-	return registry.OpenKey(registry.CLASSES_ROOT, KeyPath, access|registry.WOW64_64KEY)
+func (r RealRegistry) open(access uint32) (registry.Key, error) {
+	path := r.Path
+	if path == "" {
+		path = KeyPath
+	}
+	return registry.OpenKey(registry.CLASSES_ROOT, path, access|registry.WOW64_64KEY)
 }
 
-func (RealRegistry) Installed() bool {
-	k, err := open(registry.QUERY_VALUE)
+func (r RealRegistry) Installed() bool {
+	k, err := r.open(registry.QUERY_VALUE)
 	if err != nil {
 		return false
 	}
@@ -24,8 +29,8 @@ func (RealRegistry) Installed() bool {
 	return true
 }
 
-func (RealRegistry) Get(name string) (Kind, string, uint32, error) {
-	k, err := open(registry.QUERY_VALUE)
+func (r RealRegistry) Get(name string) (Kind, string, uint32, error) {
+	k, err := r.open(registry.QUERY_VALUE)
 	if err != nil {
 		return Missing, "", 0, err
 	}
@@ -47,8 +52,8 @@ func (RealRegistry) Get(name string) (Kind, string, uint32, error) {
 	}
 }
 
-func (RealRegistry) SetString(name, value string) error {
-	k, err := open(registry.SET_VALUE)
+func (r RealRegistry) SetString(name, value string) error {
+	k, err := r.open(registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
@@ -56,8 +61,8 @@ func (RealRegistry) SetString(name, value string) error {
 	return k.SetStringValue(name, value)
 }
 
-func (RealRegistry) SetDWORD(name string, value uint32) error {
-	k, err := open(registry.SET_VALUE)
+func (r RealRegistry) SetDWORD(name string, value uint32) error {
+	k, err := r.open(registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
@@ -65,8 +70,8 @@ func (RealRegistry) SetDWORD(name string, value uint32) error {
 	return k.SetDWordValue(name, value)
 }
 
-func (RealRegistry) Delete(name string) error {
-	k, err := open(registry.SET_VALUE)
+func (r RealRegistry) Delete(name string) error {
+	k, err := r.open(registry.SET_VALUE)
 	if err != nil {
 		return err
 	}

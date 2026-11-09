@@ -23,7 +23,7 @@ one before installing SohobOTP Sign-in on a machine.
 C++ with Visual Studio 2022 (v143, Windows SDK) and the WiX Toolset 3.14. It cannot be built on
 Linux or macOS. Two ways:
 
-- **GitHub Actions** (`.github/workflows/windows-signin.yml`): builds the DLLs and the MSI on a
+- **GitHub Actions** (`.github/workflows/windows.yml`): builds the DLLs and the MSI on a
   Windows runner when this folder changes and keeps them as artefacts.
 - **By hand** on Windows: run `get-php.ps1` once (embedded PHP runtime, not stored in git), then
   `msbuild SohobOTPSignIn.sln /p:Configuration=Release /p:Platform=x64`; the MSI is in

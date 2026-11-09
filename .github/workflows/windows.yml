@@ -1,0 +1,90 @@
+# Windows build and test of SohobOTP: the agent (+ MSI) is built on Linux, SohobOTP Sign-in is
+# compiled on Windows, then a Windows machine runs the agent's Windows tests and the full
+# end-to-end test (agent/tests/windows/e2e.ps1) with both MSIs.
+name: windows
+on:
+  push: {}
+  workflow_dispatch: {}
+jobs:
+  agent-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Agent tests and builds (Linux and Windows binaries)
+        run: sh agent/tests/run-in-docker.sh
+      - name: Agent MSI
+        run: sh agent/packaging/windows/build-msi.sh
+      - name: Test portal for Windows
+        run: |
+          docker run --rm -v "$PWD":/src -w /src/agent -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 \
+            golang:1.22.10-bookworm go build -buildvcs=false -o dist/fakeportal.exe ./tests/fakeportal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-windows
+          path: |
+            agent/dist/sohobotp-agent.msi
+            agent/dist/sohobotp-agent-windows-amd64.exe
+            agent/dist/fakeportal.exe
+
+  signin-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Embedded PHP runtime (pinned upstream commit)
+        shell: pwsh
+        run: ./windows-signin/get-php.ps1
+      - name: WiX Toolset 3.14
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) { choco install wixtoolset --version 3.14.1 -y --no-progress }
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build SohobOTP Sign-in (Release x64)
+        run: msbuild windows-signin\SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=x64
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Get-ChildItem -Recurse windows-signin -Include SohobOTPSignIn.dll,SohobOTPSignInFilter.dll,*.msi | Where-Object { $_.FullName -match 'Release' } | Copy-Item -Destination out
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signin-windows
+          path: out/
+
+  windows-test:
+    needs: [agent-build, signin-build]
+    if: always() && needs.agent-build.result == 'success'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.10"
+      - name: Agent unit tests on Windows (real registry, DPAPI)
+        working-directory: agent
+        run: go test -count=1 ./...
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-windows
+          path: agent-out
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: signin-windows
+          path: signin-out
+      - name: End-to-end test
+        shell: pwsh
+        run: |
+          $signin = Get-ChildItem signin-out -Filter *.msi -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'x86' } | Select-Object -First 1
+          $params = @{ AgentMsi = (Resolve-Path agent-out/sohobotp-agent.msi).Path; FakePortal = (Resolve-Path agent-out/fakeportal.exe).Path; Work = "$env:RUNNER_TEMP\sohobotp-e2e" }
+          if ($signin) { $params.SignInMsi = $signin.FullName; Write-Host "with SohobOTP Sign-in: $($signin.Name)" } else { Write-Host "SohobOTP Sign-in not built: testing the agent with its registry key only" }
+          & ./agent/tests/windows/e2e.ps1 @params
+          exit $LASTEXITCODE
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-logs
+          path: |
+            ${{ runner.temp }}/sohobotp-e2e/*.log
+            C:/ProgramData/SohobOTP/agent/agent.log
