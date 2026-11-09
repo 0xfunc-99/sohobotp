@@ -134,7 +134,9 @@ func ModuleFile(p *protocol.LinuxPolicy, radiusFile string) string {
 		// jump over the remaining exclusion lines and the pam_radius line, to the end of this file
 		fmt.Fprintf(&b, "auth [success=%d default=ignore] pam_succeed_if.so quiet %s\n", len(skip)-i, cond)
 	}
-	fmt.Fprintf(&b, "auth required pam_radius_auth.so conf=%s prompt=code\n", radiusFile)
+	// force_prompt: always ask for the code; without it pam_radius re-sends the password
+	// typed for the previous module (seen with libpam-radius-auth 2.0.0).
+	fmt.Fprintf(&b, "auth required pam_radius_auth.so conf=%s prompt=code force_prompt\n", radiusFile)
 	return b.String()
 }
 
@@ -222,14 +224,23 @@ func (a *Applier) Plan(p *protocol.LinuxPolicy, secret string) ([]Change, error)
 			changes = append(changes, Change{Path: path, Content: str(next)})
 		}
 	}
+	backup := radiusFile + ".sohobotp-orig"
+	current, currentErr := os.ReadFile(a.p(radiusFile))
+	ours := currentErr == nil && strings.HasPrefix(string(current), managedHeader)
 	if p.Enabled {
 		changes = append(changes,
 			Change{Path: "/etc/pam.d/" + moduleName, Content: str(ModuleFile(p, radiusFile)), Mode: 0o644},
 			Change{Path: radiusFile, Content: str(RadiusConf(p, secret)), Mode: 0o600},
 		)
+		if currentErr == nil && !ours {
+			// keep the file the package (or an administrator) put there, restored when 2FA is turned off
+			changes = append(changes, Change{Path: backup, Content: str(string(current)), Mode: 0o600})
+		}
 	} else {
 		changes = append(changes, Change{Path: "/etc/pam.d/" + moduleName})
-		if raw, err := os.ReadFile(a.p(radiusFile)); err == nil && strings.HasPrefix(string(raw), managedHeader) {
+		if original, err := os.ReadFile(a.p(backup)); err == nil {
+			changes = append(changes, Change{Path: radiusFile, Content: str(string(original)), Mode: 0o600}, Change{Path: backup})
+		} else if ours {
 			changes = append(changes, Change{Path: radiusFile})
 		}
 	}
@@ -382,9 +393,13 @@ func (a *Applier) reloadSSH() {
 	}
 	// no systemd (containers): signal the listening sshd
 	if raw, err := os.ReadFile(a.p("/run/sshd.pid")); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 1 {
-			if proc, err := os.FindProcess(pid); err == nil {
-				_ = signalHUP(proc)
+		// only if that process really is sshd (a stale pid file must not signal anything else;
+		// in containers sshd may be process 1)
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
+			if comm, err := os.ReadFile(a.p(fmt.Sprintf("/proc/%d/comm", pid))); err == nil && strings.TrimSpace(string(comm)) == "sshd" {
+				if proc, err := os.FindProcess(pid); err == nil {
+					_ = signalHUP(proc)
+				}
 			}
 		}
 	}

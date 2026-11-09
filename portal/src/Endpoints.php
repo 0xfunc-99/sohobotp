@@ -263,10 +263,24 @@ final class Endpoints
         ] + $d;
     }
 
+    /**
+     * A saved policy completed with defaults. Each OS section is merged key by key, never
+     * recursively: a saved list (e.g. services ["sshd"]) replaces the default list entirely.
+     */
+    public static function effectivePolicy(array $policy): array
+    {
+        $d = self::DEFAULT_POLICY;
+        return [
+            'checkin_interval' => $policy['checkin_interval'] ?? $d['checkin_interval'],
+            'linux' => array_replace($d['linux'], (array) ($policy['linux'] ?? [])),
+            'windows' => array_replace($d['windows'], (array) ($policy['windows'] ?? [])),
+        ];
+    }
+
     /** Flat form values for a policy (inverse of policyFromInput). */
     public static function policyToInput(array $policy): array
     {
-        $policy = array_replace_recursive(self::DEFAULT_POLICY, $policy);
+        $policy = self::effectivePolicy($policy);
         $input = ['checkin_interval' => $policy['checkin_interval']];
         foreach ($policy['linux'] as $key => $value) {
             $input['linux_' . $key] = $value;
@@ -688,11 +702,12 @@ final class Endpoints
     public function deleteEndpoint(string $id): array
     {
         $endpoint = $this->endpoint($id) ?? throw new ValidationException('This endpoint does not exist.');
-        if ('' !== ($endpoint['radius_client_id'] ?? '')) {
-            $this->removeRadiusClient($endpoint);
-        }
         @unlink(self::dir() . "/$id.json");
         @unlink(self::dir() . "/$id.json.lock");
+        if ('' !== ($endpoint['radius_client_id'] ?? '')) {
+            $this->removeRadiusClient($endpoint);
+            $this->retryRadiusErrors();
+        }
         return $endpoint;
     }
 
@@ -709,6 +724,7 @@ final class Endpoints
     public function syncRadiusClients(callable $filter): void
     {
         $changed = false;
+        $freed = false;
         foreach ($this->endpoints() as $endpoint) {
             if (!$filter($endpoint) || 'linux' !== $endpoint['os']) {
                 continue;
@@ -742,7 +758,7 @@ final class Endpoints
             } elseif (null !== $client) {
                 $radius->deleteClient($client['id']);
                 $client = null;
-                $changed = true;
+                $changed = $freed = true;
             }
             self::endpointStore($endpoint['id'])->update(static function (array &$data) use ($client, $error): void {
                 if ([] !== $data) {
@@ -753,6 +769,24 @@ final class Endpoints
         }
         if ($changed) {
             Jobs::enqueue('radius.apply', [], 'endpoints');
+        }
+        if ($freed) {
+            $this->retryRadiusErrors();
+        }
+    }
+
+    /**
+     * An address freed by a removed client (e.g. the old endpoint of a re-installed machine)
+     * lets endpoints that are waiting for it get their client now.
+     */
+    private function retryRadiusErrors(): void
+    {
+        $waiting = static fn (array $e): bool => '' !== ($e['radius_error'] ?? '');
+        foreach ($this->endpoints() as $endpoint) {
+            if ($waiting($endpoint)) {
+                $this->syncRadiusClients($waiting);
+                return;
+            }
         }
     }
 
@@ -931,7 +965,7 @@ final class Endpoints
         if (null === $group) {
             return [null, [], 'The endpoint group no longer exists.'];
         }
-        $p = array_replace_recursive(self::DEFAULT_POLICY, $group['policy']);
+        $p = self::effectivePolicy($group['policy']);
         $host = $endpoint['portal_host'];
         if ('linux' === $endpoint['os']) {
             $l = $p['linux'];

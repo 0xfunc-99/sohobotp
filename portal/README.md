@@ -16,7 +16,7 @@ in those folders also refuses to run on its own.
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
 | 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (tested against Samba AD and OpenLDAP) |
 | 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
-| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **4a done** (portal side: groups, enrolment, signed agent API); agent in progress (Codex, `portal/agent-go`) |
+| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **portal and Linux agent done** (agent in `agent/`, tested end to end); Windows agent built, needs a real-machine test; MSI and self-update to do |
 | 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
 | 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
 | 7 | Raspberry Pi / virtual appliance image with the portal and worker | |

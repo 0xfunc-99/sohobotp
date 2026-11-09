@@ -1,3 +1,6 @@
+> **Status (2026-11-09): taken over and implemented by Claude** in `agent/` (branch
+> `portal/agent-go`). Remaining from this task: real Windows test, DPAPI, MSI (phase 3).
+
 # Task: SohobOTP agent in Go (stage 4b, Linux first, then Windows)
 
 **Branch:** create `portal/agent-go` from `portal/stage3-radius`

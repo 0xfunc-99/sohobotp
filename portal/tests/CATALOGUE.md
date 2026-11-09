@@ -10,7 +10,7 @@ Every case the system must handle, what should happen, and how it is tested. Sta
 
 Suites: `unit` = `tests/unit.php`, `e2e` = `tests/e2e.php`, `ad` = `tests/e2e-ad.php` +
 `tests/e2e-ad-endpoints.php` (`MULTIOTP_TEST_AD=1`), `appliance` = `tests/run-appliance-test.sh`,
-`agent` = Codex's `agent/tests/run-in-docker.sh` (branch `portal/agent-go`).
+`agent` = `agent/tests/run-in-docker.sh` (unit) and `agent/tests/e2e-linux.sh` (end to end).
 
 State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 320 e2e,
 114 AD, appliance). **No P1 gap left.** Of the 98 cases: 53 fully automated, 8 partial
@@ -90,7 +90,7 @@ State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 32
 
 | Case | Expected | Status |
 |---|---|---|
-| Protocol vectors (enrolment proof, request and config signatures, sealed secrets) | byte-identical in PHP and Go | auto (unit; agent) |
+| Protocol vectors (enrolment proof, request and config signatures, sealed secrets) | byte-identical in PHP and Go | auto (unit; agent unit) |
 | Enrolment: wrong / used-up token, bad key proof | refused | auto (unit, e2e) |
 | Enrolment token **expired** or **revoked** over HTTP | refused | partial (unit, via store edit) **P2** |
 | Signed check-in: replay, tampered body, other URI, other key, old timestamp | refused | auto (unit, e2e) |
@@ -136,11 +136,13 @@ State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 32
 
 | Case | Expected | Status |
 |---|---|---|
-| SSH with password + code, wrong code, excluded user, root | as designed | agent (Codex Phase 1) |
-| SSH key + code (`ssh_keys_need_code`) | both required | agent |
-| Broken config / `sshd -t` fails | rolled back, reported as failed | agent |
-| RADIUS servers all down | excluded/break-glass users still get in; others refused | agent (added to Codex Phase 1) |
-| Debian and RHEL family | both work | agent |
+| SSH and sudo with password + code, wrong code, wrong password, real SSH session | as designed | auto (agent e2e) |
+| Excluded user, break-glass group, root | password only, never locked out | auto (agent e2e) |
+| RADIUS servers all down, then back | only users needing a code are refused; back to normal | auto (agent e2e) |
+| Policy change from the portal, 2FA off | files follow; restored byte for byte | auto (agent e2e) |
+| Broken config / `sshd -t` fails, unknown PAM layout | rolled back / refused, files untouched | auto (agent unit) |
+| SSH key + code (`ssh_keys_need_code`) | both required | partial (drop-in unit-tested) P2 |
+| RHEL family (Rocky / Alma) | same behaviour | partial (unit-tested layout, no e2e run) P2 |
 
 ## 9. Web security
 

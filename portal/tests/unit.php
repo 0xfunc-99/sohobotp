@@ -406,5 +406,24 @@ check('admin move pins the group against AD rules', true === $endpoints->endpoin
 $endpoints->deleteEndpoint($pendingAgent->id);
 $endpoints->deleteEndpoint($adAgent->id);
 
+// --- Endpoints: a re-installed machine (old endpoint still there) gets its RADIUS client when the old one goes
+[, $reToken] = $endpoints->createToken($servers['id'], 'reinstall', 1, 2, 'unit');
+$old = new AgentSim();
+$old->id = $endpoints->enroll($old->enrollRequest($reToken, $linInventory), '192.0.2.90', 'portal.example.test')['endpoint_id'];
+$new = new AgentSim();
+$new->id = $endpoints->enroll($new->enrollRequest($reToken, $linInventory), '192.0.2.90', 'portal.example.test')['endpoint_id'];
+check('re-install: second endpoint at the same address waits, with the reason', '' === $endpoints->endpoint($new->id)['radius_client_id'] && str_contains($endpoints->endpoint($new->id)['radius_error'], 'already'));
+check('re-install: no configuration while waiting', null === $checkin($new, $none, null, '192.0.2.90')['config']);
+$endpoints->deleteEndpoint($old->id);
+$freedRecord = $endpoints->endpoint($new->id);
+check('re-install: deleting the old endpoint gives the new one its RADIUS client', '' !== $freedRecord['radius_client_id'] && '' === $freedRecord['radius_error']);
+check('re-install: the new endpoint now gets its configuration', null !== $checkin($new, $none, null, '192.0.2.90')['config']);
+$endpoints->deleteEndpoint($new->id);
+
+// --- Endpoints: a shorter saved list replaces the default list (no positional merge)
+$effective = Endpoints::effectivePolicy(['linux' => ['services' => ['sshd']], 'windows' => []]);
+check('policy: saved services ["sshd"] stay ["sshd"] (sudo not merged back from the defaults)', ['sshd'] === $effective['linux']['services'] && 60 === $effective['checkin_interval']);
+check('policy form shows only the saved services', ['sshd'] === Endpoints::policyToInput(['linux' => ['services' => ['sshd']]])['linux_services']);
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -133,7 +133,7 @@ func install(args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := a.Once(); err != nil {
+	if err := checkinAndReport(a); err != nil {
 		fmt.Fprintln(os.Stderr, "first check-in failed (the service retries):", err)
 	}
 	report(a.St)
@@ -160,6 +160,16 @@ func run(args []string) error {
 	if !*once {
 		return agent.RunService(a)
 	}
+	if err := checkinAndReport(a); err != nil {
+		return err
+	}
+	report(a.St)
+	return nil
+}
+
+// checkinAndReport checks in once and, when a configuration was applied, reports the
+// result to the portal right away.
+func checkinAndReport(a *agent.Agent) error {
 	before := a.St.Applied.Version
 	if _, err := a.Once(); err != nil {
 		return err
@@ -170,7 +180,6 @@ func run(args []string) error {
 			return err
 		}
 	}
-	report(a.St)
 	return nil
 }
 

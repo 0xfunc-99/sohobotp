@@ -44,7 +44,7 @@ final class CpGateway
         if ('' === $data || strlen($data) > 65536 || !str_contains($data, '<multiOTP')) {
             self::refuse(400, 'Not a multiOTP client request.');
         }
-        $policy = array_replace_recursive(Endpoints::DEFAULT_POLICY, $endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows'];
+        $policy = Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows'];
 
         $engine = MultiotpService::get();
         $engine->SetServerSecret($endpoints->cpSecret($id));

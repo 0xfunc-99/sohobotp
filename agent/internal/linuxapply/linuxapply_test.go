@@ -114,7 +114,7 @@ func TestModuleFileExclusionsSkipOnlyTheCode(t *testing.T) {
 # skip only the code line: they still need their normal password.
 auth [success=2 default=ignore] pam_succeed_if.so quiet user in root:deploy
 auth [success=1 default=ignore] pam_succeed_if.so quiet user ingroup mfa-breakglass
-auth required pam_radius_auth.so conf=/etc/pam_radius_auth.conf prompt=code
+auth required pam_radius_auth.so conf=/etc/pam_radius_auth.conf prompt=code force_prompt
 `
 	if got != want {
 		t.Fatalf("module file:\n%s\nwant:\n%s", got, want)
@@ -179,6 +179,30 @@ func TestApplyDebianAndDisableRestoresBytes(t *testing.T) {
 		if exists(dir, p) {
 			t.Errorf("%s left behind", p)
 		}
+	}
+}
+
+func TestPackageRadiusFileKeptAndRestored(t *testing.T) {
+	dir := debian(t)
+	original := "# Debian sample\n#server[:port] shared_secret timeout\n"
+	if err := os.WriteFile(filepath.Join(dir, "/etc/pam_radius_auth.conf"), []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &Applier{Root: dir, Sys: &fakeSystem{}}
+	if _, err := a.Apply(policy(), secret); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, dir, "/etc/pam_radius_auth.conf.sohobotp-orig") != original || !strings.HasPrefix(read(t, dir, "/etc/pam_radius_auth.conf"), managedHeader) {
+		t.Fatal("original RADIUS file not kept aside")
+	}
+	if again, err := a.Apply(policy(), secret); err != nil || len(again) != 0 {
+		t.Fatalf("second apply must not touch the backup: %+v %v", again, err)
+	}
+	if _, err := a.Apply(&protocol.LinuxPolicy{Enabled: false}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, dir, "/etc/pam_radius_auth.conf") != original || exists(dir, "/etc/pam_radius_auth.conf.sohobotp-orig") {
+		t.Fatal("original RADIUS file not restored")
 	}
 }
 
