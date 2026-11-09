@@ -1,0 +1,146 @@
+// Package state stores the agent's identity and progress. The directory is readable
+// by root (Linux) or SYSTEM/Administrators (Windows) only; private keys never leave it.
+package state
+
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"golang.org/x/crypto/nacl/box"
+
+	"multiotp-portal/agent/internal/protocol"
+)
+
+var b64 = base64.StdEncoding
+
+// State is persisted as agent.json in Dir().
+type State struct {
+	PortalURL       string           `json:"portal_url"`
+	CAFile          string           `json:"ca_file,omitempty"`
+	EndpointID      string           `json:"endpoint_id"`
+	PortalKey       string           `json:"portal_key"`
+	SignSeed        string           `json:"sign_seed"`
+	BoxPrivate      string           `json:"box_private"`
+	BoxPublic       string           `json:"box_public"`
+	Applied         protocol.Applied `json:"applied"`
+	CheckinInterval int              `json:"checkin_interval"`
+	PortalState     string           `json:"portal_state"` // active | pending | disabled | unknown
+	LastCheckin     int64            `json:"last_checkin"`
+	LastError       string           `json:"last_error"`
+}
+
+// Keys are the endpoint's private keys, loaded from the state.
+type Keys struct {
+	Sign    ed25519.PrivateKey
+	BoxPub  *[32]byte
+	BoxPriv *[32]byte
+}
+
+// dirOverride lets tests and containers use another folder (SOHOBOTP_AGENT_DIR).
+func Dir() string {
+	if d := os.Getenv("SOHOBOTP_AGENT_DIR"); d != "" {
+		return d
+	}
+	return defaultDir()
+}
+
+func path() string { return filepath.Join(Dir(), "agent.json") }
+
+// NewKeys creates a fresh Ed25519 signing key and X25519 box key pair.
+func NewKeys() (*Keys, error) {
+	_, sign, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	pub, priv, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	return &Keys{Sign: sign, BoxPub: pub, BoxPriv: priv}, nil
+}
+
+// Store writes the keys into the state (they are saved with it).
+func (s *State) Store(k *Keys) {
+	s.SignSeed = b64.EncodeToString(k.Sign.Seed())
+	s.BoxPrivate = b64.EncodeToString(k.BoxPriv[:])
+	s.BoxPublic = b64.EncodeToString(k.BoxPub[:])
+}
+
+// Keys returns the private keys kept in the state.
+func (s *State) Keys() (*Keys, error) {
+	seed, err := b64.DecodeString(s.SignSeed)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		return nil, errors.New("signing key missing or damaged in the agent state")
+	}
+	priv, err1 := b64.DecodeString(s.BoxPrivate)
+	pub, err2 := b64.DecodeString(s.BoxPublic)
+	if err1 != nil || err2 != nil || len(priv) != 32 || len(pub) != 32 {
+		return nil, errors.New("encryption key missing or damaged in the agent state")
+	}
+	k := &Keys{Sign: ed25519.NewKeyFromSeed(seed), BoxPub: new([32]byte), BoxPriv: new([32]byte)}
+	copy(k.BoxPub[:], pub)
+	copy(k.BoxPriv[:], priv)
+	return k, nil
+}
+
+// PortalPublicKey is the pinned portal signing key.
+func (s *State) PortalPublicKey() (ed25519.PublicKey, error) {
+	key, err := b64.DecodeString(s.PortalKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, errors.New("pinned portal key missing or damaged in the agent state")
+	}
+	return key, nil
+}
+
+// Exists tells whether the agent is enrolled on this machine.
+func Exists() bool {
+	_, err := os.Stat(path())
+	return err == nil
+}
+
+// Load reads the state.
+func Load() (*State, error) {
+	raw, err := os.ReadFile(path())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errors.New("the agent is not enrolled on this machine (run install)")
+		}
+		return nil, err
+	}
+	var s State
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, fmt.Errorf("agent state damaged: %w", err)
+	}
+	return &s, nil
+}
+
+// Save writes the state atomically, readable by the owner only.
+func (s *State) Save() error {
+	if err := ensureDir(Dir()); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path() + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	if err := protectFile(tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path())
+}
+
+// Remove deletes the state directory (uninstall).
+func Remove() error {
+	return os.RemoveAll(Dir())
+}
