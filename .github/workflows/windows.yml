@@ -37,6 +37,13 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) { choco install wixtoolset --version 3.14.1 -y --no-progress }
+      - name: Spectre-mitigated libraries for the v142 toolset (the projects build with /Qspectre)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $p = Start-Process -Wait -PassThru "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList "modify --installPath `"$vs`" --add Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64.Spectre --quiet --norestart --nocache"
+          Write-Host "vs_installer exit $($p.ExitCode)"
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
       - uses: microsoft/setup-msbuild@v2
       - name: Build SohobOTP Sign-in (Release x64)
         run: msbuild windows-signin\SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=x64

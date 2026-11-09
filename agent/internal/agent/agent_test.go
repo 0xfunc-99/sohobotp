@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func (f *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.seen.Applied.Version < f.version {
 		sealed, _ := box.SealAnonymous(nil, []byte("Radius-Secret-0123"), f.boxPub, rand.Reader)
 		payload, _ := json.Marshal(map[string]any{
-			"endpoint_id": "e0000000000000000001", "version": f.version, "issued_at": time.Now().Unix(), "os": "linux",
+			"endpoint_id": "e0000000000000000001", "version": f.version, "issued_at": time.Now().Unix(), "os": runtime.GOOS,
 			"policy": map[string]any{"enabled": true}, "secrets": map[string]string{"radius_secret": b64.EncodeToString(sealed)},
 		})
 		signer := f.key

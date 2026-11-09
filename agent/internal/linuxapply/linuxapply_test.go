@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -154,7 +155,7 @@ func TestApplyDebianAndDisableRestoresBytes(t *testing.T) {
 		t.Fatal("sudo include misplaced")
 	}
 	st, _ := os.Stat(filepath.Join(dir, "/etc/pam_radius_auth.conf"))
-	if st.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 { // no Unix modes on Windows
 		t.Fatalf("radius file mode %v", st.Mode().Perm())
 	}
 	if !strings.Contains(read(t, dir, sshDropIn), "AuthenticationMethods publickey,keyboard-interactive keyboard-interactive") {
