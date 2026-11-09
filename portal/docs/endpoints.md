@@ -5,7 +5,7 @@ binary `sohobotp-agent` (`sohobotp-agent.exe` on Windows), systemd unit
 `sohobotp-agent.service`, Windows service `SohobOTPAgent` (display name "SohobOTP Agent"),
 state in `/etc/sohobotp-agent/` and `%ProgramData%\SohobOTP\agent\`. Wire-protocol
 identifiers (`multiotp-agent-v1`, `multiotp-config-v1`, ...) are internal constants and keep
-their names. The Windows login itself is the multiOTP Credential Provider (third-party,
+their names. The Windows login itself is SohobOTP Sign-in (third-party,
 Apache 2.0); its tile text defaults to "SohobOTP".
 
 Goal: manage Windows and Linux machines from the portal. Each machine runs a small
@@ -16,7 +16,7 @@ Decisions (2026-11-08): agent written in **Go** (one binary per OS, Windows serv
 systemd unit); Linux logins use **PAM → RADIUS** (`pam_radius_auth` against the stage 3
 FreeRADIUS servers); the portal can **push configuration**, show **inventory and
 health**, and **self-update** the agent (no remote commands for now); Windows laptops
-get the **offline cache** of the multiOTP Credential Provider.
+get the **offline cache** of SohobOTP Sign-in.
 
 ## Pieces
 
@@ -51,11 +51,11 @@ get the **offline cache** of the multiOTP Credential Provider.
 - **Revocation:** disabling an endpoint rejects its signatures, revokes its CP secret and
   removes its RADIUS client on the next apply.
 
-## Windows: multiOTP Credential Provider
+## Windows: SohobOTP Sign-in (fork of the multiOTP Credential Provider)
 
 The agent installs the CP MSI if missing (hosted by the portal, signature checked) and
 writes its registry values under
-`HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}`:
+`HKEY_CLASSES_ROOT\CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}`:
 
 | Policy field | Registry value |
 |---|---|

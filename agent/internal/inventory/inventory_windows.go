@@ -24,10 +24,10 @@ func platform(inv *protocol.Inventory) {
 		inv.Domain, _, _ = k.GetStringValue("Domain")
 		k.Close()
 	}
-	inv.Component = protocol.Component{Name: "multiotp-cp", Version: credentialProviderVersion()}
+	inv.Component = protocol.Component{Name: "sohobotp-signin", Version: credentialProviderVersion()}
 }
 
-// credentialProviderVersion reads the installed multiOTP Credential Provider version
+// credentialProviderVersion reads the installed SohobOTP Sign-in version
 // from the uninstall entries (64-bit view).
 func credentialProviderVersion() string {
 	root, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`, registry.ENUMERATE_SUB_KEYS)
@@ -44,7 +44,7 @@ func credentialProviderVersion() string {
 		display, _, _ := k.GetStringValue("DisplayName")
 		version, _, _ := k.GetStringValue("DisplayVersion")
 		k.Close()
-		if strings.Contains(strings.ToLower(display), "multiotp credential provider") {
+		if strings.HasPrefix(strings.ToLower(display), "sohobotp sign-in") {
 			return version
 		}
 	}

@@ -6,7 +6,7 @@ namespace Portal;
 defined('PORTAL_ROOT') || exit;
 
 /**
- * Server side of the multiOTP Credential Provider for managed Windows endpoints
+ * Server side of SohobOTP Sign-in (fork of the multiOTP Credential Provider) for managed Windows endpoints
  * (portal/cp.php?e=<endpoint id>). The CP's bundled multiOTP client speaks the legacy
  * client/server XML protocol; this gateway answers it with the engine's own XmlServer(),
  * but with the endpoint's OWN shared secret (pushed sealed by the agent) instead of the

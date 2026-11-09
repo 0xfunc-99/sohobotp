@@ -16,7 +16,7 @@ sohobotp-agent install --portal https://portal.example.com --token <TOKEN> --pin
 ```
 
 ```powershell
-# Windows, administrator PowerShell (install the multiOTP Credential Provider MSI first)
+# Windows, administrator PowerShell (install SohobOTP Sign-in (SohobOTPSignIn.msi) first)
 .\sohobotp-agent.exe install --portal https://portal.example.com --token <TOKEN> --pin <PIN>
 ```
 
@@ -26,7 +26,7 @@ self-signed one). Verification is never switched off.
 **Windows, by hand:** double-click `sohobotp-agent.msi` (as an administrator). The setup window
 asks for the portal address, the enrolment token, the pin and, if the portal uses its own
 certificate, the CA file; **Install** stays disabled until the first three are filled in.
-Install the multiOTP Credential Provider first.
+Install SohobOTP Sign-in first.
 
 ![MSI setup window](docs/msi-setup-window.png)
 
@@ -64,8 +64,8 @@ Other commands: `status`, `run --once` (check in now), `apply --dry-run --config
 Every apply is snapshotted; any failure (including `sshd -t`) restores all files. Turning
 2FA off in the portal restores the files byte for byte.
 
-**Windows**: the registry values of the multiOTP Credential Provider
-(`HKCR\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}`): the machine's own gateway URL
+**Windows**: the registry values of SohobOTP Sign-in (Sohobcom fork of the multiOTP Credential Provider)
+(`HKCR\CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}`): the machine's own gateway URL
 (`portal/cp.php?e=<id>`) and secret, sign-in / unlock / UAC modes, break-glass account,
 offline cache and texts. Existing value types are kept; the agent refuses to run without
 the Credential Provider; failures restore the previous values.
@@ -131,9 +131,9 @@ Unit tests reproduce every libsodium protocol vector and cover the PAM and regis
 The Windows build is cross-compiled and its registry logic unit-tested; it has not run on
 Windows yet. Before production, on a Windows 11 / Server 2022 test machine:
 
-1. Install the multiOTP Credential Provider MSI (5.10.x), then the agent with a token.
+1. Install SohobOTP Sign-in (SohobOTPSignIn.msi), then the agent with a token.
    `sohobotp-agent.exe status` shows version 1 applied; the portal shows the inventory.
-2. `reg query "HKCR\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}"`: `multiOTPServers`
+2. `reg query "HKCR\CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}"`: `multiOTPServers`
    is the `cp.php?e=` URL, the secret is not `ClientServerSecret`, types are unchanged.
 3. Sign in (console and RDP) with password + code; wrong code refused; break-glass account
    needs no code; unlock and UAC follow the group's modes.

@@ -12,7 +12,7 @@ SetupDlg	PinLabel	Text	20	138	330	10	3		Portal key pin (after --pin in the insta
 SetupDlg	PinEdit	Edit	20	149	330	16	7	PIN	{255}	CaEdit	
 SetupDlg	CaLabel	Text	20	170	330	10	3		CA certificate file, only if the portal uses its own certificate (optional):		
 SetupDlg	CaEdit	Edit	20	181	330	16	7	CAFILE	{255}	Install	
-SetupDlg	Note	Text	20	204	330	22	3		Install the multiOTP Credential Provider before this agent. The token is used once and then deleted from this computer.		
+SetupDlg	Note	Text	20	204	330	22	3		Install SohobOTP Sign-in (SohobOTPSignIn.msi) before this agent. The token is used once and then deleted from this computer.		
 SetupDlg	BottomLine	Line	0	232	370	0	1				
 SetupDlg	Install	PushButton	212	240	66	17	3		&Install	Cancel	
 SetupDlg	Cancel	PushButton	284	240	66	17	3		Cancel	PortalEdit	

@@ -168,9 +168,9 @@ Payload:
 
 Secret: `radius_secret` (this endpoint's RADIUS shared secret).
 
-### Windows policy (`os = windows`): multiOTP Credential Provider
+### Windows policy (`os = windows`): SohobOTP Sign-in
 
-| Field | Type | Registry value under `HKCR\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}` |
+| Field | Type | Registry value under `HKCR\CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}` |
 |---|---|---|
 | `server_url` | string | `multiOTPServers` (the endpoint's own CP gateway URL) |
 | `server_timeout` | int | `multiOTPServerTimeout` (DWORD) |

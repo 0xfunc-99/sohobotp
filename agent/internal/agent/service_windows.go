@@ -59,7 +59,7 @@ func InstallService() error {
 	}
 	s, err := m.CreateService(serviceName, target, mgr.Config{
 		DisplayName: "SohobOTP Agent",
-		Description: "Applies the SohobOTP two-factor policy (multiOTP Credential Provider) of this machine.",
+		Description: "Applies the SohobOTP two-factor policy (SohobOTP Sign-in) of this machine.",
 		StartType:   mgr.StartAutomatic,
 	}, "run")
 	if err != nil {

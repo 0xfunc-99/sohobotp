@@ -222,7 +222,7 @@ final class Endpoints
         $mode = static function (string $key) use ($input): string {
             $value = (string) ($input[$key] ?? '');
             if (!preg_match('/^[0-3][ed]$/', $value)) {
-                throw new ValidationException('Invalid Credential Provider mode.');
+                throw new ValidationException('Invalid Windows sign-in mode.');
             }
             return $value;
         };

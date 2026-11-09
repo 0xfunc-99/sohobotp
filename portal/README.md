@@ -157,7 +157,7 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
   - Linux: which services need a code (SSH, sudo, console, su), the RADIUS server group the
     machines join, RADIUS servers, excluded users and groups (root always), and whether SSH
     keys also need a code;
-  - Windows (multiOTP Credential Provider): sign-in, unlock and UAC modes, a break-glass
+  - Windows (SohobOTP Sign-in): sign-in, unlock and UAC modes, a break-glass
     account, offline cache (opt-in, 1-30 days), UPN format and texts;
   - the check-in interval.
 - **Enrolment tokens** (Enrol endpoints page) are per group, expire (1-720 h), have a use limit,

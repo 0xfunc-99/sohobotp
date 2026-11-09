@@ -25,7 +25,7 @@
             <Component Id="AgentService" Guid="c00567bd-bcac-4ebd-be74-32e001636263" Win64="yes">
               <File Id="AgentExe" Name="sohobotp-agent.exe" Source="sohobotp-agent.exe" KeyPath="yes"/>
               <ServiceInstall Id="AgentServiceInstall" Name="SohobOTPAgent" DisplayName="SohobOTP Agent"
-                              Description="Applies the SohobOTP two-factor policy (multiOTP Credential Provider) of this machine."
+                              Description="Applies the SohobOTP two-factor policy (SohobOTP Sign-in) of this machine."
                               Type="ownProcess" Start="auto" ErrorControl="normal" Arguments="run"/>
               <ServiceControl Id="AgentServiceControl" Name="SohobOTPAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes"/>
             </Component>

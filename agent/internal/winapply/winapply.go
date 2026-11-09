@@ -1,7 +1,8 @@
 // Package winapply writes a SohobOTP Windows policy into the registry values of the
-// multiOTP Credential Provider (HKCR\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}).
+// SohobOTP Sign-in, the Windows sign-in component (HKCR\CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31};
+// a fork of the multiOTP Credential Provider, same value names).
 //
-// The Credential Provider's own installer creates its values; the agent keeps the type of
+// SohobOTP Sign-in's own installer creates its values; the agent keeps the type of
 // every existing value (REG_SZ or REG_DWORD) and only falls back to DWORD for numbers and
 // switches and REG_SZ for text when a value does not exist yet. Every write is snapshotted
 // and restored if any write fails.
@@ -17,7 +18,7 @@ import (
 )
 
 // KeyPath is the Credential Provider's configuration key under HKEY_CLASSES_ROOT.
-const KeyPath = `CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}`
+const KeyPath = `CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}`
 
 // Kind of a registry value.
 type Kind int
@@ -107,7 +108,7 @@ func Apply(reg Registry, p *protocol.WindowsPolicy, secret string, dryRun bool) 
 		return nil, err
 	}
 	if !reg.Installed() {
-		return nil, errors.New("the multiOTP Credential Provider is not installed (registry key missing): install its MSI first")
+		return nil, errors.New("SohobOTP Sign-in is not installed (registry key missing): install SohobOTPSignIn.msi first")
 	}
 	var snaps []saved
 	var changed []string

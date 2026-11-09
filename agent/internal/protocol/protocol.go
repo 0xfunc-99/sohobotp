@@ -133,7 +133,7 @@ type RadiusServer struct {
 	Port int    `json:"port"`
 }
 
-// WindowsPolicy is the policy for os=windows (multiOTP Credential Provider).
+// WindowsPolicy is the policy for os=windows (SohobOTP Sign-in).
 type WindowsPolicy struct {
 	ServerURL           string `json:"server_url"`
 	ServerTimeout       int    `json:"server_timeout"`

@@ -54,7 +54,7 @@
   </fieldset>
 
   <fieldset>
-    <legend>Windows (multiOTP Credential Provider)</legend>
+    <legend>Windows (SohobOTP Sign-in)</legend>
     <label>Sign-in <?= $modes('win_cpus_logon') ?></label>
     <label>Unlock <?= $modes('win_cpus_unlock') ?></label>
     <label>Administrator prompts (UAC) <?= $modes('win_cpus_credui') ?></label>
