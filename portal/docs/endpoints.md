@@ -155,4 +155,4 @@ dashboard.
   with sshd enrols against the appliance and an SSH login needs the code.
 - **4c** Windows applier + CP gateway + offline cache. Cross-compiled and unit-tested
   here (registry behind an interface); a real Windows VM test is needed.
-- **4d** Self-update with signed releases.
+- **4d** Self-update with signed releases. **Done**: see agent/README.md.

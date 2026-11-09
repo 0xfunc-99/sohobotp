@@ -21,6 +21,12 @@
   <label>Description <input name="description" value="<?= e($input['description']) ?>" maxlength="255"></label>
   <label>Check-in interval (seconds) <input name="checkin_interval" value="<?= (int) $input['checkin_interval'] ?>" inputmode="numeric">
     <small>How often agents ask for changes. An endpoint is shown offline after three missed check-ins.</small></label>
+  <label>Agent version
+    <select name="agent_version">
+      <option value="">No automatic update</option>
+      <?php foreach (Portal\AgentReleases::versions() as $version): ?><option value="<?= e($version) ?>"<?= $input['agent_version'] === $version ? ' selected' : '' ?>><?= e($version) ?></option><?php endforeach; ?>
+    </select>
+    <small>Machines with an older agent update themselves to this signed release (never downgraded). Releases are signed offline and added with portal-admin.php agent-release-add.</small></label>
 
   <fieldset>
     <legend>Linux (PAM → RADIUS)</legend>

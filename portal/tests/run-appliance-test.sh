@@ -52,6 +52,8 @@ docker exec "$NAME" php -r '
 docker exec "$NAME" sh -c '
   ok() { echo "ok   $1"; }; fail() { echo "FAIL $1"; FAILED=1; }; FAILED=0
   pgrep -u www-data -f "^php .*worker.php --loop" >/dev/null && ok "worker runs as www-data" || fail "worker user"
+  su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/bin/portal-admin.php anonymous-stats" | grep -q "statistics: off" && ok "anonymous statistics off at start" || fail "anonymous statistics still on"
+  grep -q "^anonymous_stat=0" /etc/multiotp/config/multiotp.ini && ok "engine configuration has anonymous_stat=0" || fail "anonymous_stat not 0 in multiotp.ini"
   pgrep -u root -f "^php .*worker.php --loop" >/dev/null && fail "a worker runs as root" || ok "no worker running as root"
   [ "$(stat -c %U /usr/local/sbin/multiotp-portal-radius)" = root ] && ok "helper owned by root" || fail "helper owner"
   su -s /bin/sh www-data -c "sudo -n /usr/local/sbin/multiotp-portal-radius status" >/dev/null && ok "www-data may run the helper" || fail "sudo helper"

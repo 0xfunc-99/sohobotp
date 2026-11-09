@@ -16,7 +16,7 @@ in those folders also refuses to run on its own.
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
 | 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (tested against Samba AD and OpenLDAP) |
 | 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
-| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **portal and Linux agent done** (agent in `agent/`, tested end to end); Windows agent built, needs a real-machine test; MSI and self-update to do |
+| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **done** (agent in `agent/`: Debian and Rocky tested end to end, signed self-update, MSI for Group Policy); Windows needs a real-machine test |
 | 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
 | 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
 | 7 | Raspberry Pi / virtual appliance image with the portal and worker | |
@@ -194,8 +194,10 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
   (pushed sealed by the agent), answered by the engine's client/server code. The offline
   cache follows the endpoint group (off, or 1-30 days); unknown, pending, disabled and Linux
   endpoints are refused; the last sign-in request is shown on the endpoint page.
-- Not yet: signed self-update (4d), the agent MSI for GPO (agent side), TLS verification in
-  the CP's bundled client (see docs/endpoints.md).
+- **Signed self-update** (4d): `portal-admin.php agent-release-add` stores releases signed
+  offline (`sohobotp-agent release sign`); the endpoint group's *Agent version* rolls them
+  out; agents verify the signature with the release key built into them.
+- Not yet: TLS verification in the CP's bundled client (see docs/endpoints.md).
 
 ## Background worker
 
@@ -275,6 +277,18 @@ and page titles (default `SohobOTP`), `MULTIOTP_PORTAL_COMPANY` the logo's text 
 
 These are applied to every copy: `multiotp.class.php`, the generated `multiotp.php`, and
 the appliance bundles under `raspberry/boot-part/multiotp-tree/usr/local/bin/multiotp/`.
+
+### Anonymous statistics off (all engine copies)
+
+multiOTP sent anonymous usage statistics to `stats.multiotp.net` once a week, from inside
+a login check, with a 5-second timeout: the first VPN/SSH login of the week could be slow or
+time out (seen in the agent end-to-end test), and the appliance contacted an outside server.
+SohobOTP turns this off:
+
+- the engine default `anonymous_stat` is now 0 in every copy (new installations);
+- the appliance start script runs `portal-admin.php anonymous-stats --state=off --once`, which
+  switches existing installations off once and then respects an administrator's choice;
+- `portal-admin.php anonymous-stats [--state=on|off|status]` changes or shows it (audited).
 
 ### Stage 4c (both server copies)
 

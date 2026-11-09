@@ -106,7 +106,23 @@ func (c *Client) Checkin(endpointID string, sign ed25519.PrivateKey, body protoc
 	return &reply, nil
 }
 
+// Download fetches a release binary (signed request). The caller verifies it.
+func (c *Client) Download(endpointID string, sign ed25519.PrivateKey, req protocol.ReleaseRequest, max int64) ([]byte, error) {
+	var data []byte
+	err := c.do("release", req, sign, endpointID, max, func(raw []byte) error { data = raw; return nil })
+	return data, err
+}
+
 func (c *Client) post(action string, payload any, sign ed25519.PrivateKey, endpointID string, out any) error {
+	return c.do(action, payload, sign, endpointID, 1<<20, func(raw []byte) error {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return fmt.Errorf("unexpected answer from the portal: %w", err)
+		}
+		return nil
+	})
+}
+
+func (c *Client) do(action string, payload any, sign ed25519.PrivateKey, endpointID string, max int64, handle func([]byte) error) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -136,9 +152,12 @@ func (c *Client) post(action string, payload any, sign ed25519.PrivateKey, endpo
 		return fmt.Errorf("cannot reach the portal: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
 	if err != nil {
 		return err
+	}
+	if int64(len(raw)) > max {
+		return errors.New("answer from the portal is too large")
 	}
 	if resp.StatusCode != http.StatusOK {
 		apiErr := &APIError{Status: resp.StatusCode, Code: "http_error", Message: http.StatusText(resp.StatusCode)}
@@ -148,8 +167,5 @@ func (c *Client) post(action string, payload any, sign ed25519.PrivateKey, endpo
 		}
 		return apiErr
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("unexpected answer from the portal: %w", err)
-	}
-	return nil
+	return handle(raw)
 }

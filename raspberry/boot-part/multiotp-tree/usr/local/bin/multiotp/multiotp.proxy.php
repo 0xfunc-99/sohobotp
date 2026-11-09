@@ -798,7 +798,7 @@ class Multiotp
       $this->_sql_tables_schema['config']  = array(
           'actual_version'              => "TEXT DEFAULT ''",
           'admin_password_hash'         => "TEXT DEFAULT ''",
-          'anonymous_stat'              => "int(1) DEFAULT 1",
+          'anonymous_stat'              => "int(1) DEFAULT 0", // SohobOTP: off by default (it was sent during logins, 5 s timeout)
           'anonymous_stat_timeout'      => "int(10) DEFAULT 5",
           'anonymous_stat_last_update'  => "int(10) DEFAULT 0",
           'anonymous_stat_random_id'    => "TEXT DEFAULT ''",

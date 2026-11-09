@@ -33,6 +33,9 @@ type State struct {
 	PortalState     string           `json:"portal_state"` // active | pending | disabled | unknown
 	LastCheckin     int64            `json:"last_checkin"`
 	LastError       string           `json:"last_error"`
+	// self-update: a refused version is not retried for an hour
+	UpdateFailedVersion string `json:"update_failed_version,omitempty"`
+	UpdateFailedAt      int64  `json:"update_failed_at,omitempty"`
 }
 
 // Keys are the endpoint's private keys, loaded from the state.
@@ -65,20 +68,29 @@ func NewKeys() (*Keys, error) {
 	return &Keys{Sign: sign, BoxPub: pub, BoxPriv: priv}, nil
 }
 
-// Store writes the keys into the state (they are saved with it).
-func (s *State) Store(k *Keys) {
-	s.SignSeed = b64.EncodeToString(k.Sign.Seed())
-	s.BoxPrivate = b64.EncodeToString(k.BoxPriv[:])
+// Store writes the keys into the state (they are saved with it). Private keys are sealed
+// with the platform protection (DPAPI machine scope on Windows).
+func (s *State) Store(k *Keys) error {
+	seed, err := sealKey(k.Sign.Seed())
+	if err != nil {
+		return fmt.Errorf("cannot protect the signing key: %w", err)
+	}
+	box, err := sealKey(k.BoxPriv[:])
+	if err != nil {
+		return fmt.Errorf("cannot protect the encryption key: %w", err)
+	}
+	s.SignSeed, s.BoxPrivate = seed, box
 	s.BoxPublic = b64.EncodeToString(k.BoxPub[:])
+	return nil
 }
 
 // Keys returns the private keys kept in the state.
 func (s *State) Keys() (*Keys, error) {
-	seed, err := b64.DecodeString(s.SignSeed)
+	seed, err := openKey(s.SignSeed)
 	if err != nil || len(seed) != ed25519.SeedSize {
-		return nil, errors.New("signing key missing or damaged in the agent state")
+		return nil, errors.New("signing key missing, damaged, or protected for another machine")
 	}
-	priv, err1 := b64.DecodeString(s.BoxPrivate)
+	priv, err1 := openKey(s.BoxPrivate)
 	pub, err2 := b64.DecodeString(s.BoxPublic)
 	if err1 != nil || err2 != nil || len(priv) != 32 || len(pub) != 32 {
 		return nil, errors.New("encryption key missing or damaged in the agent state")

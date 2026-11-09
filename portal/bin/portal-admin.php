@@ -12,6 +12,12 @@
  *   php portal/bin/portal-admin.php unlock --username=alice
  *   php portal/bin/portal-admin.php enable|disable --username=alice
  *   php portal/bin/portal-admin.php verify-audit
+ *   php portal/bin/portal-admin.php agent-release-add --file=sohobotp-agent-linux-amd64 --manifest=manifest.json
+ *   php portal/bin/portal-admin.php agent-release-list
+ *       signed agent releases for self-update (sign them OFFLINE: sohobotp-agent release sign)
+ *   php portal/bin/portal-admin.php anonymous-stats [--state=on|off|status] [--once]
+ *       multiOTP's weekly anonymous statistics (sent during a login, off by default in SohobOTP);
+ *       --once does nothing if an administrator already chose (used at appliance start)
  *
  * In Docker:  docker exec -it multiotp php /usr/local/bin/multiotp/portal/bin/portal-admin.php list
  */
@@ -65,8 +71,10 @@ $command = $argv[1] ?? 'help';
 // --name=value options after the command (getopt() would stop at the command word)
 $options = [];
 foreach (array_slice($argv, 2) as $arg) {
-    if (preg_match('/^--(username|role|display-name|email|mfa-user)=(.*)$/s', $arg, $m)) {
+    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest)=(.*)$/s', $arg, $m)) {
         $options[$m[1]] = $m[2];
+    } elseif ('--once' === $arg) {
+        $options['once'] = true;
     } else {
         fail('Unknown option: ' . $arg);
     }
@@ -175,6 +183,46 @@ try {
             } else {
                 fail('Audit trail integrity check FAILED at line ' . $result['broken_at'] . '.', 2);
             }
+            break;
+
+        case 'agent-release-add':
+            $manifest = json_decode((string) @file_get_contents((string) ($options['manifest'] ?? '')), true);
+            if (!is_array($manifest)) {
+                fail('--manifest must be the JSON file written by "sohobotp-agent release sign".');
+            }
+            $m = Portal\AgentReleases::add((string) ($options['file'] ?? ''), $manifest);
+            $audit->record('agent.release_add', 'success', "{$m['os']}/{$m['arch']} {$m['version']}", ['sha256' => $m['sha256'], 'size' => $m['size']]);
+            out("Added agent {$m['version']} for {$m['os']}/{$m['arch']}. Choose it as the target version of an endpoint group to roll it out.");
+            break;
+
+        case 'agent-release-list':
+            foreach (Portal\AgentReleases::all() as $m) {
+                out(sprintf('%-8s %-14s %10d bytes  %s', $m['version'], $m['os'] . '/' . $m['arch'], $m['size'], substr($m['sha256'], 0, 16)));
+            }
+            break;
+
+        case 'anonymous-stats':
+            $engine = Portal\MultiotpService::get();
+            $state = $options['state'] ?? 'status';
+            $marker = Config::ensureDataDir() . '/anonymous-stats.chosen';
+            if ('status' === $state) {
+                out('Anonymous statistics: ' . ($engine->IsAnonymousStat() ? 'on' : 'off') . (is_file($marker) ? ' (chosen by an administrator)' : ''));
+                break;
+            }
+            if (!in_array($state, ['on', 'off'], true)) {
+                fail('--state must be on, off or status.');
+            }
+            if (!empty($options['once']) && is_file($marker)) {
+                out('Anonymous statistics already chosen by an administrator: left ' . ($engine->IsAnonymousStat() ? 'on' : 'off') . '.');
+                break;
+            }
+            'on' === $state ? $engine->EnableAnonymousStat() : $engine->DisableAnonymousStat();
+            if (!$engine->WriteConfigData()) {
+                fail('The multiOTP configuration could not be written.');
+            }
+            file_put_contents($marker, $state . "\n");
+            $audit->record('settings.anonymous_stats', 'success', $state);
+            out('Anonymous statistics turned ' . $state . '.');
             break;
 
         default:

@@ -425,5 +425,47 @@ $effective = Endpoints::effectivePolicy(['linux' => ['services' => ['sshd']], 'w
 check('policy: saved services ["sshd"] stay ["sshd"] (sudo not merged back from the defaults)', ['sshd'] === $effective['linux']['services'] && 60 === $effective['checkin_interval']);
 check('policy form shows only the saved services', ['sshd'] === Endpoints::policyToInput(['linux' => ['services' => ['sshd']]])['linux_services']);
 
+// --- multiOTP anonymous statistics are off by default (they were sent during logins)
+Portal\MultiotpService::reset();
+check('anonymous statistics off on a fresh configuration', false === Portal\MultiotpService::get()->IsAnonymousStat());
+
+// --- Agent releases (self-update): storage, signature, offer, download
+use Portal\AgentReleases;
+
+$relKeys = sodium_crypto_sign_seed_keypair(str_repeat("\x05", 32));
+$relBin = sys_get_temp_dir() . '/sohobotp-agent-0.2.0';
+file_put_contents($relBin, 'agent binary v0.2.0');
+$rel = ['version' => '0.2.0', 'os' => 'linux', 'arch' => 'amd64', 'sha256' => hash_file('sha256', $relBin), 'size' => filesize($relBin)];
+check('release message identical to the Go agent format', "sohobotp-release-v1\nlinux\namd64\n0.2.0\n" . $rel['sha256'] . "\n19" === AgentReleases::message($rel));
+$rel['signature'] = base64_encode(sodium_crypto_sign_detached(AgentReleases::message($rel), sodium_crypto_sign_secretkey($relKeys)));
+putenv('MULTIOTP_PORTAL_RELEASE_KEY=' . base64_encode(sodium_crypto_sign_publickey($relKeys)));
+check('release: file not matching the manifest refused', throws(static fn () => AgentReleases::add($relBin, ['size' => 1] + $rel), ValidationException::class));
+check('release: signature from another key refused when the portal knows the release key', throws(static fn () => AgentReleases::add($relBin, ['signature' => base64_encode(random_bytes(64))] + $rel), ValidationException::class));
+check('release: unsupported platform refused', throws(static fn () => AgentReleases::add($relBin, ['os' => 'darwin'] + $rel), ValidationException::class));
+AgentReleases::add($relBin, $rel);
+check('release stored and listed', ['0.2.0'] === AgentReleases::versions() && null !== AgentReleases::find('0.2.0', 'linux', 'amd64'));
+check('group target must be an existing release', throws(static fn () => $endpoints->saveGroup($laptops['id'], ['name' => 'Laptops', 'agent_version' => '9.9.9'] + $form(['linux_enabled' => ''])), ValidationException::class));
+$endpoints->saveGroup($laptops['id'], ['name' => 'Laptops', 'agent_version' => '0.2.0'] + $form(['linux_enabled' => '']));
+[, $updToken] = $endpoints->createToken($laptops['id'], 'update', 1, 1, 'unit');
+$upd = new AgentSim();
+$updInventory = ['hostname' => 'upd-01', 'os' => 'linux', 'arch' => 'amd64', 'agent_version' => '0.1.0'];
+$upd->id = $endpoints->enroll($upd->enrollRequest($updToken, $updInventory), '192.0.2.95', 'portal.example.test')['endpoint_id'];
+$updCheckin = static function (array $inventory) use ($endpoints, $upd): array {
+    $body = json_encode(['inventory' => $inventory, 'applied' => ['version' => 0, 'status' => 'none']]);
+    $uri = '/portal/agent.php?a=checkin';
+    return $endpoints->checkin($endpoints->authenticate($upd->headers('POST', $uri, $body), 'POST', $uri, $body), json_decode($body, true), '192.0.2.95');
+};
+$offer = $updCheckin($updInventory)['update'];
+check('update offered to an older agent, with the signed manifest', is_array($offer) && '0.2.0' === $offer['version'] && $rel['signature'] === $offer['signature'] && $rel['sha256'] === $offer['sha256']);
+check('no update offered to the same version', null === $updCheckin(['agent_version' => '0.2.0'] + $updInventory)['update']);
+check('no update offered to another architecture', null === $updCheckin(['arch' => 'arm64'] + $updInventory)['update']);
+$updCheckin($updInventory);
+check('release download: only the release for this machine', $relBin !== '' && hash_file('sha256', $endpoints->releaseFile($upd->id, ['version' => '0.2.0', 'os' => 'linux', 'arch' => 'amd64'])) === $rel['sha256']
+    && throws(static fn () => $endpoints->releaseFile($upd->id, ['version' => '0.2.0', 'os' => 'windows', 'arch' => 'amd64']), AgentError::class));
+$endpoints->setStatus($upd->id, false);
+check('release download refused to a disabled endpoint', throws(static fn () => $endpoints->releaseFile($upd->id, ['version' => '0.2.0', 'os' => 'linux', 'arch' => 'amd64']), AgentError::class));
+$endpoints->deleteEndpoint($upd->id);
+putenv('MULTIOTP_PORTAL_RELEASE_KEY');
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

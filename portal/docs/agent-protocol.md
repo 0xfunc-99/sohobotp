@@ -114,7 +114,14 @@ Response 200:
 - `config`: `null` when the agent's applied version is current; otherwise a signed
   configuration envelope (section 4). After a `failed` apply of version N the portal
   sends N again only when it changes (version N+1).
-- `update`: reserved for stage 4d (self-update); ignore it until then.
+- `update`: `null`, or a signed release offered for self-update when the endpoint group has a
+  newer target version for this OS and architecture:
+  `{"version", "os", "arch", "sha256", "size", "signature"}`. The signature (Ed25519, the
+  OFFLINE release key built into the agent, never the portal key) covers
+  `sohobotp-release-v1\n<os>\n<arch>\n<version>\n<sha256 lowercase hex>\n<size>`. The agent
+  ignores versions not newer than its own, verifies the signature before downloading, then
+  downloads with a signed `POST agent.php?a=release` body `{"version", "os", "arch"}`
+  (answer: the binary, `application/octet-stream`) and checks size and SHA-256.
 
 ## 4. Signed configuration
 

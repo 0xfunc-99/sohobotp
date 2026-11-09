@@ -12,6 +12,7 @@ import hashlib, hmac, json, os, struct, subprocess, sys, time
 import pexpect
 
 STEPS = "/tmp/totp-steps.json"
+RADIUS_FILE = next(f for f in ("/etc/raddb/server", "/etc/pam_radius.conf", "/etc/pam_radius_auth.conf") if os.path.exists(f))
 failures = 0
 
 
@@ -95,7 +96,7 @@ def main():
         ok, out = ssh_login("carol", pw("carol"), wrong(seeds, "carol"))
         check("real SSH session: wrong code refused", not ok, out)
         check("sshd -t accepts the generated configuration", subprocess.run(["sshd", "-t"]).returncode == 0)
-        check("RADIUS file readable by root only", oct(os.stat("/etc/pam_radius_auth.conf").st_mode & 0o777) == "0o600")
+        check("RADIUS file readable by root only", oct(os.stat(RADIUS_FILE).st_mode & 0o777) == "0o600")
     elif phase == "radius-down":
         ok, out = pam("sshd", "alice", pw("alice"), code(seeds, "alice"), timeout=120)
         check("RADIUS down: users needing a code are refused", not ok, out)
@@ -119,9 +120,9 @@ def main():
         same, diff = same_tree("/etc/pam.d", "/etc/pam.d.orig")
         check("2FA off: /etc/pam.d identical to before the agent", same, diff)
         check("2FA off: package RADIUS file restored, SSH drop-in removed",
-              open("/etc/pam_radius_auth.conf").read() == open("/etc/pam_radius_auth.conf.test-orig").read()
-              and not os.path.exists("/etc/pam_radius_auth.conf.sohobotp-orig")
-              and not os.path.exists("/etc/ssh/sshd_config.d/50-sohobotp.conf"))
+              open(RADIUS_FILE).read() == open(RADIUS_FILE + ".test-orig").read()
+              and not os.path.exists(RADIUS_FILE + ".sohobotp-orig")
+              and not os.path.exists("/etc/ssh/sshd_config.d/00-sohobotp.conf"))
         ok, out = pam("sshd", "alice", pw("alice"))
         check("2FA off: password alone works", ok, out)
     else:

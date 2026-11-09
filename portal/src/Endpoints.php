@@ -29,6 +29,7 @@ final class Endpoints
     public const CP_MODES = ['0' => 'Local and remote desktop', '1' => 'Remote desktop only', '2' => 'Local only', '3' => 'Off'];
     public const DEFAULT_POLICY = [
         'checkin_interval' => 60,
+        'agent_version' => '', // self-update target ('' = no automatic update)
         'linux' => [
             'enabled'          => true,
             'radius_group_id'  => '',
@@ -225,6 +226,10 @@ final class Endpoints
             }
             return $value;
         };
+        $agentVersion = trim((string) ($input['agent_version'] ?? ''));
+        if ('' !== $agentVersion && (!AgentReleases::validVersion($agentVersion) || !in_array($agentVersion, AgentReleases::versions(), true))) {
+            throw new ValidationException('Choose an agent version that has been added as a release (portal-admin.php agent-release-add).');
+        }
         $excludedAccount = $text('win_excluded_account', 128);
         if ('' !== $excludedAccount && !preg_match('/^[^\\\\\/:*?"<>|]{1,64}\\\\[^\\\\\/:*?"<>|@]{1,64}$/', $excludedAccount)) {
             throw new ValidationException('The excluded Windows account must look like DOMAIN\\user or COMPUTER\\user.');
@@ -232,6 +237,7 @@ final class Endpoints
 
         return [
             'checkin_interval' => $int('checkin_interval', 30, 3600, 'Check-in interval'),
+            'agent_version' => $agentVersion,
             'linux' => [
                 'enabled'          => $linuxEnabled,
                 'radius_group_id'  => $linuxEnabled ? $radiusGroup : ('' !== $radiusGroup && null !== (new Radius())->group($radiusGroup) ? $radiusGroup : ''),
@@ -272,6 +278,7 @@ final class Endpoints
         $d = self::DEFAULT_POLICY;
         return [
             'checkin_interval' => $policy['checkin_interval'] ?? $d['checkin_interval'],
+            'agent_version' => (string) ($policy['agent_version'] ?? ''),
             'linux' => array_replace($d['linux'], (array) ($policy['linux'] ?? [])),
             'windows' => array_replace($d['windows'], (array) ($policy['windows'] ?? [])),
         ];
@@ -281,7 +288,7 @@ final class Endpoints
     public static function policyToInput(array $policy): array
     {
         $policy = self::effectivePolicy($policy);
-        $input = ['checkin_interval' => $policy['checkin_interval']];
+        $input = ['checkin_interval' => $policy['checkin_interval'], 'agent_version' => $policy['agent_version']];
         foreach ($policy['linux'] as $key => $value) {
             $input['linux_' . $key] = $value;
         }
@@ -952,8 +959,39 @@ final class Endpoints
             'checkin_interval' => (int) ($group['policy']['checkin_interval'] ?? 60),
             'state' => 'active',
             'config' => $config,
-            'update' => null,
+            'update' => self::updateOffer($record, $group),
         ];
+    }
+
+    /**
+     * A signed release to offer: the group has a target version, the machine reports an
+     * older one, and a release exists for its OS and architecture. The agent verifies the
+     * release signature itself (release key built in) and never downgrades.
+     */
+    private static function updateOffer(array $record, ?array $group): ?array
+    {
+        $target = (string) ($group['policy']['agent_version'] ?? '');
+        $current = (string) ($record['inventory']['agent_version'] ?? '');
+        if ('' === $target || !AgentReleases::validVersion($current) || version_compare($target, $current, '<=')) {
+            return null;
+        }
+        $m = AgentReleases::find($target, $record['os'], (string) ($record['inventory']['arch'] ?? ''));
+        return null === $m ? null : array_intersect_key($m, array_flip(['version', 'os', 'arch', 'sha256', 'size', 'signature']));
+    }
+
+    /** a=release: the binary of a release for an authenticated, active endpoint. */
+    public function releaseFile(string $id, array $request): string
+    {
+        $endpoint = $this->endpoint($id) ?? throw new AgentError('unknown_endpoint', 401, 'Unknown endpoint.');
+        if ('active' !== $endpoint['status']) {
+            throw new AgentError('disabled', 403, 'This endpoint is not active.');
+        }
+        $version = (string) ($request['version'] ?? '');
+        $m = AgentReleases::validVersion($version) ? AgentReleases::find($version, $endpoint['os'], (string) ($endpoint['inventory']['arch'] ?? '')) : null;
+        if (null === $m || ($request['os'] ?? '') !== $m['os'] || ($request['arch'] ?? '') !== $m['arch']) {
+            throw new AgentError('bad_request', 404, 'No such release for this machine.');
+        }
+        return AgentReleases::file($m);
     }
 
     /**

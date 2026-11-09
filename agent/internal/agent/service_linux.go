@@ -87,14 +87,16 @@ func UninstallService() error {
 	return nil
 }
 
-// RunService runs the loop until SIGTERM (systemd stops it).
-func RunService(a *Agent) error {
+// RunService runs Serve until SIGTERM (systemd stops it).
+func RunService() error {
 	stop := make(chan struct{})
 	go func() {
 		waitForSignal()
 		close(stop)
 	}()
-	a.Run(stop)
+	if Serve(stop) {
+		os.Exit(3) // systemd (Restart=always) starts the updated binary
+	}
 	return nil
 }
 

@@ -68,6 +68,13 @@ final class AgentApi
                     $id = $endpoints->authenticate(self::headers(), 'POST', (string) ($_SERVER['REQUEST_URI'] ?? ''), $body);
                     self::respond(200, $endpoints->checkin($id, $request, $ip));
                     // no break
+                case 'release':
+                    $id = $endpoints->authenticate(self::headers(), 'POST', (string) ($_SERVER['REQUEST_URI'] ?? ''), $body);
+                    $file = $endpoints->releaseFile($id, $request);
+                    header('Content-Type: application/octet-stream');
+                    header('Content-Length: ' . filesize($file));
+                    readfile($file);
+                    exit;
                 default:
                     throw new AgentError('bad_request', 404, 'Unknown action.');
             }

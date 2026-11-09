@@ -723,6 +723,12 @@ else
   cp -af /var/log/multiotp/* /var/multiotp-temp/log/multiotp
   cp -af /var/log/freeradius/* /var/multiotp-temp/log/freeradius
 
+  # SohobOTP: multiOTP's weekly anonymous statistics are sent during a login (5 s timeout);
+  # turn them off once on existing installations, unless an administrator already chose
+  if [ -e /usr/local/bin/multiotp/portal/bin/portal-admin.php ] ; then
+    su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/bin/portal-admin.php anonymous-stats --state=off --once" >> /var/log/multiotp/portal-worker.log 2>&1
+  fi
+
   # multiOTP portal background worker (directory sync, previews, scheduled jobs),
   # run as www-data like PHP-FPM, restarted if it ever stops
   if [ -e /usr/local/bin/multiotp/portal/bin/worker.php ] ; then

@@ -13,7 +13,7 @@
         <?php foreach ($groups as $g): $l = $g['policy']['linux']; $w = $g['policy']['windows']; ?>
           <tr>
             <td><strong><?= e($g['name']) ?></strong><?php if ('' !== $g['description']): ?><br><span class="muted"><?= e($g['description']) ?></span><?php endif; ?></td>
-            <td><?= (int) $g['endpoints'] ?></td>
+            <td><?= (int) $g['endpoints'] ?><?php if ('' !== ($g['policy']['agent_version'] ?? '')): ?><br><span class="muted">agent <?= e($g['policy']['agent_version']) ?></span><?php endif; ?></td>
             <td><?= $l['enabled'] ? e(implode(', ', array_map(static fn (string $s): string => Portal\Endpoints::LINUX_SERVICES[$s] ?? $s, $l['services']))) . ' · RADIUS group ' . e($radiusNames[$l['radius_group_id']] ?? '?') : 'off' ?></td>
             <td>sign-in: <?= e(Portal\Endpoints::CP_MODES[$w['cpus_logon'][0]] ?? $w['cpus_logon']) ?><?= $w['cache_enabled'] ? ' · offline cache ' . (int) $w['cache_days'] . ' days' : '' ?></td>
             <?php if ($canManage): ?>

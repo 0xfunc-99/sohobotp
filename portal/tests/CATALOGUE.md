@@ -115,7 +115,8 @@ State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 32
 | Real DNS (`dns_get_record`) against AD DNS | the computer's address resolves | partial (test uses a resolver map) **P2** |
 | Domain controller down during the 15-minute check | job fails, nothing moved or approved, no loop | partial (AD not configured case) **P2** |
 | Host name longer than 15 characters | matched on the 15-character NetBIOS name | **gap P3** |
-| Real GPO deployment of the MSI | installs, enrols, approved, policy from OU | **manual** (needs Codex's MSI) |
+| MSI contents (service, registry values, hidden token) | as designed | auto (build-msi.sh table check) |
+| Real GPO deployment of the MSI | installs, enrols, token deleted, approved, policy from OU | **manual** (Windows) |
 
 ## 7. Windows sign-in (Credential Provider gateway)
 
@@ -142,7 +143,18 @@ State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 32
 | Policy change from the portal, 2FA off | files follow; restored byte for byte | auto (agent e2e) |
 | Broken config / `sshd -t` fails, unknown PAM layout | rolled back / refused, files untouched | auto (agent unit) |
 | SSH key + code (`ssh_keys_need_code`) | both required | partial (drop-in unit-tested) P2 |
-| RHEL family (Rocky / Alma) | same behaviour | partial (unit-tested layout, no e2e run) P2 |
+| RHEL family (Rocky 9): `include system-auth` turned into a substack, drop-in sorted first | same behaviour as Debian | auto (agent e2e `DISTRO=rocky`, agent unit) |
+
+## 8b. Agent self-update
+
+| Case | Expected | Status |
+|---|---|---|
+| Release signed with the release key, newer version | downloaded, checked, installed, reported | auto (agent e2e) |
+| Release signed with another key / tampered manifest / wrong size or hash | refused, nothing installed | auto (agent e2e, agent unit) |
+| Older or same version offered | ignored (no downgrade) | auto (agent unit, portal unit) |
+| Release download for another platform, disabled endpoint | refused by the portal | auto (portal unit) |
+| Upload of a release with a bad signature when the portal knows the release key | refused | auto (portal unit) |
+| Windows: running exe replaced, service restarts on the new version | yes | **manual** (Windows) |
 
 ## 9. Web security
 

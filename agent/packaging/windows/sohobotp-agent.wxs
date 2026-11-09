@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SohobOTP Agent MSI (Group Policy: Computer Configuration > Software Installation, or
+  msiexec /i sohobotp-agent.msi /qn PORTAL=https://portal.example.com TOKEN=... PIN=... [CAFILE=C:\path\ca.pem]).
+  Installs the agent and its service (LocalSystem, automatic). PORTAL/TOKEN/PIN/CAFILE are
+  written to HKLM\SOFTWARE\SohobOTP\Agent; the service enrols with them on first start and
+  deletes the token. Repair and upgrade keep the existing enrolment.
+  Built with msitools (wixl): agent/packaging/windows/build-msi.sh
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="SohobOTP Agent" Language="1033" Version="$(var.Version)" Manufacturer="Sohobcom"
+           UpgradeCode="fc89f2fa-d510-465b-add5-625a33e9964b">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="SohobOTP Agent" Comments="Two-factor policy agent for SohobOTP" Manufacturer="Sohobcom"/>
+    <Media Id="1" Cabinet="agent.cab" EmbedCab="yes"/>
+
+    <!-- public properties allowed into the elevated install; TOKEN never written to MSI logs -->
+    <Property Id="SecureCustomProperties" Value="PORTAL;TOKEN;PIN;CAFILE"/>
+    <Property Id="MsiHiddenProperties" Value="TOKEN"/>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="SohobOTPDir" Name="SohobOTP">
+          <Directory Id="INSTALLDIR" Name="Agent">
+            <Component Id="AgentService" Guid="c00567bd-bcac-4ebd-be74-32e001636263" Win64="yes">
+              <File Id="AgentExe" Name="sohobotp-agent.exe" Source="sohobotp-agent.exe" KeyPath="yes"/>
+              <ServiceInstall Id="AgentServiceInstall" Name="SohobOTPAgent" DisplayName="SohobOTP Agent"
+                              Description="Applies the SohobOTP two-factor policy (multiOTP Credential Provider) of this machine."
+                              Type="ownProcess" Start="auto" ErrorControl="normal" Arguments="run"/>
+              <ServiceControl Id="AgentServiceControl" Name="SohobOTPAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes"/>
+            </Component>
+            <Component Id="AgentEnrolment" Guid="fe045dd2-8517-4de8-ada0-2fb63ab55e67" Win64="yes">
+              <RegistryKey Root="HKLM" Key="SOFTWARE\SohobOTP\Agent">
+                <RegistryValue Name="Portal" Type="string" Value="[PORTAL]" KeyPath="yes"/>
+                <RegistryValue Name="Token" Type="string" Value="[TOKEN]"/>
+                <RegistryValue Name="Pin" Type="string" Value="[PIN]"/>
+                <RegistryValue Name="CAFile" Type="string" Value="[CAFILE]"/>
+              </RegistryKey>
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Agent" Title="SohobOTP Agent" Level="1">
+      <ComponentRef Id="AgentService"/>
+      <ComponentRef Id="AgentEnrolment"/>
+    </Feature>
+  </Product>
+</Wix>

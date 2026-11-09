@@ -9,20 +9,24 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"multiotp-portal/agent/internal/agent"
-	"multiotp-portal/agent/internal/client"
 	"multiotp-portal/agent/internal/inventory"
 	"multiotp-portal/agent/internal/protocol"
+	"multiotp-portal/agent/internal/release"
 	"multiotp-portal/agent/internal/state"
 )
 
@@ -43,8 +47,13 @@ func main() {
 		err = dryRun(os.Args[2:])
 	case "uninstall":
 		err = uninstall()
+	case "release":
+		err = releaseCmd(os.Args[2:])
 	case "version":
 		fmt.Println("sohobotp-agent", inventory.Version)
+		if release.PublicKey == "" {
+			fmt.Println("self-update: disabled (no release key in this build)")
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -62,7 +71,9 @@ func usage() {
   status             enrolment, last check-in, applied configuration
   apply --dry-run --config FILE   show what a Linux policy would change
   uninstall          remove the PAM changes (Linux), the service and the agent state
-  version`)
+  version
+  release keygen --out DIR                       create the OFFLINE release key (keep it off the portal)
+  release sign --key FILE --file BIN --version X.Y.Z --os linux|windows --arch amd64|arm64 [--out manifest.json]`)
 }
 
 func install(args []string) error {
@@ -81,51 +92,8 @@ func install(args []string) error {
 	if err := agent.RequireAdmin(); err != nil {
 		return err
 	}
-	if state.Exists() {
-		st, _ := state.Load()
-		id := ""
-		if st != nil {
-			id = st.EndpointID
-		}
-		return fmt.Errorf("this machine is already enrolled (endpoint %s): run uninstall first", id)
-	}
-	st := &state.State{PortalURL: *portal, Applied: protocol.Applied{Status: "none"}}
-	if *caFile != "" {
-		// keep a copy next to the state: the original file may move
-		if err := os.MkdirAll(state.Dir(), 0o700); err != nil {
-			return err
-		}
-		dst := filepath.Join(state.Dir(), "portal-ca.pem")
-		if err := copyFile(*caFile, dst); err != nil {
-			return fmt.Errorf("cannot copy the CA file: %w", err)
-		}
-		st.CAFile = dst
-	}
-	c, err := client.New(*portal, st.CAFile)
+	st, err := agent.Enroll(agent.Enrolment{Portal: *portal, Token: *token, Pin: *pin, CAFile: *caFile})
 	if err != nil {
-		return err
-	}
-	keys, err := state.NewKeys()
-	if err != nil {
-		return err
-	}
-	reply, err := c.Enroll(*token, keys, inventory.Collect())
-	if err != nil {
-		return err
-	}
-	portalKey, err := decodeKey(reply.PortalKey)
-	if err != nil {
-		return err
-	}
-	if protocol.Pin(portalKey) != protocol.NormalisePin(*pin) {
-		return errors.New("the portal's key does not match the pin: not enrolled (wrong portal, or someone is intercepting the connection); delete the new endpoint in the portal")
-	}
-	st.EndpointID = reply.EndpointID
-	st.PortalKey = reply.PortalKey
-	st.CheckinInterval = reply.CheckinInterval
-	st.PortalState = "active"
-	st.Store(keys)
-	if err := st.Save(); err != nil {
 		return err
 	}
 	fmt.Printf("Enrolled as endpoint %s.\n", st.EndpointID)
@@ -133,7 +101,7 @@ func install(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := checkinAndReport(a); err != nil {
+	if err := a.CheckinAndReport(); err != nil {
 		fmt.Fprintln(os.Stderr, "first check-in failed (the service retries):", err)
 	}
 	report(a.St)
@@ -153,33 +121,17 @@ func run(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if !*once {
+		return agent.RunService()
+	}
 	a, err := agent.Load()
 	if err != nil {
 		return err
 	}
-	if !*once {
-		return agent.RunService(a)
-	}
-	if err := checkinAndReport(a); err != nil {
+	if err := a.CheckinAndReport(); err != nil {
 		return err
 	}
 	report(a.St)
-	return nil
-}
-
-// checkinAndReport checks in once and, when a configuration was applied, reports the
-// result to the portal right away.
-func checkinAndReport(a *agent.Agent) error {
-	before := a.St.Applied.Version
-	if _, err := a.Once(); err != nil {
-		return err
-	}
-	if a.St.Applied.Version != before {
-		time.Sleep(time.Second)
-		if _, err := a.Once(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -254,29 +206,65 @@ func uninstall() error {
 	return nil
 }
 
-func decodeKey(s string) ([]byte, error) {
-	key, err := base64Decode(s)
-	if err != nil || len(key) != 32 {
-		return nil, errors.New("the portal sent an invalid key")
+// releaseCmd: offline release signing for self-update (stage 4d).
+func releaseCmd(args []string) error {
+	if len(args) == 0 {
+		return errors.New("release keygen|sign")
 	}
-	return key, nil
+	switch args[0] {
+	case "keygen":
+		fs := flag.NewFlagSet("release keygen", flag.ContinueOnError)
+		out := fs.String("out", "", "folder for release-private.key")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *out == "" {
+			return errors.New("--out is required")
+		}
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(*out, "release-private.key")
+		if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(priv.Seed())+"\n"), 0o600); err != nil {
+			return err
+		}
+		fmt.Printf("Private key: %s (keep it offline, never on the portal)\nPublic key (build agents with it): %s\n", path, base64.StdEncoding.EncodeToString(pub))
+		return nil
+	case "sign":
+		fs := flag.NewFlagSet("release sign", flag.ContinueOnError)
+		keyFile := fs.String("key", "", "release-private.key")
+		file := fs.String("file", "", "agent binary to sign")
+		version := fs.String("version", "", "version built into the binary (x.y.z)")
+		goos := fs.String("os", "", "linux or windows")
+		arch := fs.String("arch", "", "amd64 or arm64")
+		out := fs.String("out", "", "manifest file (default: stdout)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		rawKey, err := os.ReadFile(*keyFile)
+		if err != nil {
+			return err
+		}
+		seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(rawKey)))
+		if err != nil || len(seed) != ed25519.SeedSize {
+			return errors.New("invalid release key file")
+		}
+		data, err := os.ReadFile(*file)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		m := &release.Manifest{Version: *version, OS: *goos, Arch: *arch, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+		if err := release.Sign(m, ed25519.NewKeyFromSeed(seed)); err != nil {
+			return err
+		}
+		raw, _ := json.MarshalIndent(m, "", "  ")
+		if *out == "" {
+			fmt.Println(string(raw))
+			return nil
+		}
+		return os.WriteFile(*out, append(raw, '\n'), 0o644)
+	}
+	return errors.New("release keygen|sign")
 }
-
-func copyFile(from, to string) error {
-	in, err := os.Open(from)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
-}
-
-func base64Decode(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }

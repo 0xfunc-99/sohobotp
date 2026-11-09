@@ -91,7 +91,9 @@ func setup(t *testing.T) (*Agent, *fakePortal, *recordApplier) {
 	ca := filepath.Join(t.TempDir(), "ca.pem")
 	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)
 	st := &state.State{PortalURL: srv.URL, CAFile: ca, EndpointID: "e0000000000000000001", PortalKey: b64.EncodeToString(portalPub), Applied: protocol.Applied{Status: "none"}}
-	st.Store(keys)
+	if err := st.Store(keys); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}

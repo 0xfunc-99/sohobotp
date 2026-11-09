@@ -1,9 +1,11 @@
 #!/bin/sh
 # Linux agent end-to-end test against the production image (portal + nginx + FreeRADIUS +
 # worker) and a Debian endpoint with SSH, sudo and pam_radius.
-# Usage (from the repository root):  sh agent/tests/e2e-linux.sh
+# Usage (from the repository root):  sh agent/tests/e2e-linux.sh            (Debian 12)
+#                                     DISTRO=rocky sh agent/tests/e2e-linux.sh (Rocky Linux 9)
 set -eu
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+DISTRO="${DISTRO:-debian}"
 RUN="sohobotp-e2e-$$"
 APP="$RUN-portal"
 CLI="$RUN-debian"
@@ -12,11 +14,27 @@ STATUS=0
 
 sh "$REPO/agent/tests/run-in-docker.sh" >/dev/null
 case "$(docker info --format '{{.Architecture}}')" in
-  aarch64|arm64) BIN="$REPO/agent/dist/sohobotp-agent-linux-arm64" ;;
-  *) BIN="$REPO/agent/dist/sohobotp-agent-linux-amd64" ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) ARCH=amd64 ;;
 esac
+# Self-update test material: a TEST release key, agents 0.1.0 and 0.2.0 built with it,
+# 0.2.0 signed with it, and a 0.3.0 signed with ANOTHER key (must be refused by the agent).
+E2E="$REPO/agent/dist/e2e"
+rm -rf "$E2E" && mkdir -p "$E2E"
+docker run --rm -v "$REPO":/src -w /src/agent -e GOFLAGS=-buildvcs=false -e ARCH="$ARCH" \
+  -v sohobotp-go-cache:/go/pkg/mod golang:1.22.10-bookworm sh -euc '
+    go run ./cmd/sohobotp-agent release keygen --out dist/e2e | sed -n "s/^Public key (build agents with it): //p" > dist/e2e/release.pub
+    mkdir -p dist/e2e/other && go run ./cmd/sohobotp-agent release keygen --out dist/e2e/other >/dev/null
+    KEY=$(cat dist/e2e/release.pub)
+    for v in 0.1.0 0.2.0 0.3.0; do
+      CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -ldflags "-s -w -X multiotp-portal/agent/internal/inventory.Version=$v -X multiotp-portal/agent/internal/release.PublicKey=$KEY" \
+        -o dist/e2e/agent-$v ./cmd/sohobotp-agent
+    done
+    go run ./cmd/sohobotp-agent release sign --key dist/e2e/release-private.key --file dist/e2e/agent-0.2.0 --version 0.2.0 --os linux --arch $ARCH --out dist/e2e/agent-0.2.0.json
+    go run ./cmd/sohobotp-agent release sign --key dist/e2e/other/release-private.key --file dist/e2e/agent-0.3.0 --version 0.3.0 --os linux --arch $ARCH --out dist/e2e/agent-0.3.0.json'
+BIN="$E2E/agent-0.1.0"
 docker build -q -t multiotp-portal-appliance:dev "$REPO" >/dev/null
-docker build -q -t sohobotp-test-debian "$REPO/agent/tests/docker/debian" >/dev/null
+docker build -q -t "sohobotp-test-$DISTRO" "$REPO/agent/tests/docker/$DISTRO" >/dev/null
 docker network create "$RUN" >/dev/null
 cleanup() { docker rm -f "$APP" "$CLI" >/dev/null 2>&1 || true; docker network rm "$RUN" >/dev/null 2>&1 || true; rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -47,10 +65,11 @@ echo "$SETUP" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdi
 TOKEN="$(echo "$SETUP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
 PIN="$(echo "$SETUP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pin"])')"
 
-docker run -d --name "$CLI" --network "$RUN" -v "$BIN":/opt/sohobotp-agent:ro -v "$TMP":/e2e:ro \
-  -v "$REPO/agent/tests/e2e/client.py":/opt/client.py:ro sohobotp-test-debian >/dev/null
+docker run -d --name "$CLI" --network "$RUN" -v "$BIN":/opt/sohobotp-agent-0.1.0:ro -v "$TMP":/e2e:ro \
+  -v "$REPO/agent/tests/e2e/client.py":/opt/client.py:ro "sohobotp-test-$DISTRO" >/dev/null
 client() { docker exec "$CLI" python3 /opt/client.py "$1" /e2e/seeds.json || STATUS=1; }
-agent() { docker exec "$CLI" /opt/sohobotp-agent "$@"; }
+docker exec "$CLI" install -m 0755 /opt/sohobotp-agent-0.1.0 /usr/local/sbin/sohobotp-agent
+agent() { docker exec "$CLI" /usr/local/sbin/sohobotp-agent "$@"; }
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; STATUS=1; fi; }
 
 echo "== enrolment"
@@ -63,7 +82,7 @@ check "state readable by root only" "[ \"\$(docker exec $CLI stat -c %a /etc/soh
 check "first configuration applied" "agent status | grep -q 'version 1, applied'"
 ENDPOINT="$(portal endpoint)"
 echo "$ENDPOINT" | python3 -c 'import json,sys; e=json.load(sys.stdin); print("   portal: config", e.get("config"), "applied", e.get("applied"), "radius", e.get("radius_client_id"), e.get("radius_error"))'
-check "portal sees the inventory and the applied version" "echo '$ENDPOINT' | python3 -c 'import json,sys; e=json.load(sys.stdin); sys.exit(0 if e[\"inventory\"][\"os_name\"].startswith(\"Debian\") and e[\"applied\"][\"version\"]==1 and e[\"applied\"][\"status\"]==\"applied\" and e[\"radius_client_id\"] else 1)'"
+check "portal sees the inventory and the applied version" "echo '$ENDPOINT' | python3 -c 'import json,sys; e=json.load(sys.stdin); sys.exit(0 if e[\"inventory\"][\"os_name\"].split()[0] in (\"Debian\", \"Rocky\") and e[\"applied\"][\"version\"]==1 and e[\"applied\"][\"status\"]==\"applied\" and e[\"radius_client_id\"] else 1)'"
 printf 'Waiting for FreeRADIUS to apply the endpoint client'
 for i in $(seq 1 60); do
   [ "$(portal radius-applied)" = yes ] && { echo " ok"; break; }
@@ -90,12 +109,28 @@ check "portal policy changed to SSH only" "portal policy ssh-only | grep -q 'pol
 check "agent picks up version 2" "agent run --once | grep -q 'version 2, applied'"
 client sudo-removed
 
+echo "== self-update with signed releases"
+for v in 0.2.0 0.3.0; do
+  docker cp "$E2E/agent-$v" "$APP:/tmp/agent-$v" && docker cp "$E2E/agent-$v.json" "$APP:/tmp/agent-$v.json"
+  docker exec "$APP" chmod 0644 "/tmp/agent-$v" "/tmp/agent-$v.json"
+  check "portal stores release $v" "docker exec $APP su -s /bin/sh www-data -c 'php /usr/local/bin/multiotp/portal/bin/portal-admin.php agent-release-add --file=/tmp/agent-$v --manifest=/tmp/agent-$v.json' | grep -q Added"
+done
+check "portal policy: target 0.3.0 (signed with another key)" "portal policy update-0.3.0 | grep -q 'policy saved'"
+OUT="$(agent run --once 2>&1 || true)"
+check "agent refuses the release signed with another key" "echo \"\$OUT\" | grep -q 'update to 0.3.0 refused: release signature' && agent version | grep -q 'sohobotp-agent 0.1.0'"
+check "portal policy: target 0.2.0" "portal policy update-0.2.0 | grep -q 'policy saved'"
+OUT="$(agent run --once 2>&1 || true)"
+check "agent downloads, verifies and installs 0.2.0" "agent version | grep -q 'sohobotp-agent 0.2.0'"
+agent run --once >/dev/null 2>&1 || true
+check "portal sees the new agent version" "portal endpoint | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)[\"inventory\"][\"agent_version\"]==\"0.2.0\" else 1)'"
+check "updated agent keeps working (SSH still needs the code)" "docker exec $CLI python3 /opt/client.py sudo-removed /e2e/seeds.json >/dev/null 2>&1"
+
 echo "== 2FA turned off in the portal"
 check "portal policy changed to 2FA off" "portal policy off | grep -q 'policy saved'"
-check "agent picks up version 3" "agent run --once | grep -q 'version 3, applied'"
+check "agent picks up the 2FA-off configuration" "agent run --once | grep -q 'version [0-9]*, applied'"
 client disabled
 
 echo "== uninstall"
-check "uninstall removes the agent state" "docker exec $CLI sh -c '/opt/sohobotp-agent uninstall >/dev/null 2>&1; ! test -e /etc/sohobotp-agent'"
-[ "$STATUS" = 0 ] && echo "All Linux agent end-to-end checks passed." || echo "Some Linux agent end-to-end checks FAILED."
+check "uninstall removes the agent state and binary" "docker exec $CLI sh -c '/usr/local/sbin/sohobotp-agent uninstall >/dev/null 2>&1; ! test -e /etc/sohobotp-agent && ! test -e /usr/local/sbin/sohobotp-agent'"
+[ "$STATUS" = 0 ] && echo "All Linux agent end-to-end checks passed ($DISTRO)." || echo "Some Linux agent end-to-end checks FAILED ($DISTRO)."
 exit $STATUS

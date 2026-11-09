@@ -89,43 +89,69 @@ func UninstallService() error {
 }
 
 // RunService runs under the Service Control Manager, or in the console when started by hand.
-func RunService(a *Agent) error {
+func RunService() error {
 	isService, err := svc.IsWindowsService()
 	if err != nil {
 		return err
 	}
 	if !isService {
-		stop := make(chan struct{})
-		a.Run(stop)
+		_ = Serve(make(chan struct{}))
 		return nil
 	}
 	OpenLogFile()
-	return svc.Run(serviceName, &handler{a: a})
+	ensureRecovery()
+	return svc.Run(serviceName, &handler{})
 }
 
-type handler struct{ a *Agent }
+type handler struct{}
 
 func (h *handler) Execute(_ []string, requests <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	status <- svc.Status{State: svc.StartPending}
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	restart := false
 	go func() {
-		h.a.Run(stop)
+		restart = Serve(stop)
 		close(done)
 	}()
 	status <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	for req := range requests {
-		switch req.Cmd {
-		case svc.Interrogate:
-			status <- req.CurrentStatus
-		case svc.Stop, svc.Shutdown:
-			status <- svc.Status{State: svc.StopPending}
-			close(stop)
-			<-done
+	for {
+		select {
+		case <-done:
+			if restart {
+				// a non-zero exit is a failure: the recovery action starts the updated binary
+				return false, 1
+			}
 			return false, 0
+		case req := <-requests:
+			switch req.Cmd {
+			case svc.Interrogate:
+				status <- req.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				status <- svc.Status{State: svc.StopPending}
+				close(stop)
+				<-done
+				return false, 0
+			}
 		}
 	}
-	return false, 0
+}
+
+// ensureRecovery makes the service restart after a failure, also when it was installed by
+// the MSI (wixl cannot write the failure-actions table).
+func ensureRecovery() {
+	m, err := mgr.Connect()
+	if err != nil {
+		return
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(serviceName)
+	if err != nil {
+		return
+	}
+	defer s.Close()
+	_ = s.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 10 * time.Second}}, 86400)
+	_ = s.SetRecoveryActionsOnNonCrashFailures(true)
 }
 
 func sameFile(a, b string) bool {

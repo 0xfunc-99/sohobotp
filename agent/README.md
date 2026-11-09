@@ -23,6 +23,20 @@ sohobotp-agent install --portal https://portal.example.com --token <TOKEN> --pin
 Add `--ca-file ca.pem` when the portal certificate is not publicly trusted (the appliance's
 self-signed one). Verification is never switched off.
 
+**Group Policy (Windows):** deploy `sohobotp-agent.msi` (Computer Configuration → Software
+Installation, with a transform setting the properties, or a startup script):
+
+```powershell
+msiexec /i sohobotp-agent.msi /qn PORTAL=https://portal.example.com TOKEN=<TOKEN> PIN=<PIN> [CAFILE=C:\path\ca.pem]
+```
+
+The MSI installs the agent and the `SohobOTPAgent` service and writes the values to
+`HKLM\SOFTWARE\SohobOTP\Agent`; the service enrols on its first start and **deletes the
+token**. `TOKEN` is hidden from MSI logs. Use an enrolment token with *Active Directory
+approval*: anyone can read a GPO's files, so a copied token must not admit unknown machines.
+Build: `sh agent/packaging/windows/build-msi.sh` (msitools in Docker). The MSI has no
+upgrade table (wixl limitation): new versions arrive by self-update.
+
 Other commands: `status`, `run --once` (check in now), `apply --dry-run --config FILE`
 (Linux: show what a policy would change), `uninstall`, `version`.
 
@@ -32,10 +46,10 @@ Other commands: `status`, `run --once` (check in now), `apply --dry-run --config
 
 | File | Content |
 |---|---|
-| `/etc/pam.d/sshd`, `sudo`, `login`, `su` (as the policy says) | two lines added after the password step: a marker and `auth include sohobotp-2fa` |
+| `/etc/pam.d/sshd`, `sudo`, `login`, `su` (as the policy says) | two lines added after the password step: a marker and `auth include sohobotp-2fa`. On RHEL an `auth include system-auth` step becomes `auth substack system-auth` (its `sufficient pam_unix` would otherwise end the stack before the code); the original line is kept in the marker and restored |
 | `/etc/pam.d/sohobotp-2fa` | exclusions (root always; users; groups) that skip **only** the code, then `pam_radius_auth.so ... prompt=code force_prompt` |
-| `/etc/pam_radius_auth.conf` (`/etc/raddb/server` on RHEL) | RADIUS servers and this machine's own secret, root 0600; a pre-existing file is kept as `.sohobotp-orig` |
-| `/etc/ssh/sshd_config.d/50-sohobotp.conf` | `KbdInteractiveAuthentication yes`, `PasswordAuthentication no` (passwords go through PAM so the code is asked), optional `AuthenticationMethods publickey,keyboard-interactive` |
+| `/etc/pam_radius_auth.conf` (Debian/Ubuntu), `/etc/pam_radius.conf` (RHEL/Rocky 9) or `/etc/raddb/server` (older RHEL) | RADIUS servers and this machine's own secret, root 0600; a pre-existing file is kept as `.sohobotp-orig` |
+| `/etc/ssh/sshd_config.d/00-sohobotp.conf` (sorts first: sshd keeps the first value, and RHEL's `50-redhat.conf` turns keyboard-interactive off) | `KbdInteractiveAuthentication yes`, `PasswordAuthentication no` (passwords go through PAM so the code is asked), optional `AuthenticationMethods publickey,keyboard-interactive` |
 
 Every apply is snapshotted; any failure (including `sshd -t`) restores all files. Turning
 2FA off in the portal restores the files byte for byte.
@@ -63,7 +77,24 @@ the Credential Provider; failures restore the previous values.
   in configurations are sealed to its X25519 key. Private keys never leave the machine.
 - When the portal is unreachable, refuses the machine (disabled) or keeps it pending, the
   last applied configuration stays: 2FA is never removed by a failure.
-- Windows keys are protected by the folder ACL (DPAPI encryption at rest is planned).
+- Windows private keys are encrypted with DPAPI (machine scope) inside a folder readable by
+  SYSTEM and Administrators only: a copied state file is useless on another machine.
+- Self-update (below) only installs releases signed with the offline release key built into
+  the agent, never older versions, and only if size and SHA-256 match.
+
+## Self-update (signed releases)
+
+1. Once, on an offline machine: `sohobotp-agent release keygen --out /secure/folder`. Keep
+   `release-private.key` there; build agents with the printed public key:
+   `AGENT_VERSION=x.y.z RELEASE_PUBLIC_KEY=<key> sh agent/tests/run-in-docker.sh`.
+2. For each release and platform: `sohobotp-agent release sign --key release-private.key
+   --file sohobotp-agent-linux-amd64 --version x.y.z --os linux --arch amd64 --out manifest.json`.
+3. On the portal: `portal-admin.php agent-release-add --file=... --manifest=...`
+   (set `MULTIOTP_PORTAL_RELEASE_KEY` to the public key so the portal also refuses bad uploads).
+4. Choose the version as the endpoint group's **Agent version**. Older agents download it
+   through the signed agent API, verify it, replace their binary atomically and restart
+   (systemd `Restart=always`; Windows recovery actions). A refused release is retried after
+   an hour at the earliest; the reason is in `status`.
 
 ## Tests
 
@@ -72,12 +103,14 @@ sh agent/tests/run-in-docker.sh   # gofmt, go vet (Linux + Windows), race tests,
 sh agent/tests/e2e-linux.sh       # production image + Debian endpoint, real FreeRADIUS and SSH
 ```
 
-The end-to-end test (35 checks) covers:
+The end-to-end test (43 checks; `DISTRO=rocky` runs it on Rocky Linux 9) covers:
 - enrolment (wrong pin refused, TLS with a test CA);
 - password + code over SSH and sudo, wrong code, wrong password, a real SSH session;
 - excluded user, break-glass group, root;
 - RADIUS down (only users needing a code refused) and back;
 - a policy change from the portal (sudo restored byte for byte), 2FA off (all files restored);
+- self-update: a release signed with another key refused, a signed one installed and
+  reported, the updated agent still enforcing the policy;
 - uninstall.
 
 Unit tests reproduce every libsodium protocol vector and cover the PAM and registry appliers
@@ -100,9 +133,15 @@ Windows yet. Before production, on a Windows 11 / Server 2022 test machine:
    registry. Disable the endpoint; sign-in through the gateway is refused.
 6. `services.msc`: SohobOTP Agent running, restarts after being killed; `uninstall` removes
    it.
+7. MSI: `msiexec /i sohobotp-agent.msi /qn PORTAL=... TOKEN=... PIN=...` enrols on its own;
+   `HKLM\SOFTWARE\SohobOTP\Agent` no longer has `Token` afterwards; the key fields in
+   `agent.json` start with `dpapi:`.
+8. Self-update: set a newer signed version as the group's target; the service restarts on it.
 
 ## Not done yet
 
-- Windows: real-machine test (above), DPAPI for the key file, MSI for Group Policy.
-- RHEL-family end-to-end run (the applier is unit-tested with the RHEL layout).
-- Signed self-update (stage 4d).
+- Windows: the real-machine test above (the MSI, DPAPI, registry writing and the service
+  are built and unit-tested, but have not run on Windows).
+- MSI upgrade table (wixl cannot write it): versions are upgraded by self-update.
+- Automatic rollback if an updated agent cannot start (the service manager keeps restarting
+  it; set the previous signed version as the target again if that happens).

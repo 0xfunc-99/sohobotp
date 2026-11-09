@@ -27,7 +27,7 @@ function form(array $over = []): array
     }
     return $over + [
         'name' => GROUP, 'checkin_interval' => '30', 'linux_enabled' => '1', 'linux_radius_group_id' => $radiusGroup,
-        'linux_radius_servers' => '', 'linux_timeout' => '10', 'linux_services' => ['sshd', 'sudo'],
+        'linux_radius_servers' => '', 'linux_timeout' => '5', 'linux_services' => ['sshd', 'sudo'],
         'linux_excluded_users' => 'deploy', 'linux_excluded_groups' => 'mfa-breakglass', 'linux_ssh_keys_need_code' => '',
         'win_cpus_logon' => '0e', 'win_cpus_unlock' => '0e', 'win_cpus_credui' => '0e', 'win_excluded_account' => '',
         'win_cache_days' => '7', 'win_timeout_unlock' => '0', 'win_server_timeout' => '5',
@@ -91,7 +91,12 @@ switch ($argv[1] ?? '') {
         }
         break;
     case 'policy':
-        $presets = ['ssh-only' => ['linux_services' => ['sshd']], 'off' => ['linux_enabled' => '']];
+        $presets = [
+            'ssh-only' => ['linux_services' => ['sshd']],
+            'update-0.3.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.3.0'],
+            'update-0.2.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.2.0'],
+            'off' => ['linux_enabled' => ''],
+        ];
         $over = $presets[$argv[2] ?? ''] ?? throw new InvalidArgumentException('policy presets: ' . implode(', ', array_keys($presets)));
         $g = group();
         (new Endpoints())->saveGroup($g['id'], form($over));

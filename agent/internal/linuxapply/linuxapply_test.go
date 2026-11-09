@@ -303,8 +303,12 @@ func TestRHELLayout(t *testing.T) {
 	if !strings.Contains(read(t, dir, "/etc/pam.d/sshd"), "auth       substack     password-auth\n"+marker+"\n"+includeLine+"\nauth       include      postlogin") {
 		t.Fatal("RHEL include misplaced")
 	}
-	if !strings.Contains(read(t, dir, "/etc/pam.d/"+moduleName), "conf=/etc/raddb/server") || !exists(dir, "/etc/raddb/server") {
-		t.Fatal("RHEL RADIUS file path")
+	if !strings.Contains(read(t, dir, "/etc/pam.d/"+moduleName), "conf=/etc/pam_radius.conf") || !exists(dir, "/etc/pam_radius.conf") {
+		t.Fatal("RHEL 9 RADIUS file path (/etc/pam_radius.conf)")
+	}
+	old := root(t, map[string]string{"/etc/raddb/server": "# EL7\n", "/etc/redhat-release": "CentOS Linux release 7.9\n"})
+	if f := (&Applier{Root: old}).RadiusFile(); f != "/etc/raddb/server" {
+		t.Fatalf("older RHEL keeps /etc/raddb/server, got %s", f)
 	}
 }
 
@@ -315,5 +319,60 @@ func TestMissingModuleRefused(t *testing.T) {
 	}
 	if read(t, dir, "/etc/pam.d/sshd") != debianSSHD {
 		t.Fatal("changed although the module is missing")
+	}
+}
+
+func TestDropInSortsBeforeDistributionFiles(t *testing.T) {
+	dir := root(t, map[string]string{
+		"/etc/pam.d/sshd": rhelSSHD, "/etc/ssh/sshd_config": sshdConfig, "/etc/redhat-release": "Rocky Linux release 9.4\n",
+		"/etc/ssh/sshd_config.d/50-redhat.conf":   "ChallengeResponseAuthentication no\n",
+		"/etc/ssh/sshd_config.d/50-sohobotp.conf": managedHeader + "\nold name\n",
+		"/usr/lib64/security/pam_radius_auth.so":  "",
+	})
+	p := policy()
+	p.Services = []string{"sshd"}
+	if _, err := (&Applier{Root: dir, Sys: &fakeSystem{}}).Apply(p, secret); err != nil {
+		t.Fatal(err)
+	}
+	names, _ := os.ReadDir(filepath.Join(dir, "/etc/ssh/sshd_config.d"))
+	if len(names) != 2 || names[0].Name() != "00-sohobotp.conf" || names[1].Name() != "50-redhat.conf" {
+		t.Fatalf("the agent drop-in must be read first and the old name removed: %v", names)
+	}
+}
+
+const rhelSudo = `#%PAM-1.0
+auth       include      system-auth
+account    include      system-auth
+password   include      system-auth
+session    include      system-auth
+`
+
+// On RHEL, system-auth has "auth sufficient pam_unix.so": with "include" a right password
+// would end the stack before the code is asked. The line must become a substack.
+func TestRHELIncludeBecomesSubstackAndIsRestored(t *testing.T) {
+	dir := root(t, map[string]string{
+		"/etc/pam.d/sshd": rhelSSHD, "/etc/pam.d/sudo": rhelSudo, "/etc/ssh/sshd_config": sshdConfig,
+		"/etc/redhat-release": "Rocky Linux release 9.4\n", "/usr/lib64/security/pam_radius_auth.so": "",
+	})
+	a := &Applier{Root: dir, Sys: &fakeSystem{}}
+	if _, err := a.Apply(policy(), secret); err != nil {
+		t.Fatal(err)
+	}
+	sudo := read(t, dir, "/etc/pam.d/sudo")
+	want := "#%PAM-1.0\n" + marker + " - replaced: auth       include      system-auth\nauth       substack      system-auth\n" + includeLine + "\naccount    include      system-auth\n"
+	if !strings.HasPrefix(sudo, want) {
+		t.Fatalf("sudo:\n%s", sudo)
+	}
+	if strings.Contains(sudo, "account    substack") {
+		t.Fatal("only the auth line may change")
+	}
+	if again, err := a.Apply(policy(), secret); err != nil || len(again) != 0 {
+		t.Fatalf("second apply must change nothing: %+v %v", again, err)
+	}
+	if _, err := a.Apply(&protocol.LinuxPolicy{Enabled: false}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, dir, "/etc/pam.d/sudo") != rhelSudo || read(t, dir, "/etc/pam.d/sshd") != rhelSSHD {
+		t.Fatal("RHEL files not restored byte for byte")
 	}
 }

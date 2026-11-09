@@ -31,6 +31,8 @@ type Agent struct {
 	Log     func(format string, args ...any)
 	now     func() time.Time
 	backoff time.Duration
+	// Updated is the version installed by a self-update; the process must restart.
+	Updated string
 }
 
 // Load prepares the agent from its saved state.
@@ -80,6 +82,9 @@ func (a *Agent) Once() (time.Duration, error) {
 	}
 	if reply.Config != nil {
 		a.handle(reply.Config)
+	}
+	if reply.Update != nil && a.Updated == "" {
+		a.update(reply.Update)
 	}
 	if err := a.St.Save(); err != nil {
 		return a.nextBackoff(), err
@@ -135,8 +140,9 @@ func (a *Agent) nextBackoff() time.Duration {
 	return a.backoff
 }
 
-// Run checks in until stop is closed. A configuration just applied is reported at once.
-func (a *Agent) Run(stop <-chan struct{}) {
+// Run checks in until stop is closed, or until a self-update needs a restart (returns true).
+// A configuration just applied is reported at once.
+func (a *Agent) Run(stop <-chan struct{}) bool {
 	a.Log("SohobOTP agent %s started for endpoint %s (%s)", inventory.Version, a.St.EndpointID, a.St.PortalURL)
 	for {
 		applied := a.St.Applied.Version
@@ -146,10 +152,13 @@ func (a *Agent) Run(stop <-chan struct{}) {
 		} else if a.St.Applied.Version != applied {
 			wait = time.Second // report the result right away
 		}
+		if a.Updated != "" {
+			return true // the service manager starts the new version
+		}
 		select {
 		case <-stop:
 			a.Log("SohobOTP agent stopped")
-			return
+			return false
 		case <-time.After(wait):
 		}
 	}

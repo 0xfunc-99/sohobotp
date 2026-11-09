@@ -79,6 +79,25 @@ type CheckinReply struct {
 	CheckinInterval int       `json:"checkin_interval"`
 	State           string    `json:"state"` // active | pending
 	Config          *Envelope `json:"config"`
+	Update          *Update   `json:"update"`
+}
+
+// Update offers a signed agent release (stage 4d). The signature is checked against the
+// release key built into the agent, never against the portal key.
+type Update struct {
+	Version   string `json:"version"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	Signature string `json:"signature"`
+}
+
+// ReleaseRequest is the body of a=release (signed): which binary to download.
+type ReleaseRequest struct {
+	Version string `json:"version"`
+	OS      string `json:"os"`
+	Arch    string `json:"arch"`
 }
 
 // Envelope is a signed configuration (section 4).

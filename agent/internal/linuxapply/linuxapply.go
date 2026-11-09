@@ -27,7 +27,10 @@ const (
 	marker        = "# SohobOTP two-factor (managed by sohobotp-agent, do not edit)"
 	includeLine   = "auth include " + moduleName
 	managedHeader = "# Managed by the SohobOTP agent - do not edit, changes are overwritten."
-	sshDropIn     = "/etc/ssh/sshd_config.d/50-sohobotp.conf"
+	// sshd keeps the FIRST value it reads: the drop-in must sort before the distribution's own
+	// (RHEL's 50-redhat.conf sets ChallengeResponseAuthentication no).
+	sshDropIn       = "/etc/ssh/sshd_config.d/00-sohobotp.conf"
+	legacySSHDropIn = "/etc/ssh/sshd_config.d/50-sohobotp.conf"
 )
 
 // Services the agent may protect, in a fixed order.
@@ -39,6 +42,10 @@ var (
 	secretRe   = regexp.MustCompile(`^[\x21-\x7e]{8,128}$`)
 	passwordRe = regexp.MustCompile(`^\s*(@include\s+common-auth\b|auth\s+(include|substack)\s+(common-auth|password-auth|system-auth|system-login)\b)`)
 	includeRe  = regexp.MustCompile(`(?mi)^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$`)
+	// "auth include system-auth": a "sufficient" success inside system-auth would end the
+	// whole stack before the code is asked (RHEL); it becomes a substack, which isolates it.
+	authIncludeRe = regexp.MustCompile(`^(\s*auth\s+)include(\s+(?:common-auth|password-auth|system-auth|system-login)\b.*)$`)
+	replacedRe    = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(marker) + ` - replaced: (.*)\n.*\n` + regexp.QuoteMeta(includeLine) + `\n`)
 )
 
 // System runs commands; replaced in tests.
@@ -63,13 +70,17 @@ type Change struct {
 
 func (a *Applier) p(path string) string { return filepath.Join(a.Root, path) }
 
-// RadiusFile is /etc/raddb/server on RHEL-family systems, /etc/pam_radius_auth.conf elsewhere.
+// RadiusFile is the pam_radius server file of this distribution: /etc/raddb/server (older
+// RHEL), /etc/pam_radius.conf (RHEL/Rocky 9, EPEL pam_radius 2.x) or /etc/pam_radius_auth.conf
+// (Debian/Ubuntu). The module line always names it with conf=.
 func (a *Applier) RadiusFile() string {
-	if st, err := os.Stat(a.p("/etc/raddb")); err == nil && st.IsDir() {
-		return "/etc/raddb/server"
+	for _, f := range []string{"/etc/raddb/server", "/etc/pam_radius.conf", "/etc/pam_radius_auth.conf"} {
+		if _, err := os.Stat(a.p(f)); err == nil {
+			return f
+		}
 	}
 	if _, err := os.Stat(a.p("/etc/redhat-release")); err == nil {
-		return "/etc/raddb/server"
+		return "/etc/pam_radius.conf"
 	}
 	return "/etc/pam_radius_auth.conf"
 }
@@ -167,24 +178,30 @@ func SSHDropIn(p *protocol.LinuxPolicy) string {
 
 // WithInclude adds the marker and include lines after the password step (idempotent).
 func WithInclude(service, content string) (string, error) {
-	if strings.Contains(content, "\n"+includeLine+"\n") || strings.HasPrefix(content, includeLine+"\n") {
+	if strings.Contains(content, "\n"+includeLine+"\n") {
 		return content, nil
 	}
 	lines := strings.SplitAfter(content, "\n")
 	for i, line := range lines {
 		if passwordRe.MatchString(line) {
-			if !strings.HasSuffix(line, "\n") {
-				lines[i] = line + "\n"
+			bare := strings.TrimSuffix(line, "\n")
+			if m := authIncludeRe.FindStringSubmatch(bare); m != nil {
+				// keep the original line in the marker so disabling restores it exactly
+				out := strings.Join(lines[:i], "") + marker + " - replaced: " + bare + "\n" + m[1] + "substack" + m[2] + "\n" + includeLine + "\n" + strings.Join(lines[i+1:], "")
+				return out, nil
 			}
-			out := strings.Join(lines[:i+1], "") + marker + "\n" + includeLine + "\n" + strings.Join(lines[i+1:], "")
+			out := strings.Join(lines[:i], "") + bare + "\n" + marker + "\n" + includeLine + "\n" + strings.Join(lines[i+1:], "")
 			return out, nil
 		}
 	}
 	return "", fmt.Errorf("cannot find the password step in /etc/pam.d/%s (no common-auth / system-auth / password-auth include): not changed", service)
 }
 
-// WithoutInclude removes exactly the two lines WithInclude added.
+// WithoutInclude removes exactly what WithInclude added (and restores a replaced line).
 func WithoutInclude(content string) string {
+	if m := replacedRe.FindStringSubmatchIndex(content); m != nil {
+		return content[:m[0]] + content[m[2]:m[3]] + "\n" + content[m[1]:]
+	}
 	return strings.Replace(content, marker+"\n"+includeLine+"\n", "", 1)
 }
 
@@ -244,6 +261,7 @@ func (a *Applier) Plan(p *protocol.LinuxPolicy, secret string) ([]Change, error)
 			changes = append(changes, Change{Path: radiusFile})
 		}
 	}
+	changes = append(changes, Change{Path: legacySSHDropIn}) // name used by the first test builds
 	if wanted["sshd"] {
 		cfg, err := os.ReadFile(a.p("/etc/ssh/sshd_config"))
 		if err != nil {
@@ -320,7 +338,7 @@ func (a *Applier) Apply(p *protocol.LinuxPolicy, secret string) ([]Change, error
 	}
 	sshChanged := false
 	for i, c := range changes {
-		if c.Path == sshDropIn {
+		if c.Path == sshDropIn || c.Path == legacySSHDropIn {
 			sshChanged = true
 		}
 		if c.Content == nil {

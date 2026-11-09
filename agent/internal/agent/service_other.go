@@ -9,9 +9,9 @@ var errUnsupported = errors.New("the SohobOTP agent runs on Linux and Windows on
 func RequireAdmin() error     { return nil }
 func InstallService() error   { return errUnsupported }
 func UninstallService() error { return errUnsupported }
-func RunService(a *Agent) error {
+func RunService() error {
 	stop := make(chan struct{})
 	go func() { waitForSignal(); close(stop) }()
-	a.Run(stop)
+	_ = Serve(stop)
 	return nil
 }
