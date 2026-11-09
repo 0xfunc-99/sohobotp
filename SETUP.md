@@ -31,10 +31,12 @@ In this guide, replace **`PORTAL_IP`** with the IP address (or DNS name) of your
 | `agent/linux-arm64/sohobotp-agent` | Linux agent for ARM machines (Raspberry Pi 4/5, ARM servers) |
 | `agent/windows/sohobotp-agent.msi` | Windows agent installer (setup window, or silent for Group Policy) |
 | `agent/windows/sohobotp-agent.exe` | Windows agent without installer |
+| `windows-signin/SohobOTPSignIn.msi` | SohobOTP Sign-in installer (the code field on the Windows sign-in screen) |
 | `source/` | full source: portal, agent, SohobOTP Sign-in (`source/windows-signin`) |
 | `SHA256SUMS` | checksums (`shasum -a 256 -c SHA256SUMS`, or `Get-FileHash` on Windows) |
 
-Version: agent 0.1.0, SohobOTP Sign-in 1.0.0 (source only, see step 5).
+Version: agent 0.1.0, SohobOTP Sign-in 1.0.0. The Windows installers were built and tested
+on Windows Server 2022 (36 automatic checks, see step 5).
 
 ---
 
@@ -139,26 +141,29 @@ Then, in the portal:
    **token** (only once — copy it) and the **pin**, and the ready install commands. The pin is
    also always at the bottom of the *Enrol endpoints* page.
 
-## Step 5 — Windows: build SohobOTP Sign-in (once)
+## Step 5 — Windows: SohobOTP Sign-in installer (ready-built)
 
-SohobOTP Sign-in is C++ and is compiled **on a Windows PC** (it is not pre-built in this kit).
-On a Windows 10/11 PC:
+The kit contains **`windows-signin\SohobOTPSignIn.msi`**, ready to install (step 6). It was
+compiled and tested on a Windows Server 2022 machine on GitHub (private repository
+`0xfunc-99/sohobotp`, workflow *windows*): install, registration as a Windows sign-in provider,
+the agent writing its settings, uninstall — 36 checks, all passed.
 
-1. Install **Visual Studio 2022 Community** with the workload **"Desktop development with
-   C++"**, **Git for Windows**, and the **WiX Toolset 3.14** (it needs .NET Framework 3.5:
-   *Windows Features* → *.NET Framework 3.5*).
-2. Copy `source\windows-signin` to the PC, open **Developer PowerShell for VS 2022** there:
+The installers are not code-signed yet: Windows may show *"Windows protected your PC"* or
+*unknown publisher*. Check the file with `SHA256SUMS` (`Get-FileHash`), then *More info* →
+*Run anyway*.
 
-   ```powershell
-   .\get-php.ps1
-   msbuild SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=x64
-   ```
+To build it yourself instead (only after changing its source): push the source to your
+private GitHub repository and download *signin-windows* from the *windows* run under
+*Actions*, or on a Windows PC with **Visual Studio 2022** ("Desktop development with C++",
+plus the v142 build tools with ATL and Spectre-mitigated libraries), **Git** and the
+**WiX Toolset 3.14**, in **Developer PowerShell for VS 2022** inside `source\windows-signin`:
 
-3. The installer is `WixInstall\multiOTPCredentialProviderInstaller\bin\x64\Release\SohobOTPSignIn.msi`.
+```powershell
+.\get-php.ps1
+msbuild SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=x64
+```
 
-Alternative: put `source` in a **private** GitHub repository; the included workflow
-(`.github/workflows/windows.yml`) builds the MSI on GitHub and offers it for download
-under *Actions*. The first build may need small fixes; keep the error output.
+The installer is then `WixInstall\multiOTPCredentialProviderInstaller\bin\x64\Release\SohobOTPSignIn.msi`.
 
 ## Step 6 — Windows machine
 
@@ -168,7 +173,7 @@ second session open while testing.
 
 1. Install **Microsoft Visual C++ Redistributable 2015–2022 x64**
    (https://aka.ms/vs/17/release/vc_redist.x64.exe).
-2. Install **SohobOTP Sign-in**: run `SohobOTPSignIn.msi` (from step 5). Its own settings pages
+2. Install **SohobOTP Sign-in**: run `windows-signin\SohobOTPSignIn.msi` from the kit. Its own settings pages
    can be left as they are: the agent replaces them with the right values.
 3. Copy `ca.pem` to `C:\SohobOTP\ca.pem`.
 4. Install the **SohobOTP agent**: double-click `agent\windows\sohobotp-agent.msi` and fill in the
@@ -239,8 +244,11 @@ password, then **code:**. The agent installs `libpam-radius-auth` (Debian/Ubuntu
 
 ## Limitations of this version
 
-- **Windows has not run on a real Windows machine yet**: SohobOTP Sign-in is rebranded source
-  that must be compiled (step 5); the Windows agent and MSI are built and unit-tested only.
+- **Windows is tested automatically, not yet by a person at the sign-in screen**: the
+  installers, the agent and the settings it writes passed on Windows Server 2022, but
+  signing in with password + code has to be tried on your test machine (step 6, with a
+  snapshot and a break-glass account).
+- The Windows installers are **not code-signed** (Windows warns about an unknown publisher).
 - **Linux machines are identified by their IP address for RADIUS**: two Linux machines behind
   the same NAT address cannot both be protected; RADIUS across the internet needs a VPN.
 - SSH passwords go through the keyboard-interactive prompt: scripts that send a password

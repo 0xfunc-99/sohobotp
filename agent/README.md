@@ -128,10 +128,17 @@ The end-to-end test (43 checks; `DISTRO=rocky` runs it on Rocky Linux 9) covers:
 Unit tests reproduce every libsodium protocol vector and cover the PAM and registry appliers
 (rollback, refusals, RHEL layout).
 
-## Windows: manual test (needs a real machine)
+## Windows: automatic test on real Windows, then the manual test
 
-The Windows build is cross-compiled and its registry logic unit-tested; it has not run on
-Windows yet. Before production, on a Windows 11 / Server 2022 test machine:
+`.github/workflows/windows.yml` (in a **private** GitHub repository) compiles SohobOTP Sign-in
+on Windows and, on a Windows Server 2022 machine, runs the agent's Go tests (real registry,
+DPAPI) and `tests/windows/e2e.ps1`: both MSIs installed silently, enrolment against
+`tests/fakeportal`, the registry values and their types, the token never in the registry or
+the installer log and deleted after enrolment, DPAPI keys, the state folder ACL, service
+recovery, uninstall (36 checks). `e2e.ps1` also runs by hand on a test machine.
+
+What it cannot do is sign in at the Windows sign-in screen. Before production, on a
+Windows 11 / Server 2022 test machine:
 
 1. Install SohobOTP Sign-in (SohobOTPSignIn.msi), then the agent with a token.
    `sohobotp-agent.exe status` shows version 1 applied; the portal shows the inventory.
@@ -156,8 +163,8 @@ Windows yet. Before production, on a Windows 11 / Server 2022 test machine:
 
 ## Not done yet
 
-- Windows: the real-machine test above (the MSI, DPAPI, registry writing and the service
-  are built and unit-tested, but have not run on Windows).
+- Windows: signing in with password + code at the sign-in screen (manual test above); the
+  rest is tested automatically on Windows Server 2022.
 - MSI upgrade table (wixl cannot write it): versions are upgraded by self-update.
 - Automatic rollback if an updated agent cannot start (the service manager keeps restarting
   it; set the previous signed version as the target again if that happens).
