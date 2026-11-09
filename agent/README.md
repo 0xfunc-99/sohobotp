@@ -23,8 +23,16 @@ sohobotp-agent install --portal https://portal.example.com --token <TOKEN> --pin
 Add `--ca-file ca.pem` when the portal certificate is not publicly trusted (the appliance's
 self-signed one). Verification is never switched off.
 
-**Group Policy (Windows):** deploy `sohobotp-agent.msi` (Computer Configuration → Software
-Installation, with a transform setting the properties, or a startup script):
+**Windows, by hand:** double-click `sohobotp-agent.msi` (as an administrator). The setup window
+asks for the portal address, the enrolment token, the pin and, if the portal uses its own
+certificate, the CA file; **Install** stays disabled until the first three are filled in.
+Install the multiOTP Credential Provider first.
+
+![MSI setup window](docs/msi-setup-window.png)
+
+**Group Policy (Windows):** deploy `sohobotp-agent.msi` silently (Computer Configuration →
+Software Installation, with a transform setting the properties, or a startup script); silent
+installs skip the windows:
 
 ```powershell
 msiexec /i sohobotp-agent.msi /qn PORTAL=https://portal.example.com TOKEN=<TOKEN> PIN=<PIN> [CAFILE=C:\path\ca.pem]
@@ -34,8 +42,10 @@ The MSI installs the agent and the `SohobOTPAgent` service and writes the values
 `HKLM\SOFTWARE\SohobOTP\Agent`; the service enrols on its first start and **deletes the
 token**. `TOKEN` is hidden from MSI logs. Use an enrolment token with *Active Directory
 approval*: anyone can read a GPO's files, so a copied token must not admit unknown machines.
-Build: `sh agent/packaging/windows/build-msi.sh` (msitools in Docker). The MSI has no
-upgrade table (wixl limitation): new versions arrive by self-update.
+Build: `sh agent/packaging/windows/build-msi.sh` (msitools in Docker; the installer windows
+are tables in `packaging/windows/ui/` added with msibuild). `check-msi-ui.sh` shows them under
+Wine and takes screenshots. The MSI has no upgrade table (wixl limitation): new versions arrive
+by self-update.
 
 Other commands: `status`, `run --once` (check in now), `apply --dry-run --config FILE`
 (Linux: show what a policy would change), `uninstall`, `version`.
@@ -133,7 +143,10 @@ Windows yet. Before production, on a Windows 11 / Server 2022 test machine:
    registry. Disable the endpoint; sign-in through the gateway is refused.
 6. `services.msc`: SohobOTP Agent running, restarts after being killed; `uninstall` removes
    it.
-7. MSI: `msiexec /i sohobotp-agent.msi /qn PORTAL=... TOKEN=... PIN=...` enrols on its own;
+7. MSI by double-click: the setup window, Install disabled until filled, the finish window,
+   and `msiexec /i ... /l*v log.txt` does not contain the token (MsiHiddenProperties; Wine
+   ignores it, Windows should not). Silently: `msiexec /i sohobotp-agent.msi /qn PORTAL=...
+   TOKEN=... PIN=...` enrols on its own;
    `HKLM\SOFTWARE\SohobOTP\Agent` no longer has `Token` afterwards; the key fields in
    `agent.json` start with `dpapi:`.
 8. Self-update: set a newer signed version as the group's target; the service restarts on it.

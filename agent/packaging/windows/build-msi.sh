@@ -10,7 +10,19 @@ docker run --rm -v "$REPO/agent":/agent -e VERSION="$VERSION" debian:bookworm-sl
   work=$(mktemp -d); cp /agent/dist/sohobotp-agent-windows-amd64.exe "$work/sohobotp-agent.exe"
   cp /agent/packaging/windows/sohobotp-agent.wxs "$work/"
   cd "$work" && wixl -a x64 -D Version="$VERSION" -o /agent/dist/sohobotp-agent.msi sohobotp-agent.wxs
-  echo "built agent/dist/sohobotp-agent.msi"
-  for table in Component File ServiceInstall ServiceControl Registry Property; do
+  # installer windows (setup form, progress, finish, cancel, error): wixl cannot author them,
+  # so the tables in packaging/windows/ui are added with msibuild. Silent installs skip them.
+  msi=/agent/dist/sohobotp-agent.msi; ui=/agent/packaging/windows/ui
+  for t in TextStyle Dialog Control ControlEvent ControlCondition EventMapping; do
+    cp "$ui/$t.idt" "$work/$t.idt"
+    msibuild "$msi" -i "$work/$t.idt"
+  done
+  for t in InstallUISequence Property; do
+    msiinfo export "$msi" "$t" | sed "s/\r\$//" > "$work/$t.idt"
+    sed "s/\r\$//" "$ui/$t.rows" >> "$work/$t.idt"
+    msibuild "$msi" -i "$work/$t.idt"
+  done
+  echo "built agent/dist/sohobotp-agent.msi (with installer windows)"
+  for table in Component File ServiceInstall ServiceControl Registry Property InstallUISequence Dialog ControlCondition; do
     echo "== $table"; msiinfo export /agent/dist/sohobotp-agent.msi "$table" | tail -n +4
   done'

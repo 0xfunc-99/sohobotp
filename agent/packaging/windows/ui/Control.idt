@@ -1,0 +1,36 @@
+Dialog_	Control	Type	X	Y	Width	Height	Attributes	Property	Text	Control_Next	Help
+s72	s50	s20	i2	i2	i2	i2	I4	S72	L0	S50	L50
+Control	Dialog_	Control
+SetupDlg	Title	Text	20	12	330	18	3		{\TitleFont}Install the SohobOTP Agent		
+SetupDlg	Intro	Text	20	34	330	28	3		Copy these values from the portal: Endpoints > Enrol endpoints > Create token. The computer then registers itself and receives its two-factor policy.		
+SetupDlg	TopLine	Line	0	66	370	0	1				
+SetupDlg	PortalLabel	Text	20	74	330	10	3		Portal address (for example https://192.168.10.5):		
+SetupDlg	PortalEdit	Edit	20	85	330	16	7	PORTAL	{255}	TokenEdit	
+SetupDlg	TokenLabel	Text	20	106	330	10	3		Enrolment token (shown once when the token is created):		
+SetupDlg	TokenEdit	Edit	20	117	330	16	7	TOKEN	{255}	PinEdit	
+SetupDlg	PinLabel	Text	20	138	330	10	3		Portal key pin (after --pin in the install command):		
+SetupDlg	PinEdit	Edit	20	149	330	16	7	PIN	{255}	CaEdit	
+SetupDlg	CaLabel	Text	20	170	330	10	3		CA certificate file, only if the portal uses its own certificate (optional):		
+SetupDlg	CaEdit	Edit	20	181	330	16	7	CAFILE	{255}	Install	
+SetupDlg	Note	Text	20	204	330	22	3		Install the multiOTP Credential Provider before this agent. The token is used once and then deleted from this computer.		
+SetupDlg	BottomLine	Line	0	232	370	0	1				
+SetupDlg	Install	PushButton	212	240	66	17	3		&Install	Cancel	
+SetupDlg	Cancel	PushButton	284	240	66	17	3		Cancel	PortalEdit	
+ProgressDlg	Title	Text	20	12	330	18	3		{\TitleFont}Installing the SohobOTP Agent		
+ProgressDlg	Wait	Text	20	40	330	20	3		Please wait while the agent and its service are installed.		
+ProgressDlg	ActionText	Text	20	70	330	12	3				
+ProgressDlg	ProgressBar	ProgressBar	20	88	330	12	65537				
+ProgressDlg	BottomLine	Line	0	232	370	0	1				
+ProgressDlg	Cancel	PushButton	284	240	66	17	3		Cancel		
+FinishDlg	Title	Text	20	12	330	18	3		{\TitleFont}SohobOTP Agent installed		
+FinishDlg	Body	Text	20	40	330	60	3		The agent registers this computer with the portal within a minute. If the enrolment token requires approval, approve the computer on the portal page Endpoints. Its status: "C:\Program Files\SohobOTP\Agent\sohobotp-agent.exe" status		
+FinishDlg	BottomLine	Line	0	232	370	0	1				
+FinishDlg	Finish	PushButton	284	240	66	17	3		&Finish		
+UserExitDlg	Title	Text	20	12	330	18	3		{\TitleFont}Installation cancelled		
+UserExitDlg	Body	Text	20	40	330	30	3		Nothing was installed. Run the installer again when you have the portal address, token and pin.		
+UserExitDlg	BottomLine	Line	0	232	370	0	1				
+UserExitDlg	Finish	PushButton	284	240	66	17	3		&Finish		
+FatalErrorDlg	Title	Text	20	12	330	18	3		{\TitleFont}Installation failed		
+FatalErrorDlg	Body	Text	20	40	330	40	3		The SohobOTP Agent could not be installed and nothing was changed. Run the installer as an administrator, or see the Windows Installer log (msiexec /l*v).		
+FatalErrorDlg	BottomLine	Line	0	232	370	0	1				
+FatalErrorDlg	Finish	PushButton	284	240	66	17	3		&Finish		

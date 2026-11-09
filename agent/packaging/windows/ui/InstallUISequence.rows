@@ -1,0 +1,5 @@
+SetupDlg	NOT Installed	1100
+ProgressDlg		1280
+FinishDlg		-1
+UserExitDlg		-2
+FatalErrorDlg		-3
