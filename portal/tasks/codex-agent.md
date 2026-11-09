@@ -118,6 +118,9 @@ as in the protocol: they are internal constants covered by the test vectors.
     `enabled: false` restores the original PAM files byte for byte; a broken config
     (e.g. bad `sshd -t`) is rolled back and reported as `failed`;
   - also on a RHEL-family image (Rocky or Alma) for the PAM/RADIUS paths.
+  - **all RADIUS servers down** (stop the FreeRADIUS container): excluded users and the
+    break-glass group still log in with their password, root is not locked out, everyone
+    else is refused; logins work again when RADIUS is back.
 
 ## Done when
 

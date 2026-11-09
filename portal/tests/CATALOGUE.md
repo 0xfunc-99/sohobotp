@@ -12,9 +12,9 @@ Suites: `unit` = `tests/unit.php`, `e2e` = `tests/e2e.php`, `ad` = `tests/e2e-ad
 `tests/e2e-ad-endpoints.php` (`MULTIOTP_TEST_AD=1`), `appliance` = `tests/run-appliance-test.sh`,
 `agent` = Codex's `agent/tests/run-in-docker.sh` (branch `portal/agent-go`).
 
-State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e, 114 AD,
-42 appliance). Of the 98 cases below: 38 fully automated, 14 partial (P1: 5, P2: 7, P3: 2),
-36 gaps (P1: 10, P2: 18, P3: 8), 6 manual-only, 4 in Codex's agent tests.
+State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 320 e2e,
+114 AD, appliance). **No P1 gap left.** Of the 98 cases: 53 fully automated, 8 partial
+(P2: 6, P3: 2), 26 gaps (P2: 18, P3: 8), 6 manual-only, 5 in Codex's agent tests.
 
 ## 1. Administrator access
 
@@ -28,12 +28,12 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | Idle timeout (15 min) and absolute timeout (8 h) | signed out, back to sign-in | **gap P2** |
 | Temporary password older than 24 h | refused, admin must get a new one | **gap P2** |
 | MFA step left open > 5 min, more than 5 wrong MFA codes | back to the password step | **gap P2** |
-| 20 failures from one IP in 15 min | that IP is blocked for every account | **gap P1** |
+| 20 failures from one IP in 15 min | that IP is blocked for every account, others unaffected | auto (e2e) |
 | Super admin resets another admin's MFA / password | old factor stops working, audit entry | **gap P2** |
 | Admin changes own password on My account | old password refused afterwards, other sessions signed out | partial (forced change only) |
 | Last super admin demoted, disabled or deleted | refused | auto (e2e) |
-| Roles: helpdesk, auditor, admin on every page and every POST | allowed or 403 exactly as `Roles` says | partial (main pages; not every POST per role) **P1** |
-| CSRF missing / wrong / foreign Origin on every POST | refused, audit entry | partial (sample POSTs) **P1** |
+| Roles: helpdesk and auditor on every POST route (23), auditor read pages | 403 and audit entry, nothing changed; auditor can read | auto (e2e) |
+| CSRF missing / foreign Origin on every POST route | 400, nothing changed | auto (e2e) |
 
 ## 2. Users and tokens
 
@@ -59,8 +59,8 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | Group scope, nested groups, several groups | only members synced | auto (ad) |
 | Disabled in AD, re-enabled, removed from group | disabled / re-enabled / disabled | auto (ad) |
 | Directory password + code (AD and OpenLDAP) | accepted, wrong password refused | auto (ad, e2e) |
-| **Domain controller unreachable during a sync** | sync fails, **no user is disabled or deleted** | **gap P1** |
-| Wrong service password during a scheduled sync | job fails, admin sees it, nothing changed | partial (connection test only) **P1** |
+| **Directory server unreachable during a sync** | sync fails, **no user is disabled or deleted** | auto (e2e, OpenLDAP) |
+| Wrong service password during a sync | job fails, admin sees it, nothing changed | auto (e2e; scheduled syncs run the same job) |
 | Several domain controllers, first one down | second one used | **gap P2** |
 | More than 1000 users (AD paging) | all synced | **gap P2** (stage 6 load test) |
 | User renamed or moved to another OU in AD | same multiOTP user updated, not duplicated | **gap P2** |
@@ -79,8 +79,8 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | **MS-CHAPv2 and CHAP** (many VPNs) | accepted with the right code, refused otherwise | **gap P2** |
 | Result cache per group (Wi-Fi roaming) | same login accepted again without code until timeout, never after | **gap P2** |
 | Group attribute sent / not sent in the reply | as set per group | **gap P3** |
-| Challenge state reused, or answered after it expired | refused | **gap P1** |
-| User locked after N wrong codes over RADIUS | locked; RADIUS does not allow unlimited guessing | **gap P1** |
+| Challenge state reused, forged, or answered after it expired | refused | auto (appliance) |
+| Wrong codes over RADIUS (3 → delayed, more → locked) | right code refused until unlocked; other users unaffected | auto (appliance) |
 | Message-Authenticator required, client does not send it | request dropped | **gap P2** |
 | Two applies at the same time | one runs, the other is merged or waits | partial (job de-duplication) P3 |
 | IPv6 RADIUS client | works like IPv4 | **gap P3** |
@@ -95,14 +95,14 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | Enrolment token **expired** or **revoked** over HTTP | refused | partial (unit, via store edit) **P2** |
 | Signed check-in: replay, tampered body, other URI, other key, old timestamp | refused | auto (unit, e2e) |
 | Clock skew exactly at 300 s / 301 s | accepted / refused | **gap P3** |
-| Body over 256 KiB, invalid JSON, unknown action, GET | 413 / 400 / 404 / 405 | partial (GET only) **P2** |
-| 20 bad tokens or signatures from one IP | 429 for that IP | **gap P1** |
+| Body over 256 KiB, invalid JSON, unknown action, GET | 413 / 400 / 404 / 405 | auto (e2e) |
+| 20 bad tokens or signatures from one IP | 429 for that IP, even with a valid signature | auto (e2e) |
 | Config versions: new on policy change, not resent, failed not retried, restored backup | as designed | auto (unit) |
 | Secrets sealed at rest and in transit, never in the audit trail | yes | auto (unit, e2e) |
 | Linux endpoint becomes a RADIUS client; removed on disable / delete / move | yes, and FreeRADIUS really refuses it | auto (unit, appliance) |
 | Endpoint deleted, then the agent checks in | `unknown_endpoint`, agent keeps last config | partial (portal side) **P2** |
 | Two check-ins at the same time from one endpoint | both answered, nonces not lost | **gap P3** |
-| Pages: escaping of every inventory field | escaped | partial (host name) **P1** |
+| Pages: escaping of every inventory field and apply error | escaped | auto (e2e) |
 | 5000 endpoints: list page, check-ins per second | page under 2 s, no lock contention errors | **gap P2** (stage 6) |
 
 ## 6. Rollout from Active Directory
@@ -125,9 +125,9 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | Other secret, Linux id, disabled endpoint | refused | auto (e2e) |
 | Offline cache only when the group allows it, expiring within its lifetime | yes | auto (e2e, appliance) |
 | Legacy URL with the default secret | refused; works with a private global secret or the override variable | partial (refusal only) **P2** |
-| Unknown endpoint ids from one IP | throttled (429) | **gap P1** |
+| Unknown endpoint ids from one IP | throttled (429) | auto (e2e) |
 | Gateway request without `<multiOTP`, over 64 KiB | 400 | **gap P3** |
-| `ReadUserData` from a managed laptop for another user | only non-secret fields | **gap P1** (decide whether to block it) |
+| `ReadUserData` from a managed laptop for another user | never the seed, PIN or recovery codes | auto (e2e); kept because the CP calls it at sign-in. Non-secret fields (e-mail, phone, description) stay readable with a laptop's secret: filter them after the real-Windows test **P2** |
 | Real Windows: sign-in, unlock, RDP, UAC prompt, excluded break-glass account | as the group policy says | **manual** |
 | Real Windows offline: cached login works, expires after the lifetime | yes | **manual** |
 | Real Windows: endpoint disabled while offline | cached logins still work until expiry (documented) | **manual** |
@@ -139,7 +139,7 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | SSH with password + code, wrong code, excluded user, root | as designed | agent (Codex Phase 1) |
 | SSH key + code (`ssh_keys_need_code`) | both required | agent |
 | Broken config / `sshd -t` fails | rolled back, reported as failed | agent |
-| RADIUS servers all down | excluded/break-glass users still get in; others refused | **gap P1** (agent) |
+| RADIUS servers all down | excluded/break-glass users still get in; others refused | agent (added to Codex Phase 1) |
 | Debian and RHEL family | both work | agent |
 
 ## 9. Web security
@@ -148,8 +148,8 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 |---|---|---|
 | Headers (CSP, HSTS, nosniff, frame), cookies (`__Host-`, HttpOnly, SameSite) | present | auto (e2e, appliance) |
 | nginx allowlist: only index.php, agent.php, cp.php, assets | everything else 404 | auto (appliance) |
-| XSS payload in every stored field (users, groups, inventory, rules, labels) | escaped on every page | partial **P1** |
-| Path traversal in ids (`../`, encoded) on every route | 404, nothing read | **gap P1** |
+| XSS payload in every stored text field (user, RADIUS group/client, endpoint group texts, token label, inventory, apply error), 17 pages crawled | escaped on every page | auto (e2e) |
+| Path traversal in ids (`../`, encoded) on routes, agent API and gateway | 404/400/403, nothing read | auto (e2e) |
 | Legacy CORS / session fixation fixes | as fixed | auto (e2e) |
 | Audit trail: chain, tamper detection, redaction | as designed | auto (unit, e2e) |
 
@@ -160,7 +160,7 @@ State on 2026-11-09: about 500 automated checks, all passing (160 unit, 186 e2e,
 | Worker runs as www-data, helper root-only with fixed commands | yes | auto (appliance) |
 | Worker killed during a job | job marked failed on restart, can be re-run | **gap P2** |
 | Reboot: services back, data kept | yes | **gap P2** (appliance restart test) |
-| Backup and restore of `/etc/multiotp` + portal data | portal works, secrets readable, agents keep working | **gap P1** |
+| Backup and restore of `/etc/multiotp` + portal data | admins sign in, agents and sealed secrets work, user codes work; without `portal.key` secrets are unusable (500, nothing leaked) | auto (e2e) |
 | Upgrade from a stock multiOTP appliance with existing users | users and tokens kept, portal added | **gap P2** |
 | Clock wrong on the server | codes refused; visible on the dashboard | **gap P3** |
 | Raspberry Pi image boots and passes the appliance test | yes | **manual** (stage 7) |

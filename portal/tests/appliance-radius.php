@@ -155,6 +155,60 @@ if ('challenge' === $reply['result']) {
 $reply = RadiusClient::authenticate('127.0.0.1', 1812, $vpnSecret, $name, $pin . next_code($seed, $step), '127.0.0.3');
 check('VPN group (no challenge): PIN + code in one step accepted', 'accepted' === $reply['result'], json_encode($reply));
 
+// ---------------------------------------------------------------- P1: challenge state cannot be reused, forged or used after expiry
+$reply = RadiusClient::authenticate('127.0.0.1', 1812, $wifiSecret, $name, (string) $pin, '127.0.0.4');
+$state = (string) ($reply['state'] ?? '');
+$second = RadiusClient::authenticate('127.0.0.1', 1812, $wifiSecret, $name, next_code($seed, $step), '127.0.0.4', 10, $state);
+check('challenge answered (setup for reuse test)', 'accepted' === $second['result'], json_encode($second));
+$reuse = RadiusClient::authenticate('127.0.0.1', 1812, $wifiSecret, $name, next_code($seed, $step), '127.0.0.4', 10, $state);
+check('used challenge state cannot be replayed with a new code', 'accepted' !== $reuse['result'], json_encode($reuse));
+$forged = RadiusClient::authenticate('127.0.0.1', 1812, $wifiSecret, $name, next_code($seed, $step), '127.0.0.4', 10, random_bytes(16));
+check('forged challenge state refused', 'accepted' !== $forged['result'], json_encode($forged));
+$reply = RadiusClient::authenticate('127.0.0.1', 1812, $wifiSecret, $name, (string) $pin, '127.0.0.4');
+$engine = Portal\MultiotpService::get();
+Portal\MultiotpService::reset();
+$engine = Portal\MultiotpService::get();
+$engine->SetUser($name);
+$engine->SetUserChallengeValidity(time() - 1); // as if 5 minutes had passed
+$engine->WriteUserData();
+$late = RadiusClient::authenticate('127.0.0.1', 1812, $wifiSecret, $name, next_code($seed, $step), '127.0.0.4', 10, (string) ($reply['state'] ?? ''));
+check('expired challenge refused', 'accepted' !== $late['result'], json_encode($late));
+$users->unlock($name); // the refused attempts above count as failures for this user
+
+// ---------------------------------------------------------------- P1: guessing codes over RADIUS is limited
+$guesser = 'radius.guess';
+if ($users->exists($guesser)) {
+    $users->delete($guesser);
+}
+$created = $users->create(['user' => $guesser, 'display_name' => 'Guess test', 'token_serial' => '']);
+parse_str((string) parse_url((string) $created['otpauth'], PHP_URL_QUERY), $query);
+$bits = '';
+foreach (str_split((string) ($query['secret'] ?? '')) as $char) {
+    $bits .= str_pad(decbin((int) strpos($alphabet, $char)), 5, '0', STR_PAD_LEFT);
+}
+$guessSeed = '';
+foreach (str_split($bits, 8) as $byte) {
+    $guessSeed .= 8 === strlen($byte) ? chr(bindec($byte)) : '';
+}
+$guessStep = null;
+for ($i = 0; $i < 3; $i++) {
+    $wrong = str_pad((string) (((int) Totp::code($guessSeed, intdiv(time(), 30)) + 1 + $i) % 1000000), 6, '0', STR_PAD_LEFT);
+    RadiusClient::authenticate('127.0.0.1', 1812, $vpnSecret, $guesser, $wrong, '127.0.0.3');
+}
+$reply = RadiusClient::authenticate('127.0.0.1', 1812, $vpnSecret, $guesser, next_code($guessSeed, $guessStep), '127.0.0.3');
+check('after 3 wrong codes the right code is refused for a while (delay)', 'rejected' === $reply['result'], json_encode($reply));
+for ($i = 0; $i < 4; $i++) {
+    RadiusClient::authenticate('127.0.0.1', 1812, $vpnSecret, $guesser, '000001', '127.0.0.3');
+}
+Portal\MultiotpService::reset();
+check('after 7 failures the user is blocked (delayed or locked) in the engine', $users->get($guesser)['locked'] ?? false, json_encode($users->get($guesser)));
+$users->unlock($guesser);
+$reply = RadiusClient::authenticate('127.0.0.1', 1812, $vpnSecret, $guesser, next_code($guessSeed, $guessStep), '127.0.0.3');
+check('unlocked by an administrator: the right code works again', 'accepted' === $reply['result'], json_encode($reply));
+$reply = RadiusClient::authenticate('127.0.0.1', 1812, $vpnSecret, $name, $pin . next_code($seed, $step), '127.0.0.3');
+check('other users were never affected', 'accepted' === $reply['result'], json_encode($reply));
+$users->delete($guesser);
+
 // ---------------------------------------------------------------- recent logins
 $logins = Radius::recentLogins($name);
 check('recent logins read from the multiOTP log', [] !== $logins, 'log enabled?');

@@ -791,5 +791,172 @@ check('endpoint page shows the last Credential Provider request', str_contains($
 $admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'disable']);
 check('CP gateway: disabled endpoint refused', 0 !== $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep)));
 
+// ================================================================ P1 cases (tests/CATALOGUE.md)
+
+// ---------------------------------------------------------------- CP gateway: ReadUserData never returns secrets
+$reader = $cpClient(str_replace('e=' . $windows->id, 'e=' . $windows->id, $gatewayUrl), $cpSecret, $laptop);
+$admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
+$admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'enable']);
+$readSecret = (new Portal\Endpoints())->cpSecret((string) $windows->id);
+$reader = $cpClient($gatewayUrl, $readSecret, sys_get_temp_dir() . '/cp-reader-' . bin2hex(random_bytes(3)));
+$readBack = (string) $reader->ReadUserDataOnServer('cp.tester');
+check('CP ReadUserData: answers for a known user', str_contains($readBack, 'algorithm'), substr($readBack, 0, 80));
+check('CP ReadUserData: never returns the token seed, PIN or recovery codes', !preg_match('/^(token_seed|user_pin|scratch_passwords|seed_password)\b/m', $readBack) && !str_contains($readBack, bin2hex($cpSeed)));
+
+// ---------------------------------------------------------------- directory down / wrong password: users untouched
+$directory = new Portal\Directory();
+$originalSettings = $directory->settings();
+$states = static fn (): array => array_map(static fn (array $u): bool => $u['enabled'], Portal\Directory::snapshot());
+$usersBefore = $states();
+foreach (['unreachable directory server' => [['domain_controllers' => 'ldap-down.invalid'], null], 'wrong service password' => [[], 'wrong-password']] as $case => [$override, $password]) {
+    $directory->save($override + $originalSettings, $password);
+    $admin->get('/portal/index.php?r=directory');
+    $admin->post('/portal/index.php?r=directory-run', ['op' => 'sync']);
+    $status = wait_job($admin, job_id($admin));
+    check("$case: sync reported as failed", 'failed' === $status, $status);
+    check("$case: no user disabled, created or deleted", $states() === $usersBefore, json_encode(array_diff_assoc($states(), $usersBefore)));
+}
+$directory->save($originalSettings, 'sync-test-password');
+
+// ---------------------------------------------------------------- per-IP blocking
+$attacker = new Browser($base);
+$attacker->bind = '127.0.0.9';
+for ($i = 0; $i < 20; $i++) {
+    $attacker->get('/portal/index.php');
+    $attacker->post('/portal/index.php?r=login', ['username' => 'nobody-' . $i, 'password' => 'guess ' . $i]);
+}
+$attacker->get('/portal/index.php');
+$attacker->post('/portal/index.php?r=login', ['username' => 'root', 'password' => 'Superuser portal passphrase 2026']);
+check('admin sign-in: an IP with 20 failures is blocked, even with the right password', !str_contains($attacker->location(), 'r=mfa') && 303 !== $attacker->status);
+$elsewhere = new Browser($base);
+$elsewhere->get('/portal/index.php');
+$elsewhere->post('/portal/index.php?r=login', ['username' => 'root', 'password' => 'Superuser portal passphrase 2026']);
+check('admin sign-in: other addresses are not affected', 303 === $elsewhere->status && str_contains($elsewhere->location(), 'r=mfa'));
+
+$prober = new Browser($base);
+$prober->bind = '127.0.0.8';
+for ($i = 0; $i < 21; $i++) { // 20 failures, then the 21st request is blocked
+    $prober->raw('POST', '/portal/agent.php?a=enroll', json_encode((new AgentSim())->enrollRequest(str_repeat('0', 12) . '.' . str_repeat('x', 32), ['hostname' => 'probe', 'os' => 'linux'])), ['Content-Type' => 'application/json']);
+}
+check('agent API: after 20 bad tokens from one IP, 429', 429 === $prober->status && str_contains($prober->body, 'rate_limited'), $prober->status . ' ' . $prober->body);
+$prober->raw('POST', '/portal/agent.php?a=checkin', '{}', ['Content-Type' => 'application/json'] + $waiting->headers('POST', '/portal/agent.php?a=checkin', '{}'));
+check('agent API: a blocked IP is refused even with a valid signature', 429 === $prober->status);
+$gatewayProber = new Browser($base);
+$gatewayProber->bind = '127.0.0.10';
+for ($i = 0; $i < 21; $i++) {
+    $gatewayProber->post('/portal/cp.php?e=' . bin2hex(random_bytes(10)), ['data' => '<multiOTP/>'], [], false);
+}
+check('CP gateway: probing unknown endpoint ids is blocked (429)', 429 === $gatewayProber->status, (string) $gatewayProber->status);
+check('agent API: malformed request from a clean IP gets 400, not 429', 400 === $agentHttp->raw('POST', '/portal/agent.php?a=enroll', 'not json', ['Content-Type' => 'application/json'])->status);
+check('agent API: unknown action 404, body over 256 KiB 413', 404 === $agentHttp->raw('POST', '/portal/agent.php?a=nope', '{}', [])->status
+    && 413 === $agentHttp->raw('POST', '/portal/agent.php?a=enroll', str_repeat('x', 262145), ['Content-Type' => 'application/json'])->status);
+
+// ---------------------------------------------------------------- every POST route: CSRF, origin, roles
+$auditor = new Browser($base);
+$admin->get('/portal/index.php?r=admin-new');
+$admin->post('/portal/index.php?r=admin-new', ['username' => 'reader', 'display_name' => 'Read Only', 'email' => '', 'role' => 'auditor', 'mfa' => 'enroll']);
+preg_match('/<p class="secret"><code>([^<]+)<\/code>/', $admin->body, $m);
+$readerStep = null;
+first_sign_in($auditor, 'reader', html_entity_decode($m[1] ?? ''), 'Auditor portal passphrase 2026', $readerStep);
+$radiusClients = (new Portal\Radius())->clients();
+$postRoutes = [
+    'user-new' => [], 'user-action' => ['u' => 'cp.tester', 'op' => 'delete'], 'user-bulk' => ['op' => 'delete', 'users' => ['cp.tester']],
+    'token-import' => [], 'token-action' => ['op' => 'delete', 'serial' => 'none'],
+    'directory-save' => [], 'directory-test' => [], 'directory-run' => ['op' => 'sync'], 'job-cancel' => ['id' => 'none'],
+    'radius-group' => ['name' => 'Evil'], 'radius-group-delete' => ['id' => 'none'], 'radius-client' => ['name' => 'evil'],
+    'radius-client-action' => ['id' => $radiusClients[0]['id'] ?? 'none', 'op' => 'delete'], 'radius-apply' => [],
+    'radius-diagnostics' => ['op' => 'disable-default-client'],
+    'endpoint&id=' . $linux->id => ['op' => 'delete'], 'endpoint-group' => ['name' => 'Evil'], 'endpoint-group-delete' => ['id' => $endpointGroupId],
+    'endpoint-rules' => ['op' => 'check'], 'endpoint-enrol' => ['op' => 'create', 'group_id' => $endpointGroupId],
+    'admin-new' => ['username' => 'evil', 'role' => 'superadmin'], 'admin-edit' => [], 'admin-action' => ['op' => 'delete'],
+];
+$deniedBefore = substr_count((string) file_get_contents(Portal\Config::auditFile()), '"action":"access.denied"');
+foreach ($postRoutes as $route => $fields) {
+    $admin->get('/portal/index.php?r=dashboard');
+    $admin->post('/portal/index.php?r=' . $route, $fields, [], false);
+    $noToken = $admin->status;
+    $admin->get('/portal/index.php?r=dashboard');
+    $admin->post('/portal/index.php?r=' . $route, $fields, ['Origin' => 'https://evil.example']);
+    check("CSRF: $route refused without token ($noToken) and from a foreign origin ($admin->status)", 400 === $noToken && 400 === $admin->status);
+    foreach (['helpdesk' => $help, 'auditor' => $auditor] as $role => $session) {
+        $session->get('/portal/index.php?r=dashboard');
+        $session->post('/portal/index.php?r=' . $route, $fields);
+        check("roles: $role cannot POST $route", 403 === $session->status, (string) $session->status);
+    }
+}
+$deniedAfter = substr_count((string) file_get_contents(Portal\Config::auditFile()), '"action":"access.denied"');
+check('every refused POST is in the audit trail', $deniedAfter - $deniedBefore >= 2 * count($postRoutes), ($deniedAfter - $deniedBefore) . ' entries');
+check('refused POSTs changed nothing (user, endpoint, group still there)', (new Portal\Users())->exists('cp.tester') && null !== (new Portal\Endpoints())->endpoint((string) $linux->id) && null !== (new Portal\Endpoints())->group($endpointGroupId));
+foreach (['users', 'tokens', 'radius', 'endpoints', 'endpoint-groups', 'audit', 'directory', 'jobs'] as $page) {
+    $auditor->get('/portal/index.php?r=' . $page);
+    check("roles: auditor can read $page", 200 === $auditor->status, (string) $auditor->status);
+}
+
+// ---------------------------------------------------------------- XSS: a payload in every stored text field, every page crawled
+$xss = '"><svg onload=alert(7)>';
+$xssUsers = new Portal\Users();
+$xssUsers->create(['user' => 'xss.user', 'display_name' => $xss, 'token_serial' => '']);
+$xssRadius = (new Portal\Radius())->saveGroup(null, ['name' => 'XSS radius', 'description' => $xss, 'cache_timeout' => '3600']);
+(new Portal\Radius())->createClient(['name' => 'xss-client', 'description' => $xss, 'address' => '192.0.2.200', 'group_id' => $xssRadius['id'], 'nas_type' => 'other', 'require_message_authenticator' => '1']);
+$xssEndpoints = new Portal\Endpoints();
+$xssGroup = $xssEndpoints->saveGroup(null, ['name' => 'XSS endpoints', 'description' => $xss, 'win_login_text' => $xss, 'win_otp_text' => $xss, 'win_default_prefix' => $xss] + array_diff_key($groupForm, ['name' => 1, 'description' => 1]));
+[, $xssToken] = $xssEndpoints->createToken($xssGroup['id'], $xss, 1, 1, 'e2e');
+$xssAgent = new AgentSim();
+$xssInventory = ['os' => 'windows'];
+foreach (['hostname', 'os_name', 'os_version', 'kernel', 'arch', 'domain', 'agent_version'] as $field) {
+    $xssInventory[$field] = $xss;
+}
+$xssInventory['component'] = ['name' => $xss, 'version' => $xss];
+$xssAgent->id = $xssEndpoints->enroll($xssAgent->enrollRequest($xssToken, $xssInventory), '192.0.2.201', 'portal.example.test')['endpoint_id'];
+$xssEndpoints->checkin($xssAgent->id, ['inventory' => $xssInventory, 'applied' => ['version' => 0, 'status' => 'failed', 'error' => $xss, 'at' => time()]], '192.0.2.201');
+$pages = ['dashboard', 'users', 'user&u=xss.user', 'tokens', 'radius', 'radius-group&id=' . $xssRadius['id'], 'radius-diagnostics',
+    'endpoints', 'endpoint&id=' . $xssAgent->id, 'endpoint-groups', 'endpoint-group&id=' . $xssGroup['id'], 'endpoint-enrol',
+    'directory', 'jobs', 'audit', 'admins', 'account'];
+foreach ($pages as $page) {
+    $admin->get('/portal/index.php?r=' . $page);
+    check("XSS: $page escapes stored text", 200 === $admin->status && !str_contains($admin->body, '<svg onload=alert(7)>'), (string) $admin->status);
+}
+
+// ---------------------------------------------------------------- path tricks in ids
+foreach (['endpoint&id=..%2F..%2Fportal.key', 'endpoint&id=../endpoints', 'user&u=..%2F..%2Fconfig%2Fmultiotp', 'job&id=..%2Fjobs',
+    'radius-group&id=..%2Fradius', 'endpoint-group&id=..%2F..%2Fadmins', 'admin-edit&id=..%2Fadmins', 'radius-client&id=..%2F..'] as $probe) {
+    $admin->get('/portal/index.php?r=' . $probe);
+    check("path trick refused: $probe", in_array($admin->status, [404, 303], true) && !str_contains($admin->body, 'sb1:') && !str_contains($admin->body, 'password_hash'), (string) $admin->status);
+}
+$agentHttp->bind = '127.0.0.7';
+$agentHttp->raw('POST', '/portal/agent.php?a=checkin', '{}', ['Content-Type' => 'application/json', 'X-Agent-Id' => '../../portal', 'X-Agent-Time' => (string) time(), 'X-Agent-Nonce' => base64_encode(random_bytes(16)), 'X-Agent-Signature' => base64_encode(random_bytes(64))]);
+check('agent API: path in endpoint id refused (400)', 400 === $agentHttp->status);
+check('CP gateway: path in endpoint id refused (403)', 403 === (new Browser($base))->post('/portal/cp.php?e=..%2F..%2Fportal', ['data' => '<multiOTP/>'], [], false)->status);
+
+// ---------------------------------------------------------------- backup and restore
+$etc = Portal\Config::etcDir();
+$data = Portal\Config::dataDir();
+$backup = sys_get_temp_dir() . '/backup-' . bin2hex(random_bytes(3));
+mkdir($backup);
+exec('cp -a ' . escapeshellarg($etc) . ' ' . escapeshellarg("$backup/etc") . ' && cp -a ' . escapeshellarg($data) . ' ' . escapeshellarg("$backup/portal"), $out, $rc);
+check('backup copied', 0 === $rc);
+exec('rm -rf ' . escapeshellarg($etc) . '/* ' . escapeshellarg($data) . '/*');
+$lost = (new Browser($base))->get('/portal/index.php');
+check('after data loss the portal no longer knows its admins', !str_contains((string) @file_get_contents("$data/admins.json"), 'root'));
+exec('cp -a ' . escapeshellarg("$backup/etc") . '/. ' . escapeshellarg($etc) . ' && cp -a ' . escapeshellarg("$backup/portal") . '/. ' . escapeshellarg($data), $out, $rc);
+Portal\MultiotpService::reset();
+check('restore copied', 0 === $rc);
+$restored = new Browser($base);
+$restored->get('/portal/index.php');
+$restored->post('/portal/index.php?r=login', ['username' => 'root', 'password' => 'Superuser portal passphrase 2026']);
+check('restored: administrators can sign in', 303 === $restored->status && str_contains($restored->location(), 'r=mfa'));
+$reply = $agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $waiting);
+$restoredConfig = null;
+try {
+    $restoredConfig = $waiting->openConfig($reply['config'] ?? [], $portalKeyHttp, 0, 'linux');
+} catch (Throwable $error) {
+}
+check('restored: agents keep working, signing key and sealed secrets readable', null !== $restoredConfig && '' !== ($restoredConfig['secrets']['radius_secret'] ?? ''), $agentHttp->body);
+check('restored: users and their codes still work', 0 === engine_check('cp.tester', next_code($cpSeed, $cpStep)));
+@unlink("$data/portal.key");
+$reply = $agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $waiting);
+check('restore without portal.key: sealed secrets cannot be used (server error, nothing leaked)', 500 === $agentHttp->status && !str_contains($agentHttp->body, 'secret'), $agentHttp->status . ' ' . $agentHttp->body);
+copy("$backup/portal/portal.key", "$data/portal.key");
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);
