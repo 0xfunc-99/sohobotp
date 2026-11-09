@@ -1,5 +1,13 @@
 # Stage 4: endpoints, endpoint groups and the agent
 
+The product is called **SohobOTP** (company: Sohobcom). The agent is the **SohobOTP agent**:
+binary `sohobotp-agent` (`sohobotp-agent.exe` on Windows), systemd unit
+`sohobotp-agent.service`, Windows service `SohobOTPAgent` (display name "SohobOTP Agent"),
+state in `/etc/sohobotp-agent/` and `%ProgramData%\SohobOTP\agent\`. Wire-protocol
+identifiers (`multiotp-agent-v1`, `multiotp-config-v1`, ...) are internal constants and keep
+their names. The Windows login itself is the multiOTP Credential Provider (third-party,
+Apache 2.0); its tile text defaults to "SohobOTP".
+
 Goal: manage Windows and Linux machines from the portal. Each machine runs a small
 agent that enrols once, checks in over HTTPS, receives its configuration, applies it,
 reports inventory and health, and updates itself.
@@ -18,16 +26,16 @@ get the **offline cache** of the multiOTP Credential Provider.
 | Enrolment tokens | portal | Created per endpoint group, expire, limited uses, shown once, stored hashed |
 | Agent API | `portal/agent.php?a=...` | `enroll`, `checkin` (later `release`); JSON, every request signed by the endpoint key; exact contract in [agent-protocol.md](agent-protocol.md) |
 | CP gateway | `portal/cp.php` (`/portal/cp/<endpoint-id>`) | Front for the Credential Provider's multiOTP client: per-endpoint shared secret, then the engine's `XmlServer` |
-| Agent | `agent/` (Go module) | `multiotp-agent install/run/status/uninstall`; Windows and Linux appliers |
+| Agent | `agent/` (Go module) | `sohobotp-agent install/run/status/uninstall`; Windows and Linux appliers |
 
 ## Trust model
 
-- **Install:** `multiotp-agent install --portal https://portal.example --token <enrolment token> --pin <portal key fingerprint>`.
+- **Install:** `sohobotp-agent install --portal https://portal.example --token <enrolment token> --pin <portal key fingerprint>`.
   The pin is the portal's Ed25519 config-signing public key, shown on the enrolment page.
 - **Endpoint identity:** the agent generates an Ed25519 signing key and an X25519 box
   key on the machine. Private keys never leave it (Windows: file in `%ProgramData%`
   readable by SYSTEM/Administrators only and DPAPI machine-protected; Linux:
-  `/etc/multiotp-agent/` 0700, keys 0600 root). The portal stores only public keys.
+  `/etc/sohobotp-agent/` 0700, keys 0600 root). The portal stores only public keys.
 - **Requests:** headers `X-Agent-Id`, `X-Agent-Time`, `X-Agent-Nonce`,
   `X-Agent-Signature` = Ed25519 over `METHOD\nPATH\nTIME\nNONCE\nSHA256(body)`.
   Time window ±300 s, nonces remembered for the window, so no replay.

@@ -1,6 +1,6 @@
 # Agent ↔ portal protocol, version 1
 
-The contract between the endpoint agent (`agent/`, Go) and the portal
+The contract between the SohobOTP agent (`agent/`, Go, binary `sohobotp-agent`) and the portal
 (`portal/agent.php`, PHP). Both sides are tested against
 [agent-protocol-vectors.json](agent-protocol-vectors.json), generated with the portal's
 libsodium. Background: [endpoints.md](endpoints.md).

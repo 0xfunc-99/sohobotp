@@ -1,4 +1,4 @@
-# Task: endpoint agent in Go (stage 4b, Linux first, then Windows)
+# Task: SohobOTP agent in Go (stage 4b, Linux first, then Windows)
 
 **Branch:** create `portal/agent-go` from `portal/stage3-radius`
 (`git switch -c portal/agent-go portal/stage3-radius`).
@@ -19,6 +19,14 @@ Read first, in this order:
    libsodium. Your Go tests must reproduce and verify every one of them.
 3. `portal/docs/endpoints.md`: the overall design and the security model.
 
+## Naming
+
+The product is **SohobOTP**. Binary `sohobotp-agent` (`sohobotp-agent.exe`), systemd unit
+`sohobotp-agent.service`, Windows service name `SohobOTPAgent`, display name
+"SohobOTP Agent", user-visible messages say "SohobOTP agent". Keep the wire-protocol
+identifiers (`multiotp-agent-v1`, `multiotp-agent-enroll-v1`, `multiotp-config-v1`) exactly
+as in the protocol: they are internal constants covered by the test vectors.
+
 ## Files
 
 - **May create/change:** `agent/**` only, plus the "Status" and "Questions" sections at the
@@ -31,7 +39,7 @@ Read first, in this order:
 ### Phase 1: core + Linux (do this first, fully tested)
 
 1. Go module in `agent/` (module path `multiotp-portal/agent`, Go 1.22+), command
-   `cmd/multiotp-agent`, standard library plus `golang.org/x/crypto` and `golang.org/x/sys`
+   `cmd/sohobotp-agent`, standard library plus `golang.org/x/crypto` and `golang.org/x/sys`
    only. No other dependencies.
 2. Commands:
    - `install --portal URL --token TOKEN --pin HEX [--ca-file PATH]`: create keys, enrol,
@@ -44,7 +52,7 @@ Read first, in this order:
    the pinned key, own endpoint id and OS, version strictly greater than the last applied,
    all secrets open or nothing applies), backoff on errors. TLS verification always on;
    `--ca-file` adds a CA, nothing disables verification.
-4. Key and state storage on Linux: `/etc/multiotp-agent/` mode 0700 root, files 0600.
+4. Key and state storage on Linux: `/etc/sohobotp-agent/` mode 0700 root, files 0600.
    Never log secrets, tokens, private keys or sealed values.
 5. Linux applier (Debian/Ubuntu `libpam-radius-auth` and RHEL-family `pam_radius`):
    - write the RADIUS server file (`/etc/pam_radius_auth.conf`, or `/etc/raddb/server` on
@@ -66,7 +74,7 @@ Read first, in this order:
 
 ### Phase 2: Windows (after phase 1 is green)
 
-7. Windows service (`golang.org/x/sys/windows/svc`), state in `%ProgramData%\multiotp-agent`
+7. Windows service (`golang.org/x/sys/windows/svc`), state in `%ProgramData%\SohobOTP\agent`
    with an ACL allowing only SYSTEM and Administrators; private keys additionally protected
    with DPAPI (machine scope).
 8. Credential Provider applier: write the registry values in the protocol's Windows table,

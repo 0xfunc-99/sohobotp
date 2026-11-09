@@ -31,6 +31,7 @@ function check(string $name, bool $ok, string $detail = ''): void
 final class Browser
 {
     public array $cookies = [];
+    public ?string $bind = null; // source address (e.g. 127.0.0.5) for agent requests
     public int $status = 0;
     public array $headers = [];
     public string $body = '';
@@ -92,6 +93,9 @@ final class Browser
         ]);
         if (null !== $body) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+        if (null !== $this->bind) {
+            curl_setopt($ch, CURLOPT_INTERFACE, $this->bind);
         }
         $this->body = (string) curl_exec($ch);
         $this->status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -593,6 +597,107 @@ check('directory format set for synced user', str_contains($admin->body, '<optio
 $directoryResult = engine_check('alice', 'alice-test-password' . next_code($aliceSecret, $aliceStep));
 check('directory password + code accepted (generic LDAP)', 0 === $directoryResult, 'engine result ' . $directoryResult);
 check('wrong directory password refused', 0 !== engine_check('alice', 'wrong-password' . next_code($aliceSecret, $aliceStep)));
+
+// ---------------------------------------------------------------- stage 4: endpoints, enrolment, agent API
+require __DIR__ . '/AgentSim.php';
+$admin->get('/portal/index.php?r=endpoints');
+check('endpoints page served, empty', 200 === $admin->status && str_contains($admin->body, 'No endpoints yet'));
+$admin->get('/portal/index.php?r=endpoint-enrol');
+check('enrolment without a group redirects to group creation', 303 === $admin->status && str_contains($admin->location(), 'r=endpoint-group'));
+$radiusGroupId = '';
+foreach ((new Portal\Radius())->groups() as $g) {
+    $radiusGroupId = 'VPN gateways' === $g['name'] ? $g['id'] : $radiusGroupId;
+}
+$admin->get('/portal/index.php?r=endpoint-group');
+$groupForm = [
+    'name' => 'Linux servers', 'description' => '<i>ops</i> machines', 'checkin_interval' => '60',
+    'linux_enabled' => '1', 'linux_radius_group_id' => $radiusGroupId, 'linux_radius_servers' => 'radius.example.test',
+    'linux_timeout' => '5', 'linux_services' => ['sshd', 'sudo'], 'linux_excluded_users' => '', 'linux_excluded_groups' => 'mfa-breakglass',
+    'linux_ssh_keys_need_code' => '1', 'win_cpus_logon' => '0e', 'win_cpus_unlock' => '0e', 'win_cpus_credui' => '0e',
+    'win_excluded_account' => '', 'win_cache_days' => '7', 'win_timeout_unlock' => '0', 'win_server_timeout' => '5',
+];
+$admin->post('/portal/index.php?r=endpoint-group', ['linux_radius_group_id' => ''] + $groupForm);
+check('group without RADIUS group refused with a message', 200 === $admin->status && str_contains($admin->body, 'Choose the RADIUS server group'));
+$admin->post('/portal/index.php?r=endpoint-group', $groupForm);
+check('endpoint group created', 303 === $admin->status && str_contains($admin->location(), 'r=endpoint-groups'));
+$admin->get('/portal/index.php?r=endpoint-groups');
+check('group list escapes the description', str_contains($admin->body, '&lt;i&gt;ops&lt;/i&gt;') && !str_contains($admin->body, '<i>ops</i>'));
+preg_match('/r=endpoint-group&amp;id=([0-9a-f]{12})/', $admin->body, $m);
+$endpointGroupId = $m[1] ?? '';
+$admin->get('/portal/index.php?r=endpoint-enrol');
+$pinShown = preg_match('/Portal key pin[^<]*<code>([0-9a-f ]+)<\/code>/', $admin->body, $m) ? str_replace(' ', '', $m[1]) : '';
+$admin->post('/portal/index.php?r=endpoint-enrol', ['op' => 'create', 'group_id' => $endpointGroupId, 'label' => 'e2e rollout', 'hours' => '1', 'max_uses' => '2']);
+preg_match('/<p class="secret"><code>([0-9a-f]{12}\.[A-Za-z0-9_-]{32})<\/code>/', $admin->body, $m);
+$enrolToken = $m[1] ?? '';
+check('enrolment token shown once with install commands', '' !== $enrolToken && str_contains($admin->body, 'sohobotp-agent install --portal') && str_contains($admin->body, '--pin ' . $pinShown));
+
+$agentHttp = new Browser($base);
+$agentHttp->bind = '127.0.0.5';
+$agentCall = static function (string $action, array $request, ?AgentSim $signer = null) use ($agentHttp): array {
+    $body = json_encode($request);
+    $uri = '/portal/agent.php?a=' . $action;
+    $headers = ['Content-Type' => 'application/json'];
+    if (null !== $signer) {
+        foreach ($signer->headers('POST', $uri, $body) as $name => $value) {
+            $headers[$name] = $value;
+        }
+    }
+    $agentHttp->raw('POST', $uri, $body, $headers);
+    return json_decode($agentHttp->body, true) ?? [];
+};
+$agentHttp->get('/portal/agent.php?a=enroll');
+check('agent API refuses GET', 405 === $agentHttp->status);
+$linux = new AgentSim();
+$inventory = ['hostname' => 'web-01', 'os' => 'linux', 'os_name' => 'Debian GNU/Linux', 'os_version' => '12', 'ips' => ['127.0.0.5'], 'agent_version' => '0.1.0', 'component' => ['name' => 'pam_radius', 'version' => '2.0.0']];
+$reply = $agentCall('enroll', $linux->enrollRequest(substr($enrolToken, 0, 13) . str_repeat('x', 32), $inventory));
+check('agent API: wrong token refused', 401 === $agentHttp->status && 'bad_token' === ($reply['error'] ?? ''));
+$reply = $agentCall('enroll', $linux->enrollRequest($enrolToken, $inventory));
+$linux->id = $reply['endpoint_id'] ?? null;
+$portalKeyHttp = (string) base64_decode((string) ($reply['portal_key'] ?? ''), true);
+check('agent API: enrolment accepted', 200 === $agentHttp->status && null !== $linux->id, $agentHttp->body);
+check('agent API: portal key matches the pin shown to the admin', hash('sha256', $portalKeyHttp) === $pinShown);
+$reply = $agentCall('checkin', ['inventory' => $inventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $linux);
+$pushed = null;
+try {
+    $pushed = $linux->openConfig($reply['config'] ?? [], $portalKeyHttp, 0, 'linux');
+} catch (Throwable $error) {
+    check('agent API: config opens', false, $error->getMessage() . ' ' . $agentHttp->body);
+}
+$endpointRecord = (new Portal\Endpoints())->endpoint((string) $linux->id);
+$linuxClient = (new Portal\Radius())->client((string) ($endpointRecord['radius_client_id'] ?? ''));
+check('agent API: signed check-in returns the config', null !== $pushed && [['host' => 'radius.example.test', 'port' => 1812]] === $pushed['policy']['radius_servers']);
+check('agent API: endpoint became RADIUS client at its address', null !== $linuxClient && '127.0.0.5/32' === $linuxClient['address']);
+check('agent API: RADIUS secret delivered sealed', null !== $pushed && $pushed['secrets']['radius_secret'] === (new Portal\Radius())->clientSecret($linuxClient['id'] ?? ''));
+$body = json_encode(['applied' => ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()]]);
+$replayHeaders = ['Content-Type' => 'application/json'] + $linux->headers('POST', '/portal/agent.php?a=checkin', $body);
+$agentHttp->raw('POST', '/portal/agent.php?a=checkin', $body, $replayHeaders);
+$checkinReply = json_decode($agentHttp->body, true) ?? [];
+check('agent API: applied config not resent', 200 === $agentHttp->status && array_key_exists('config', $checkinReply) && null === $checkinReply['config'], $agentHttp->body);
+$agentHttp->raw('POST', '/portal/agent.php?a=checkin', $body, $replayHeaders);
+check('agent API: replayed request refused', 401 === $agentHttp->status && str_contains($agentHttp->body, 'replay'));
+$agentHttp->raw('POST', '/portal/agent.php?a=checkin', $body . ' ', $linux->headers('POST', '/portal/agent.php?a=checkin', $body) + ['Content-Type' => 'application/json']);
+check('agent API: tampered body refused', 401 === $agentHttp->status && str_contains($agentHttp->body, 'bad_signature'));
+
+$windows = new AgentSim();
+$windowsInventory = ['hostname' => '<b>PC-07</b>', 'os' => 'windows', 'os_name' => 'Windows 11 Pro', 'domain' => 'EXAMPLE', 'component' => ['name' => 'multiotp-cp', 'version' => '5.10.4.1']];
+$windows->id = $agentCall('enroll', $windows->enrollRequest($enrolToken, $windowsInventory))['endpoint_id'] ?? null;
+check('agent API: second machine enrolled with the same token (2 uses)', null !== $windows->id);
+$reply = $agentCall('enroll', (new AgentSim())->enrollRequest($enrolToken, $windowsInventory));
+check('agent API: token used up after 2 machines', 'bad_token' === ($reply['error'] ?? ''));
+
+$admin->get('/portal/index.php?r=endpoints');
+check('endpoint list shows machines, host names escaped', str_contains($admin->body, 'web-01') && str_contains($admin->body, '&lt;b&gt;PC-07&lt;/b&gt;') && !str_contains($admin->body, '<b>PC-07</b>'));
+$admin->get('/portal/index.php?r=endpoint&id=' . $linux->id);
+check('endpoint page shows inventory and RADIUS client', 200 === $admin->status && str_contains($admin->body, 'Debian GNU/Linux') && str_contains($admin->body, '127.0.0.5/32'));
+$admin->post('/portal/index.php?r=endpoint&id=' . $linux->id, ['op' => 'disable']);
+$reply = $agentCall('checkin', ['applied' => ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()]], $linux);
+check('disabled endpoint refused by the API', 403 === $agentHttp->status && 'disabled' === ($reply['error'] ?? ''));
+check('disabled endpoint lost its RADIUS client', null === (new Portal\Radius())->client($linuxClient['id'] ?? ''));
+$help->get('/portal/index.php?r=endpoints');
+check('helpdesk has no endpoint access', 403 === $help->status);
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('audit has enrolment and token events, never the token or secrets', str_contains($auditText, '"action":"endpoint.enroll"') && str_contains($auditText, '"action":"endpoint.token_create"')
+    && str_contains($auditText, '"action":"endpoint.disable"') && !str_contains($auditText, substr($enrolToken, 13)) && !str_contains($auditText, (string) ($pushed['secrets']['radius_secret'] ?? 'no-secret')));
 
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

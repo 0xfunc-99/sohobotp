@@ -63,10 +63,22 @@ final class Config
         return '1' === self::env('MULTIOTP_PORTAL_ALLOW_HTTP');
     }
 
+    /** Product name shown in the portal and used for the agent. */
+    public static function brandName(): string
+    {
+        return self::env('MULTIOTP_PORTAL_BRAND') ?? 'SohobOTP';
+    }
+
+    /** Company behind the product (logo: assets/brand-logo.png, icon: assets/brand-icon.png). */
+    public static function companyName(): string
+    {
+        return self::env('MULTIOTP_PORTAL_COMPANY') ?? 'Sohobcom';
+    }
+
     /** Issuer label shown in authenticator apps. */
     public static function issuer(): string
     {
-        return self::env('MULTIOTP_PORTAL_ISSUER') ?? 'multiOTP portal';
+        return self::env('MULTIOTP_PORTAL_ISSUER') ?? self::brandName();
     }
 
     public static function idleTimeout(): int       { return self::int('MULTIOTP_PORTAL_IDLE_TIMEOUT', 900); }

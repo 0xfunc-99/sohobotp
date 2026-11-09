@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds the production image (Dockerfile at the repository root) and checks the portal in it:
 # HTTPS behind nginx, the background worker started by newvm.sh, and RADIUS through real
-# FreeRADIUS with the sudo helper (portal/tests/appliance-radius.php).
+# FreeRADIUS with the sudo helper (portal/tests/appliance-radius.php), and the endpoint agent API
+# (portal/tests/appliance-endpoints.php).
 # The first build downloads the whole Debian stack and takes a while; later builds are cached.
 # Usage (from the repository root):  sh portal/tests/run-appliance-test.sh
 set -eu
@@ -38,7 +39,7 @@ docker exec "$NAME" php -r '
   $check("security headers through nginx", (bool) preg_match("/content-security-policy/i", $headers));
   $check("__Host- session cookie over HTTPS", (bool) preg_match("/set-cookie: __Host-motp_portal/i", $headers));
   $check("HSTS header", (bool) preg_match("/strict-transport-security/i", $headers));
-  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md"] as $p) {
+  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md", "/portal/tests/AgentSim.php", "/portal/src/Endpoints.php", "/portal/docs/agent-protocol-vectors.json"] as $p) {
     [$c] = $get("https://localhost" . $p);
     $check("$p refused by nginx ($c)", 404 === $c);
   }
@@ -60,6 +61,9 @@ docker exec "$NAME" sh -c '
 
 echo "== RADIUS through real FreeRADIUS"
 docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-radius.php" || STATUS=1
+
+echo "== Endpoint agent API through nginx, RADIUS client in real FreeRADIUS"
+docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-endpoints.php" || STATUS=1
 
 if [ "$STATUS" != 0 ]; then
   echo "== worker log"; docker exec "$NAME" tail -n 30 /var/log/multiotp/portal-worker.log || true

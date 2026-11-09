@@ -146,6 +146,13 @@ final class Radius
         return null === $client ? null : self::public($client);
     }
 
+    /** Shared secret in clear: only for configuration pushed to a managed endpoint (sealed to its key). */
+    public function clientSecret(string $id): ?string
+    {
+        $sealed = $this->store->read()['clients'][$id]['secret'] ?? null;
+        return null === $sealed ? null : Crypto::decrypt($sealed);
+    }
+
     /** @return array{0: array, 1: string} the client and its secret (show once) */
     public function createClient(array $input): array
     {

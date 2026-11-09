@@ -93,6 +93,7 @@ final class App
         $tokens = new TokensController($this->admin, $this->audit, $this->view);
         $directory = new DirectoryController($this->admin, $this->audit, $this->view);
         $radius = new RadiusController($this->admin, $this->audit, $this->view);
+        $endpoints = new EndpointsController($this->admin, $this->audit, $this->view);
         match ($route) {
             'radius'               => $radius->index(),
             'radius-group'         => $radius->group(),
@@ -101,6 +102,12 @@ final class App
             'radius-client-action' => $radius->clientAction(),
             'radius-apply'         => $radius->apply(),
             'radius-diagnostics'   => $radius->diagnostics(),
+            'endpoints'             => $endpoints->index(),
+            'endpoint'              => $endpoints->endpoint(),
+            'endpoint-groups'       => $endpoints->groups(),
+            'endpoint-group'        => $endpoints->group(),
+            'endpoint-group-delete' => $endpoints->groupDelete(),
+            'endpoint-enrol'        => $endpoints->enrol(),
             'users'          => $users->index(),
             'user-new'       => $users->create(),
             'user'           => $users->show(),

@@ -1,6 +1,6 @@
 <?php
 /**
- * multiOTP management portal - front controller (the only PHP file served).
+ * multiOTP management portal - front controller (with agent.php, the only PHP files served).
  *
  * @license GNU Lesser General Public License (same as multiOTP)
  */

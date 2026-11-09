@@ -16,7 +16,7 @@ in those folders also refuses to run on its own.
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
 | 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (tested against Samba AD and OpenLDAP) |
 | 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
-| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | designed |
+| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **4a done** (portal side: groups, enrolment, signed agent API); agent in progress (Codex, `portal/agent-go`) |
 | 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
 | 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
 | 7 | Raspberry Pi / virtual appliance image with the portal and worker | |
@@ -24,7 +24,7 @@ in those folders also refuses to run on its own.
 
 Deferred: push notifications (need a phone app and a push service; revisit after stage 8).
 
-The visual design is interim and will follow the supplied mockup.
+Product name: **SohobOTP** (company identity: Sohobcom logo and colours, see Files and settings); page layouts are interim until the mockup arrives.
 
 ## First administrator
 
@@ -147,6 +147,43 @@ or directory password + code (users synced from AD/LDAP only).
 Not yet possible: restricting which user groups may sign in through a server group (needs an
 engine change; planned).
 
+## Endpoints (Windows and Linux agents)
+
+Design: [docs/endpoints.md](docs/endpoints.md). Exact agent protocol, with libsodium test
+vectors: [docs/agent-protocol.md](docs/agent-protocol.md). Stage 4a is the portal side; the Go
+agent itself is built separately (`portal/tasks/codex-agent.md`).
+
+- **Endpoint groups** hold the policy:
+  - Linux: which services need a code (SSH, sudo, console, su), the RADIUS server group the
+    machines join, RADIUS servers, excluded users and groups (root always), and whether SSH
+    keys also need a code;
+  - Windows (multiOTP Credential Provider): sign-in, unlock and UAC modes, a break-glass
+    account, offline cache (opt-in, 1-30 days), UPN format and texts;
+  - the check-in interval.
+- **Enrolment tokens** (Enrol endpoints page) are per group, expire (1-720 h), have a use limit,
+  are shown once and stored as SHA-256 hashes. The page shows the install command and the
+  **portal key pin**: agents refuse any portal whose signing key does not match it.
+- **Agent API** `portal/agent.php?a=enroll|checkin` (the second public PHP file):
+  - no session or cookies;
+  - every check-in is signed with the machine's own Ed25519 key, refused when more than
+    5 minutes old, replayed, tampered or from a disabled machine;
+  - failed tokens and signatures are throttled per IP.
+- **Configuration** is versioned per endpoint and signed with the portal key (seed sealed with
+  `portal.key`). Secrets are sealed to the machine's X25519 key:
+  - the Linux endpoint's RADIUS secret;
+  - a per-endpoint Credential Provider secret.
+
+  A policy change or a RADIUS secret rotation pushes a new version at the next check-in. A
+  failed apply is reported to the endpoint page and not retried until the policy changes.
+- **Linux endpoints become RADIUS clients** (their enrolment address, their own secret) in
+  the group's RADIUS server group, and FreeRADIUS is re-applied automatically. Disabling,
+  deleting or moving a machine to a group without Linux 2FA removes the client.
+- **Endpoints page**: online/offline (3 missed check-ins), needs attention (apply failed,
+  no RADIUS client), inventory (OS, IPs, agent and login component versions), configuration
+  wanted vs applied, move, disable (also replaces its secrets), delete.
+- Not yet: the Credential Provider gateway `portal/cp.php` with per-endpoint secrets (4c),
+  signed self-update (4d).
+
 ## Background worker
 
 `portal/bin/worker.php` runs queued jobs and the scheduled sync. One worker at a time (lock
@@ -200,11 +237,19 @@ together with `admins.json`**: without it, authenticator-app enrolments cannot b
 administrators must re-enrol.
 
 Environment variables (all optional): `MULTIOTP_PORTAL_DATA`, `MULTIOTP_ETC_DIR`,
-`MULTIOTP_LOG_DIR`, `MULTIOTP_PORTAL_ISSUER`, `MULTIOTP_PORTAL_IDLE_TIMEOUT`,
+`MULTIOTP_LOG_DIR`, `MULTIOTP_PORTAL_BRAND`, `MULTIOTP_PORTAL_COMPANY`, `MULTIOTP_PORTAL_ISSUER`, `MULTIOTP_PORTAL_IDLE_TIMEOUT`,
 `MULTIOTP_PORTAL_ABSOLUTE_TIMEOUT`, `MULTIOTP_PORTAL_MAX_FAILURES`, `MULTIOTP_PORTAL_LOCKOUT`,
 `MULTIOTP_PORTAL_IP_MAX_FAILURES`, `MULTIOTP_PORTAL_IP_WINDOW`,
 `MULTIOTP_PORTAL_TEMP_PASSWORD_LIFETIME`, `MULTIOTP_PORTAL_MIN_PASSWORD_LENGTH`,
 `MULTIOTP_PORTAL_ALLOW_HTTP` (tests only). Requires PHP 8.1+ with sodium and mbstring.
+
+**Branding.** The portal uses the Sohobcom identity: logo `assets/brand-logo.png`, icon
+`assets/brand-icon.png` (favicon), colours navy `#0163AD`, sky `#05A8E8` and aqua `#4CC0D9`
+(CSS variables `--brand-*` at the top of `assets/portal.css`, with a dark-mode variant).
+The product is called **SohobOTP**: `MULTIOTP_PORTAL_BRAND` sets the product name in the header
+and page titles (default `SohobOTP`), `MULTIOTP_PORTAL_COMPANY` the logo's text alternative
+(default `Sohobcom`); the authenticator-app issuer defaults to the product name unless
+`MULTIOTP_PORTAL_ISSUER` is set. The endpoint agent is the SohobOTP agent (`sohobotp-agent`). A "Powered by multiOTP open source" credit stays in the footer.
 
 ## Changes to the legacy code in this stage
 
@@ -247,7 +292,10 @@ running. The end-to-end checks cover sign-in, enrolment, roles, CSRF, lockout, s
 revocation, TOTP replay, the audit trail, the legacy CORS/session fixes, user creation with
 a seed checked by the multiOTP engine, recovery codes, disable/unlock, bulk actions, token
 import and assignment, directory test/preview/sync through the worker, out-of-scope users
-being disabled, and the helpdesk limits.
+being disabled, and the helpdesk limits. Stage 4 adds the agent protocol test vectors,
+enrolment, signed check-ins (replay, tampering, clock skew, other key, disabled endpoint),
+configuration versions and secret sealing, RADIUS clients for Linux endpoints, and the
+endpoint pages, using a simulated agent (`tests/AgentSim.php`).
 
 **Production image test** (real nginx, PHP-FPM, FreeRADIUS, sudo helper, worker):
 
@@ -259,7 +307,9 @@ Builds the root `Dockerfile` and checks HTTPS behind nginx (headers, `__Host-` c
 internal paths refused, HTTP redirect), the worker running as `www-data`, and, through real
 FreeRADIUS: apply with config check and restart, accept/reject, per-server secrets, unknown
 sources ignored, secret rotation, challenge-response per group, PIN + code, and disabling the
-catch-all client. The first build downloads the Debian stack (slow); later builds are cached.
+catch-all client. Then a simulated Linux agent enrols and checks in through nginx, becomes a
+FreeRADIUS client, and logs in with the secret it received; once disabled it is refused by both
+the API and FreeRADIUS. The first build downloads the Debian stack (slow); later builds are cached.
 
 ## Active Directory tests
 

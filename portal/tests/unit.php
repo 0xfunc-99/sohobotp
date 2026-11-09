@@ -218,5 +218,155 @@ $radius->deleteClient($fw['id']);
 Portal\MultiotpService::reset();
 check('client delete removes engine device', !Portal\MultiotpService::get()->ReadDeviceData($fw['id'], false, true));
 
+// --- Endpoints: protocol vectors (generated with libsodium, docs/agent-protocol-vectors.json)
+use Portal\AgentError;
+use Portal\Endpoints;
+
+require __DIR__ . '/AgentSim.php';
+$v = json_decode((string) file_get_contents(PORTAL_ROOT . '/docs/agent-protocol-vectors.json'), true);
+$b = static fn (string $s): string => (string) base64_decode($s, true);
+check('vector: enrolment proof message', $v['enroll']['message'] === Endpoints::enrollMessage($v['enroll']['token'], $b($v['agent_sign_public']), $b($v['agent_box_public'])));
+check('vector: enrolment proof verifies', sodium_crypto_sign_verify_detached($b($v['enroll']['proof']), $v['enroll']['message'], $b($v['agent_sign_public'])));
+$r = $v['request'];
+check('vector: request message', $r['message'] === Endpoints::requestMessage($r['method'], $r['uri'], $r['time'], $r['nonce'], $r['body']));
+check('vector: request signature verifies', sodium_crypto_sign_verify_detached($b($r['signature']), $r['message'], $b($v['agent_sign_public'])));
+$vectorPortal = sodium_crypto_sign_seed_keypair($b($v['portal_sign_seed']));
+check('vector: portal public key from seed', $v['portal_sign_public'] === base64_encode(sodium_crypto_sign_publickey($vectorPortal)));
+check('vector: pin is SHA-256 of the public key', $v['portal_key_pin'] === hash('sha256', $b($v['portal_sign_public'])));
+check('vector: config signature reproduced', $v['config']['envelope']['signature'] === base64_encode(Endpoints::signConfig($v['config']['payload_json'], sodium_crypto_sign_secretkey($vectorPortal))));
+$vectorBox = sodium_crypto_box_keypair_from_secretkey_and_publickey($b($v['agent_box_secret']), $b($v['agent_box_public']));
+$payload = json_decode($v['config']['payload_json'], true);
+check('vector: sealed secret opens', $v['config']['radius_secret_plain'] === sodium_crypto_box_seal_open($b($payload['secrets']['radius_secret']), $vectorBox));
+
+// --- Endpoints: helpers
+check('server: host name, default port', ['host' => 'radius.example.com', 'port' => 1812] === Endpoints::parseServer('radius.example.com'));
+check('server: IPv4 with port', ['host' => '10.0.0.6', 'port' => 1645] === Endpoints::parseServer('10.0.0.6:1645'));
+check('server: bracketed IPv6 with port', ['host' => '2001:db8::1', 'port' => 1812] === Endpoints::parseServer('[2001:db8::1]:1812'));
+check('server: bare IPv6', ['host' => '2001:db8::1', 'port' => 1812] === Endpoints::parseServer('2001:db8::1'));
+check('server: invalid host refused', null === Endpoints::parseServer('bad host!') && null === Endpoints::parseServer('10.0.0.1:70000'));
+$inv = Endpoints::inventory(['hostname' => "lin\x01-01" . str_repeat('x', 300), 'os' => 'plan9', 'ips' => ['10.0.0.1', 'nope', ['x']], 'component' => 'bad']);
+check('inventory: control characters removed, length capped', str_starts_with($inv['hostname'], 'lin -01') && 255 === mb_strlen($inv['hostname']));
+check('inventory: unknown OS and bad IPs dropped', '' === $inv['os'] && ['10.0.0.1'] === $inv['ips'] && ['name' => '', 'version' => ''] === $inv['component']);
+
+// --- Endpoints: groups, tokens, enrolment, check-in
+$radius = new Radius();
+$linuxRadius = $radius->saveGroup(null, ['name' => 'Linux servers', 'cache_timeout' => '3600']);
+$form = static fn (array $over = []): array => $over + [
+    'checkin_interval' => '60', 'linux_enabled' => '1', 'linux_radius_group_id' => $linuxRadius['id'], 'linux_radius_servers' => '',
+    'linux_timeout' => '5', 'linux_services' => ['sshd', 'sudo'], 'linux_excluded_users' => 'deploy', 'linux_excluded_groups' => 'mfa-breakglass',
+    'linux_ssh_keys_need_code' => '1', 'win_cpus_logon' => '0e', 'win_cpus_unlock' => '0e', 'win_cpus_credui' => '0e',
+    'win_excluded_account' => 'PC01\\breakglass', 'win_cache_enabled' => '1', 'win_cache_days' => '7', 'win_timeout_unlock' => '0', 'win_server_timeout' => '5',
+];
+$endpoints = new Endpoints();
+check('group: Linux 2FA needs a RADIUS group', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['linux_radius_group_id' => ''])), ValidationException::class));
+check('group: invalid Linux user name refused', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['linux_excluded_users' => 'a;rm -rf'])), ValidationException::class));
+check('group: invalid CP mode refused', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['win_cpus_logon' => '9x'])), ValidationException::class));
+check('group: cache lifetime capped at 30 days', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['win_cache_days' => '90'])), ValidationException::class));
+$servers = $endpoints->saveGroup(null, ['name' => 'Servers'] + $form());
+$laptops = $endpoints->saveGroup(null, ['name' => 'Laptops'] + $form(['linux_enabled' => '']));
+check('groups saved', true === $servers['policy']['linux']['enabled'] && false === $laptops['policy']['linux']['enabled']);
+
+[$tok, $plainToken] = $endpoints->createToken($servers['id'], 'unit', 1, 1, 'unit');
+check('token format id.secret', 1 === preg_match('/^[0-9a-f]{12}\.[A-Za-z0-9_-]{32}$/', $plainToken));
+check('token stored hashed only', !str_contains((string) file_get_contents(Config::dataDir() . '/endpoints.json'), explode('.', $plainToken)[1]) && !isset($endpoints->tokens()[0]['hash']));
+
+$agentError = static function (callable $fn): string {
+    try {
+        $fn();
+    } catch (AgentError $e) {
+        return $e->errorCode;
+    }
+    return 'none';
+};
+$lin = new AgentSim();
+$linInventory = ['hostname' => 'lin-01', 'os' => 'linux', 'os_name' => 'Debian GNU/Linux', 'os_version' => '12', 'ips' => ['192.0.2.50'], 'agent_version' => '0.1.0', 'component' => ['name' => 'pam_radius', 'version' => '2.0.0']];
+$bad = $lin->enrollRequest($plainToken, $linInventory);
+$bad['proof'] = base64_encode(str_repeat("\0", 64));
+check('enrol: bad key proof refused', 'bad_request' === $agentError(static fn () => $endpoints->enroll($bad, '192.0.2.50', 'portal.example.test')));
+check('enrol: wrong token refused', 'bad_token' === $agentError(static fn () => $endpoints->enroll($lin->enrollRequest(explode('.', $plainToken)[0] . '.' . str_repeat('A', 32), $linInventory), '192.0.2.50', 'portal.example.test')));
+$enrolled = $endpoints->enroll($lin->enrollRequest($plainToken, $linInventory), '192.0.2.50', 'portal.example.test');
+$lin->id = $enrolled['endpoint_id'];
+$portalKey = $endpoints->publicKey();
+check('enrol: endpoint id and pinned portal key', 1 === preg_match('/^[0-9a-f]{20}$/', $lin->id) && $portalKey === base64_decode($enrolled['portal_key']) && hash('sha256', $portalKey) === $endpoints->pin());
+check('enrol: single-use token used up', 'bad_token' === $agentError(static fn () => $endpoints->enroll((new AgentSim())->enrollRequest($plainToken, $linInventory), '192.0.2.51', 'portal.example.test')));
+$linRecord = $endpoints->endpoint($lin->id);
+$client = $radius->client($linRecord['radius_client_id']);
+check('enrol: Linux endpoint became a RADIUS client', null !== $client && '192.0.2.50/32' === $client['address'] && $client['group_id'] === $linuxRadius['id']);
+
+$checkin = static function (AgentSim $agent, array $applied, ?array $headers = null, string $ip = '192.0.2.50') use ($endpoints): array {
+    $body = json_encode(['inventory' => ['hostname' => 'host', 'os' => 'linux'], 'applied' => $applied]);
+    $uri = '/portal/agent.php?a=checkin';
+    $id = $endpoints->authenticate($headers ?? $agent->headers('POST', $uri, $body), 'POST', $uri, $body);
+    return $endpoints->checkin($id, json_decode($body, true), $ip);
+};
+$none = ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null];
+$reply = $checkin($lin, $none);
+$config = $lin->openConfig($reply['config'], $portalKey, 0, 'linux');
+check('check-in: signed config verifies and opens', 1 === $config['version'] && 'linux' === $config['os'] && $config['secrets']['radius_secret'] === $radius->clientSecret($client['id']));
+check('check-in: Linux policy', ['sshd', 'sudo'] === $config['policy']['services'] && ['root', 'deploy'] === $config['policy']['excluded_users']
+    && [['host' => 'portal.example.test', 'port' => 1812]] === $config['policy']['radius_servers'] && true === $config['policy']['ssh_keys_need_code']);
+check('check-in: config not resent once applied', null === $checkin($lin, ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()])['config']);
+check('check-in: tampered config refused by the agent', throws(static function () use ($lin, $reply, $portalKey): void {
+    $tampered = $reply['config'];
+    $tampered['payload'] = base64_encode(str_replace('"sshd"', '"login"', (string) base64_decode($tampered['payload'])));
+    $lin->openConfig($tampered, $portalKey);
+}, RuntimeException::class));
+check('check-in: config replay refused by the agent', throws(static fn () => $lin->openConfig($reply['config'], $portalKey, 1), RuntimeException::class));
+
+$body = '{"applied":{"version":1,"status":"applied"}}';
+$uri = '/portal/agent.php?a=checkin';
+$headers = $lin->headers('POST', $uri, $body);
+check('auth: valid signature accepted', $lin->id === $endpoints->authenticate($headers, 'POST', $uri, $body));
+check('auth: replayed request refused', 'replay' === $agentError(static fn () => $endpoints->authenticate($headers, 'POST', $uri, $body)));
+check('auth: changed body refused', 'bad_signature' === $agentError(static fn () => $endpoints->authenticate($lin->headers('POST', $uri, $body), 'POST', $uri, $body . ' ')));
+check('auth: other URI refused', 'bad_signature' === $agentError(static fn () => $endpoints->authenticate($lin->headers('POST', $uri, $body), 'POST', '/portal/agent.php?a=enroll', $body)));
+check('auth: old timestamp refused', 'clock_skew' === $agentError(static fn () => $endpoints->authenticate($lin->headers('POST', $uri, $body, time() - 400), 'POST', $uri, $body)));
+$stranger = new AgentSim();
+$stranger->id = $lin->id;
+check('auth: other key refused', 'bad_signature' === $agentError(static fn () => $endpoints->authenticate($stranger->headers('POST', $uri, $body), 'POST', $uri, $body)));
+$stranger->id = str_repeat('a', 20);
+check('auth: unknown endpoint refused', 'unknown_endpoint' === $agentError(static fn () => $endpoints->authenticate($stranger->headers('POST', $uri, $body), 'POST', $uri, $body)));
+
+$endpoints->saveGroup($servers['id'], ['name' => 'Servers'] + $form(['linux_timeout' => '9']));
+$reply = $checkin($lin, ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()]);
+$config = $lin->openConfig($reply['config'], $portalKey, 1);
+check('policy change: new version pushed', 2 === $config['version'] && 9 === $config['policy']['timeout']);
+check('failed apply: same version not resent', null === $checkin($lin, ['version' => 2, 'status' => 'failed', 'error' => 'sshd -t failed', 'at' => time()])['config']);
+check('failed apply: error visible to the admin', 'sshd -t failed' === $endpoints->endpoint($lin->id)['applied']['error']);
+$reply = $checkin($lin, ['version' => 9, 'status' => 'applied', 'error' => '', 'at' => time()]);
+check('portal behind the agent (restored backup): version jumps ahead', 10 === $lin->openConfig($reply['config'], $portalKey, 9)['version']);
+
+$secretBefore = $radius->clientSecret($client['id']);
+$radius->rotateSecret($client['id']);
+$reply = $checkin($lin, ['version' => 10, 'status' => 'applied', 'error' => '', 'at' => time()]);
+check('RADIUS secret rotation reaches the endpoint', null !== $reply['config'] && $lin->openConfig($reply['config'], $portalKey, 10)['secrets']['radius_secret'] !== $secretBefore);
+
+[, $multiToken] = $endpoints->createToken($laptops['id'], 'laptops', 1, 5, 'unit');
+$win = new AgentSim();
+$win->id = $endpoints->enroll($win->enrollRequest($multiToken, ['hostname' => 'PC01', 'os' => 'windows', 'domain' => 'EXAMPLE']), '192.0.2.60', 'portal.example.test')['endpoint_id'];
+$reply = $checkin($win, $none, null, '192.0.2.60');
+$winConfig = $win->openConfig($reply['config'], $portalKey, 0, 'windows');
+check('Windows: per-endpoint CP gateway URL', 'https://portal.example.test/portal/cp.php?e=' . $win->id === $winConfig['policy']['server_url']);
+check('Windows: own CP secret, offline cache policy', 1 === preg_match('/^[0-9a-f]{48}$/', $winConfig['secrets']['cp_shared_secret']) && true === $winConfig['policy']['cache_enabled'] && 'PC01\\breakglass' === $winConfig['policy']['excluded_account']);
+check('Windows: no RADIUS client', '' === $endpoints->endpoint($win->id)['radius_client_id']);
+check('Windows: CP secret sealed at rest', !str_contains((string) file_get_contents(Endpoints::dir() . '/' . $win->id . '.json'), $winConfig['secrets']['cp_shared_secret']));
+$endpoints->setStatus($win->id, false);
+check('disabled endpoint refused', 'disabled' === $agentError(static fn () => $checkin($win, $none, null, '192.0.2.60')));
+$endpoints->setStatus($win->id, true);
+$reply = $checkin($win, ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()], null, '192.0.2.60');
+check('re-enabled endpoint gets a new CP secret', null !== $reply['config'] && $win->openConfig($reply['config'], $portalKey, 1)['secrets']['cp_shared_secret'] !== $winConfig['secrets']['cp_shared_secret']);
+
+$endpoints->moveEndpoint($lin->id, $laptops['id']);
+check('moved to a group without Linux 2FA: RADIUS client removed', '' === $endpoints->endpoint($lin->id)['radius_client_id'] && null === $radius->client($client['id']));
+$reply = $checkin($lin, ['version' => 11, 'status' => 'applied', 'error' => '', 'at' => time()]);
+$config = $lin->openConfig($reply['config'], $portalKey, 11);
+check('Linux 2FA off: policy disabled, no secrets', ['enabled' => false] === $config['policy'] && [] === $config['secrets']);
+check('group with endpoints cannot be deleted', throws(static fn () => $endpoints->deleteGroup($laptops['id']), ValidationException::class));
+$endpoints->moveEndpoint($lin->id, $servers['id']);
+$linRecord = $endpoints->endpoint($lin->id);
+check('moved back: RADIUS client recreated', '' !== $linRecord['radius_client_id'] && null !== $radius->client($linRecord['radius_client_id']));
+$endpoints->deleteEndpoint($lin->id);
+check('deleted endpoint: file and RADIUS client gone', null === $endpoints->endpoint($lin->id) && null === $radius->client($linRecord['radius_client_id']));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);
