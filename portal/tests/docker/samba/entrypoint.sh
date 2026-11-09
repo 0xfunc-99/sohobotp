@@ -26,4 +26,14 @@ samba-tool group add MFA-Users
 samba-tool group add VPN-Users
 samba-tool group addmembers MFA-Users alice,bob
 samba-tool group addmembers VPN-Users carol,MFA-Users
+# Computer accounts for the endpoint tests (tests/e2e-ad-endpoints.php)
+samba-tool ou create 'OU=Laptops,DC=example,DC=test'
+samba-tool ou create 'OU=Servers,DC=example,DC=test'
+samba-tool computer create PC01 --computerou='OU=Laptops'
+samba-tool computer create PC02 --computerou='OU=Laptops'
+samba-tool computer create SRV01 --computerou='OU=Servers'
+samba-tool group add MFA-Servers
+samba-tool group add All-Servers
+samba-tool group addmembers MFA-Servers 'SRV01$'
+samba-tool group addmembers All-Servers MFA-Servers
 exec samba --foreground --no-process-group

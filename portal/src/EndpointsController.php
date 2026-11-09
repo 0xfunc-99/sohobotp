@@ -17,7 +17,7 @@ final class EndpointsController extends Controller
         $groupFilter = $this->query('group', 32);
         $healthFilter = $this->query('health', 16);
         $rows = [];
-        $counts = ['online' => 0, 'offline' => 0, 'never' => 0, 'disabled' => 0, 'attention' => 0];
+        $counts = ['online' => 0, 'offline' => 0, 'never' => 0, 'pending' => 0, 'disabled' => 0, 'attention' => 0];
         foreach ($list as $endpoint) {
             $endpoint['health'] = $endpoints->health($endpoint);
             $endpoint['attention'] = self::attention($endpoint);
@@ -54,6 +54,25 @@ final class EndpointsController extends Controller
             $name = $endpoint['inventory']['hostname'] ?: $endpoint['id'];
             try {
                 switch ($this->post('op', 16)) {
+                    case 'approve':
+                        $endpoints->approve($endpoint['id']);
+                        $this->audit->record('endpoint.approve', 'success', $name, ['endpoint' => $endpoint['id'], 'by' => 'admin']);
+                        Session::flash('success', 'Endpoint approved. It receives its configuration at its next check-in.');
+                        break;
+                    case 'reject':
+                        if ('pending' !== $endpoint['status']) {
+                            throw new ValidationException('Only machines waiting for approval can be rejected.');
+                        }
+                        $endpoints->deleteEndpoint($endpoint['id']);
+                        $this->audit->record('endpoint.reject', 'success', $name, ['endpoint' => $endpoint['id'], 'ip' => $endpoint['enrolled_ip']]);
+                        Session::flash('success', 'Enrolment rejected and removed.');
+                        $this->redirect('endpoints');
+                    case 'unlock-group':
+                        $endpoints->unlockGroup($endpoint['id']);
+                        Jobs::enqueue('endpoints.directory', [], $this->admin['username']);
+                        $this->audit->record('endpoint.group_unlock', 'success', $name, ['endpoint' => $endpoint['id']]);
+                        Session::flash('success', 'The Active Directory rules choose this machine\'s group again (checked in the background).');
+                        break;
                     case 'move':
                         $moved = $endpoints->moveEndpoint($endpoint['id'], $this->post('group_id', 32));
                         $this->audit->record('endpoint.move', 'success', $name, ['endpoint' => $endpoint['id'], 'from' => $endpoint['group_id'], 'to' => $moved['group_id']]);
@@ -98,9 +117,15 @@ final class EndpointsController extends Controller
     {
         $this->requirePermission('endpoints.view');
         $endpoints = new Endpoints();
+        $groups = $endpoints->groups();
+        $settings = (new Directory())->settings();
         $this->view->render('endpoint-groups', [
             'title' => 'Endpoint groups',
-            'groups' => $endpoints->groups(),
+            'groups' => $groups,
+            'names' => array_column($groups, 'name', 'id'),
+            'rules' => $endpoints->rules(),
+            'adReady' => $settings['enabled'] && 1 === $settings['server_type'],
+            'lastCheck' => Jobs::latest('endpoints.directory'),
             'radiusNames' => array_column((new Radius())->groups(), 'name', 'id'),
             'canManage' => $this->can('endpoints.manage'),
         ]);
@@ -138,6 +163,44 @@ final class EndpointsController extends Controller
         ]);
     }
 
+    /** Active Directory assignment rules (POST only). */
+    public function rules(): void
+    {
+        $this->requirePermission('endpoints.manage');
+        if (!$this->isPost()) {
+            $this->redirect('endpoint-groups');
+        }
+        $endpoints = new Endpoints();
+        try {
+            switch ($this->post('op', 16)) {
+                case 'add':
+                    $rule = $endpoints->addRule($this->post('type', 8), $this->post('value', 512), $this->post('group_id', 32));
+                    $this->audit->record('endpoint.rule_add', 'success', $rule['value'], ['rule' => $rule]);
+                    Jobs::enqueue('endpoints.directory', [], $this->admin['username']);
+                    Session::flash('success', 'Rule added. Machines are re-checked in the background.');
+                    break;
+                case 'delete':
+                    $rule = $endpoints->deleteRule($this->post('id', 12));
+                    $this->audit->record('endpoint.rule_delete', 'success', $rule['value'], ['rule' => $rule]);
+                    Session::flash('success', 'Rule deleted. Machines stay in their current group.');
+                    break;
+                case 'up':
+                case 'down':
+                    $endpoints->moveRule($this->post('id', 12), 'up' === $this->post('op', 16) ? -1 : 1);
+                    $this->audit->record('endpoint.rule_order', 'success', $this->post('id', 12), ['direction' => $this->post('op', 16)]);
+                    Jobs::enqueue('endpoints.directory', [], $this->admin['username']);
+                    break;
+                case 'check':
+                    $job = Jobs::enqueue('endpoints.directory', [], $this->admin['username']);
+                    $this->audit->record('endpoint.directory_check', 'success', '', ['job' => $job['id']]);
+                    $this->redirect('job', ['id' => $job['id']]);
+            }
+        } catch (ValidationException $invalid) {
+            Session::flash('error', $invalid->getMessage());
+        }
+        $this->redirect('endpoint-groups');
+    }
+
     public function groupDelete(): void
     {
         $this->requirePermission('endpoints.manage');
@@ -166,10 +229,11 @@ final class EndpointsController extends Controller
                             $this->post('label', 100),
                             (int) $this->post('hours', 4),
                             (int) $this->post('max_uses', 6),
-                            $this->admin['username']
+                            $this->admin['username'],
+                            $this->post('approval', 16) ?: 'none'
                         );
                         $this->audit->record('endpoint.token_create', 'success', $token['label'], [
-                            'token' => $token['id'], 'group' => $token['group_id'], 'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'],
+                            'token' => $token['id'], 'group' => $token['group_id'], 'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
                         ]);
                         $this->view->render('endpoint-token', [
                             'title' => 'Enrolment token created',
@@ -209,6 +273,13 @@ final class EndpointsController extends Controller
     {
         if ('disabled' === $endpoint['status']) {
             return null;
+        }
+        if ('pending' === $endpoint['status']) {
+            return 'Waiting for approval' . ('' !== ($endpoint['approval_note'] ?? '') ? ': ' . $endpoint['approval_note'] : '.');
+        }
+        $adName = (string) ($endpoint['ad_name'] ?? '');
+        if ('' !== $adName && '' !== $endpoint['inventory']['hostname'] && 0 !== strcasecmp(explode('.', $adName)[0], explode('.', $endpoint['inventory']['hostname'])[0])) {
+            return 'The machine now reports the host name "' . $endpoint['inventory']['hostname'] . '" but is bound to the computer account ' . strtoupper($adName) . '. If it was renamed, delete it and enrol it again.';
         }
         if ('' !== ($endpoint['radius_error'] ?? '')) {
             return $endpoint['radius_error'];

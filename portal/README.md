@@ -181,8 +181,16 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
 - **Endpoints page**: online/offline (3 missed check-ins), needs attention (apply failed,
   no RADIUS client), inventory (OS, IPs, agent and login component versions), configuration
   wanted vs applied, move, disable (also replaces its secrets), delete.
+- **Approval of new machines** (per token): active immediately, approved by an administrator,
+  or approved automatically when the computer account is in Active Directory (enabled, DNS
+  name resolving to the enrolment address, not already used). Pending machines check in but
+  get no configuration or secrets.
+- **Policy from Active Directory**: rules map a computer's OU or (nested) AD group to an
+  endpoint group, first match wins, re-checked every 15 minutes and after enrolments
+  (worker job `endpoints.directory`, "Check AD now"). Administrator moves are pinned. Rollout
+  with Group Policy: see [docs/endpoints.md](docs/endpoints.md#rollout-from-active-directory-group-policy).
 - Not yet: the Credential Provider gateway `portal/cp.php` with per-endpoint secrets (4c),
-  signed self-update (4d).
+  signed self-update (4d), the agent MSI for GPO (agent side).
 
 ## Background worker
 
@@ -331,7 +339,11 @@ published. The first optional run downloads a Debian image and Samba packages;
 do not run it when downloads are prohibited. If buildx settings are unwritable,
 set `BUILDX_CONFIG` to a writable temporary directory.
 
-**Validation status (2026-11-08):** all 87 Samba AD checks pass, together with the
+`tests/e2e-ad-endpoints.php` (same run) checks computer lookups in OUs and nested groups,
+approval from AD (unknown, disabled, wrong-address and duplicate computers stay pending),
+rule order, AD membership changes, administrator pinning and identity binding (27 checks).
+
+**Validation status (2026-11-09):** all 87 Samba AD checks and 27 endpoint AD checks pass, together with the
 default suite. Running them found three bugs, fixed in this stage (see below): the Samba
 image missed `samba-ad-provision`, new AD users had no display name until the second sync,
 and AD password + code always failed when an account suffix was set. A fourth issue

@@ -101,6 +101,35 @@ writes its registry values under
 - Offline: `pam_radius` has no cache; Linux machines need a reachable RADIUS server
   (two servers for failover).
 
+## Rollout from Active Directory (Group Policy)
+
+1. **Install with GPO.** Deploy the agent MSI (`sohobotp-agent.msi`, properties `PORTAL`, `TOKEN`,
+   `PIN`, optional `CAFILE`) with Computer Configuration → Software Installation, or a startup
+   script that runs `sohobotp-agent.exe install ...`. The Credential Provider MSI is deployed
+   the same way (stage 4c makes the agent install it).
+2. **Token with Active Directory approval.** Everything in a GPO is readable by every domain
+   user (SYSVOL), so the token can be copied. Create it with *Approved automatically when the
+   computer is in Active Directory*: a new machine stays **pending** (no configuration, no
+   secrets) until the portal's worker finds its computer account and approves it when
+   - the account exists (sAMAccountName = host name + `$`) and is enabled;
+   - its `dNSHostName` resolves (portal DNS) to the address the machine enrolled from;
+   - no other active endpoint already uses that computer account.
+
+   Otherwise it waits for an administrator (Approve / Reject on the endpoint page), with the
+   reason shown. Residual risk: someone on the same network address as a real computer that
+   is not yet enrolled could claim its name; use manual approval where that matters.
+3. **Policy from AD.** Rules on the Endpoint groups page map a computer's **OU** (or any OU
+   below it) or its **AD group** (nested membership included) to an endpoint group; the first
+   matching rule wins. The worker re-checks every 15 minutes and right after an enrolment,
+   so moving a computer to another OU or group changes its policy at the next check-in.
+   A machine moved by an administrator is pinned until "Let AD rules choose the group".
+4. **Identity binding.** The computer account found first stays bound to the endpoint: if
+   the machine later reports another host name it keeps its account (shown as needing
+   attention) and cannot take over another computer's policy.
+
+The lookups use the Directory page's service account (read-only, LDAPS recommended) and
+need Active Directory (server type 1).
+
 ## Inventory and health
 
 Each check-in reports: hostname, OS and version, domain, IP addresses, agent version,

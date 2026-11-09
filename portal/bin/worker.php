@@ -64,6 +64,11 @@ function tick(): void
         });
         log_line('scheduled directory sync ' . (empty($job['already_active']) ? 'queued' : 'skipped (one is already active)'));
     }
+    $endpoints = new Portal\Endpoints();
+    if ($endpoints->isDirectoryCheckDue(time())) {
+        $job = Jobs::enqueue('endpoints.directory', [], 'scheduler');
+        log_line('scheduled endpoint AD check ' . (empty($job['already_active']) ? 'queued' : 'skipped (one is already active)'));
+    }
     while (null !== ($job = Jobs::claimNext())) {
         log_line("running {$job['type']} {$job['id']} for {$job['requested_by']}");
         run_job($job, $directory);
@@ -117,6 +122,21 @@ function run_job(array $job, Directory $directory): void
                 Jobs::finish($job['id'], $result['ok'] ? 'succeeded' : 'failed', ['log' => explode("\n", $result['output'])], $error);
                 $audit->record('radius.apply', $result['ok'] ? 'success' : 'failure', '', ['job' => $job['id']]);
                 log_line("radius apply {$job['id']} " . ($result['ok'] ? 'applied' : 'failed'));
+                break;
+
+            case 'endpoints.directory':
+                Jobs::progress($job['id'], 'Reading computer accounts in Active Directory');
+                $only = $job['params']['endpoint'] ?? null;
+                $result = (new Portal\Endpoints())->checkDirectory(is_string($only) ? $only : null);
+                Jobs::finish($job['id'], 'succeeded', $result);
+                Audit::setActor('directory-rules');
+                foreach ($result['approved'] as $id) {
+                    $audit->record('endpoint.approve', 'success', $id, ['endpoint' => $id, 'by' => 'active-directory', 'job' => $job['id']]);
+                }
+                foreach ($result['moved'] as $move) {
+                    $audit->record('endpoint.move', 'success', $move['endpoint'], $move + ['by' => 'active-directory', 'job' => $job['id']]);
+                }
+                log_line("endpoint AD check {$job['id']}: " . json_encode(['checked' => $result['checked'], 'found' => $result['found'], 'approved' => count($result['approved']), 'moved' => count($result['moved'])]));
                 break;
 
             default:

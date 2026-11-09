@@ -104,8 +104,12 @@ without secrets.
 Response 200:
 
 ```json
-{ "checkin_interval": 60, "config": null, "update": null }
+{ "checkin_interval": 60, "state": "active", "config": null, "update": null }
 ```
+
+- `state`: `active`, or `pending` while the machine waits for approval (enrolment token with
+  administrator or Active Directory approval). A pending machine gets no configuration; the
+  agent keeps checking in at the interval and shows the state in `status`.
 
 - `config`: `null` when the agent's applied version is current; otherwise a signed
   configuration envelope (section 4). After a `failed` apply of version N the portal

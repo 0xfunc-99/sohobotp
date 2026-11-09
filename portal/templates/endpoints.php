@@ -1,10 +1,11 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<?php $healthLabel = ['online' => 'Online', 'offline' => 'Offline', 'never' => 'Never checked in', 'disabled' => 'Disabled']; ?>
-<?php $healthClass = ['online' => 'success', 'offline' => 'failure', 'never' => 'info', 'disabled' => 'denied']; ?>
+<?php $healthLabel = ['online' => 'Online', 'offline' => 'Offline', 'never' => 'Never checked in', 'pending' => 'Waiting for approval', 'disabled' => 'Disabled']; ?>
+<?php $healthClass = ['online' => 'success', 'offline' => 'failure', 'never' => 'info', 'pending' => 'info', 'disabled' => 'denied']; ?>
 <section class="cards" aria-label="Endpoint status">
   <div class="card"><span class="card-label">Endpoints</span><span class="card-value"><?= (int) $total ?></span></div>
   <div class="card"><span class="card-label">Online</span><span class="card-value"><?= (int) $counts['online'] ?></span></div>
   <div class="card<?= $counts['offline'] > 0 ? ' card-warning' : '' ?>"><span class="card-label">Offline</span><span class="card-value"><?= (int) $counts['offline'] ?></span></div>
+  <div class="card<?= $counts['pending'] > 0 ? ' card-warning' : '' ?>"><a class="card-label" href="<?= e(route('endpoints', ['health' => 'pending'])) ?>">Waiting for approval</a><span class="card-value"><?= (int) $counts['pending'] ?></span></div>
   <div class="card<?= $counts['attention'] > 0 ? ' card-warning' : '' ?>"><span class="card-label">Need attention</span><span class="card-value"><?= (int) $counts['attention'] ?></span></div>
 </section>
 
@@ -40,7 +41,7 @@
             <td><a href="<?= e(route('endpoint', ['id' => $r['id']])) ?>"><strong><?= e($inv['hostname'] ?: $r['id']) ?></strong></a>
               <?php if ('' !== $inv['domain']): ?><br><span class="muted"><?= e($inv['domain']) ?></span><?php endif; ?></td>
             <td><?= e(Portal\Endpoints::OS[$r['os']] ?? $r['os']) ?><?php if ('' !== $inv['os_name']): ?><br><span class="muted"><?= e(trim($inv['os_name'] . ' ' . $inv['os_version'])) ?></span><?php endif; ?></td>
-            <td><?= e($names[$r['group_id']] ?? '?') ?></td>
+            <td><?= e($names[$r['group_id']] ?? '?') ?><?php if (str_starts_with($r['assigned_by'] ?? '', 'rule:')): ?><br><span class="muted">by AD rule</span><?php endif; ?></td>
             <td><span class="status status-<?= e($healthClass[$r['health']]) ?>"><?= e($healthLabel[$r['health']]) ?></span>
               <?php if (null !== $r['attention']): ?><br><span class="status status-failure" title="<?= e($r['attention']) ?>">needs attention</span><?php endif; ?></td>
             <td class="nowrap"><?= e(format_time($r['last_seen'])) ?></td>

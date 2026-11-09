@@ -58,6 +58,14 @@ final class Endpoints
             'server_timeout'   => 5,
         ],
     ];
+    public const APPROVAL = [
+        'none'      => 'Active immediately',
+        'manual'    => 'An administrator approves each machine',
+        'directory' => 'Approved automatically when the computer is in Active Directory (else an administrator approves)',
+    ];
+    public const RULE_TYPES = ['ou' => 'Computer is in OU (or below)', 'group' => 'Computer is member of AD group (nested included)'];
+    /** How often the worker re-reads computer accounts when rules or AD approvals exist. */
+    public const DIRECTORY_CHECK_SECONDS = 900;
     public const TIME_WINDOW = 300;
     public const NONCE_TTL = 600;
     public const MAX_BODY = 262144;
@@ -160,6 +168,11 @@ final class Endpoints
             foreach ($data['tokens'] ?? [] as $token) {
                 if ($token['group_id'] === $id && self::tokenUsable($token)) {
                     throw new ValidationException('Revoke the enrolment tokens of this group first.');
+                }
+            }
+            foreach ($data['rules'] ?? [] as $rule) {
+                if ($rule['group_id'] === $id) {
+                    throw new ValidationException('Delete the Active Directory rules that assign machines to this group first.');
                 }
             }
             unset($data['groups'][$id]);
@@ -281,8 +294,11 @@ final class Endpoints
     }
 
     /** @return array{0: array, 1: string} the token record and the token itself (show once) */
-    public function createToken(string $groupId, string $label, int $hours, int $maxUses, string $createdBy): array
+    public function createToken(string $groupId, string $label, int $hours, int $maxUses, string $createdBy, string $approval = 'none'): array
     {
+        if (!isset(self::APPROVAL[$approval])) {
+            throw new ValidationException('Unknown approval mode.');
+        }
         if (null === $this->group($groupId)) {
             throw new ValidationException('Choose an endpoint group.');
         }
@@ -299,7 +315,7 @@ final class Endpoints
         $record = [
             'id' => $id, 'hash' => hash('sha256', $secret), 'group_id' => $groupId, 'label' => $label,
             'created_by' => $createdBy, 'created_at' => $now, 'expires_at' => $now + 3600 * $hours,
-            'max_uses' => $maxUses, 'uses' => 0, 'revoked' => false,
+            'max_uses' => $maxUses, 'uses' => 0, 'revoked' => false, 'approval' => $approval,
         ];
         $this->store->update(static function (array &$data) use ($record): void {
             foreach ($data['tokens'] ?? [] as $key => $token) {
@@ -384,6 +400,9 @@ final class Endpoints
         if ('disabled' === $endpoint['status']) {
             return 'disabled';
         }
+        if ('pending' === $endpoint['status']) {
+            return 'pending';
+        }
         if (null === ($endpoint['last_seen'] ?? null)) {
             return 'never';
         }
@@ -418,10 +437,252 @@ final class Endpoints
                 throw new ValidationException('This endpoint does not exist.');
             }
             $data['group_id'] = $groupId;
+            $data['assigned_by'] = 'admin';
+            $data['group_locked'] = true; // AD rules no longer move this machine
             return $data;
         });
         $this->syncRadiusClients(fn (array $e): bool => $e['id'] === $id);
         return self::public($endpoint);
+    }
+
+    /** Let the Active Directory rules choose the group again. */
+    public function unlockGroup(string $id): void
+    {
+        self::endpointStore($id)->update(static function (array &$data): void {
+            if ([] === $data) {
+                throw new ValidationException('This endpoint does not exist.');
+            }
+            $data['group_locked'] = false;
+        });
+    }
+
+    public function approve(string $id): array
+    {
+        $endpoint = self::endpointStore($id)->update(static function (array &$data): array {
+            if ([] === $data || 'pending' !== $data['status']) {
+                throw new ValidationException('This endpoint is not waiting for approval.');
+            }
+            $data['status'] = 'active';
+            $data['approved_at'] = time();
+            $data['approval_note'] = '';
+            return $data;
+        });
+        $this->syncRadiusClients(fn (array $e): bool => $e['id'] === $id);
+        return self::public($endpoint);
+    }
+
+    // ------------------------------------------------------------------
+    // Active Directory: assignment rules and computer checks
+    // ------------------------------------------------------------------
+
+    /** @return list<array> rules in evaluation order (first match wins) */
+    public function rules(): array
+    {
+        return array_values($this->store->read()['rules'] ?? []);
+    }
+
+    public function addRule(string $type, string $value, string $groupId): array
+    {
+        $value = trim(preg_replace('/\s*,\s*/', ',', $value) ?? '');
+        if (!isset(self::RULE_TYPES[$type])) {
+            throw new ValidationException('Unknown rule type.');
+        }
+        if ('ou' === $type && !preg_match('/^(OU|CN)=[^,]+(,(OU|CN|DC)=[^,]+)*,DC=[^,]+$/i', $value)) {
+            throw new ValidationException('Enter the OU as a distinguished name, e.g. OU=Laptops,OU=Paris,DC=example,DC=com.');
+        }
+        if ('group' === $type && !preg_match('/^[^"\/\\\[\]:;|=,+*?<>]{1,64}$/', $value)) {
+            throw new ValidationException('Enter the AD group name (sAMAccountName), e.g. MFA-Servers.');
+        }
+        if (null === $this->group($groupId)) {
+            throw new ValidationException('Choose an endpoint group.');
+        }
+        return $this->store->update(static function (array &$data) use ($type, $value, $groupId): array {
+            $rule = ['id' => bin2hex(random_bytes(6)), 'type' => $type, 'value' => $value, 'group_id' => $groupId, 'created_at' => time()];
+            $data['rules'] = array_values($data['rules'] ?? []);
+            $data['rules'][] = $rule;
+            return $rule;
+        });
+    }
+
+    public function deleteRule(string $id): array
+    {
+        return $this->store->update(static function (array &$data) use ($id): array {
+            foreach ($data['rules'] ?? [] as $i => $rule) {
+                if ($rule['id'] === $id) {
+                    unset($data['rules'][$i]);
+                    $data['rules'] = array_values($data['rules']);
+                    return $rule;
+                }
+            }
+            throw new ValidationException('This rule does not exist.');
+        });
+    }
+
+    public function moveRule(string $id, int $direction): void
+    {
+        $this->store->update(static function (array &$data) use ($id, $direction): void {
+            $rules = array_values($data['rules'] ?? []);
+            foreach ($rules as $i => $rule) {
+                $j = $i + ($direction < 0 ? -1 : 1);
+                if ($rule['id'] === $id && isset($rules[$j])) {
+                    [$rules[$i], $rules[$j]] = [$rules[$j], $rules[$i]];
+                    break;
+                }
+            }
+            $data['rules'] = $rules;
+        });
+    }
+
+    /** First rule matching a computer account, or null. */
+    public static function matchRule(array $rules, array $computer): ?array
+    {
+        $dn = strtolower(preg_replace('/\s*,\s*/', ',', $computer['dn']) ?? '');
+        $groups = array_map('strtolower', $computer['groups']);
+        foreach ($rules as $rule) {
+            $value = strtolower($rule['value']);
+            if (('ou' === $rule['type'] && str_ends_with($dn, ',' . $value))
+                || ('group' === $rule['type'] && in_array($value, $groups, true))) {
+                return $rule;
+            }
+        }
+        return null;
+    }
+
+    /** Whether the worker should re-check computer accounts now. */
+    public function isDirectoryCheckDue(int $now): bool
+    {
+        $data = $this->store->read();
+        $hasRules = [] !== ($data['rules'] ?? []);
+        $needed = $hasRules;
+        foreach ($this->endpoints() as $endpoint) {
+            $waiting = 'pending' === $endpoint['status'] && 'directory' === ($endpoint['approval'] ?? '');
+            // enrolled after the last check started (a failed check does not loop: its start time counts)
+            $unchecked = 'disabled' !== $endpoint['status'] && null === ($endpoint['directory'] ?? null)
+                && ($data['directory_check_at'] ?? 0) <= $endpoint['enrolled_at'];
+            if (($waiting || $hasRules) && $unchecked) {
+                return true; // a machine enrolled since the last check: do not wait for the interval
+            }
+            $needed = $needed || $waiting;
+        }
+        return $needed && ($data['directory_check_at'] ?? 0) + self::DIRECTORY_CHECK_SECONDS <= $now;
+    }
+
+    /**
+     * Read the computer accounts of the endpoints (all, or one), then:
+     * - approve pending machines enrolled with an "Active Directory" token when the computer
+     *   account exists, is enabled, its DNS name resolves to the enrolment address and no
+     *   other active endpoint already uses it;
+     * - move machines to the group of the first matching rule (unless an administrator
+     *   placed them by hand).
+     * Runs in the worker. $resolver(host) returns the host's IP addresses (tests replace it).
+     */
+    public function checkDirectory(?string $onlyId = null, ?callable $resolver = null): array
+    {
+        $resolver ??= static function (string $host): array {
+            $ips = [];
+            foreach (@dns_get_record($host, DNS_A | DNS_AAAA) ?: [] as $record) {
+                $ips[] = $record['ip'] ?? $record['ipv6'] ?? '';
+            }
+            return [] !== array_filter($ips) ? $ips : (@gethostbynamel($host) ?: []);
+        };
+        $all = $this->endpoints();
+        // The computer name is bound at the first match: a machine that later reports another
+        // host name keeps its computer account (and cannot switch to someone else's).
+        $nameOf = static fn (array $e): string => '' !== ($e['ad_name'] ?? '') ? $e['ad_name'] : $e['inventory']['hostname'];
+        $targets = array_values(array_filter($all, static fn (array $e): bool => 'disabled' !== $e['status']
+            && '' !== $nameOf($e) && (null === $onlyId || $e['id'] === $onlyId)));
+        $this->store->update(static function (array &$data): void {
+            $data['directory_check_at'] = time();
+        });
+        $summary = ['checked' => count($targets), 'found' => 0, 'not_found' => [], 'approved' => [], 'moved' => []];
+        if ([] === $targets) {
+            return $summary;
+        }
+        try {
+            $computers = (new Directory())->computers(array_map($nameOf, $targets));
+        } catch (ValidationException $error) {
+            // remember the attempt, so machines wait for the next interval instead of re-queuing
+            foreach ($targets as $endpoint) {
+                self::endpointStore($endpoint['id'])->update(static function (array &$data) use ($error): void {
+                    if ([] !== $data && null === ($data['directory'] ?? null)) {
+                        $data['directory'] = ['found' => false, 'error' => $error->getMessage(), 'checked_at' => time()];
+                    }
+                });
+            }
+            throw $error;
+        }
+        $rules = $this->rules();
+        $changed = [];
+        $claimed = []; // computer DNs approved in this run: never two endpoints for one computer
+        foreach ($targets as $endpoint) {
+            $name = $nameOf($endpoint);
+            $computer = $computers[strtolower($name)] ?? null;
+            $note = '';
+            $approve = false;
+            if (null === $computer) {
+                $summary['not_found'][] = $name;
+                $note = 'No computer account named ' . strtoupper(substr(explode('.', $name)[0], 0, 15)) . ' in Active Directory.';
+            } else {
+                $summary['found']++;
+                if ('pending' === $endpoint['status'] && 'directory' === ($endpoint['approval'] ?? '')) {
+                    $duplicate = false;
+                    foreach ($all as $other) {
+                        if ($other['id'] !== $endpoint['id'] && 'active' === $other['status'] && 0 === strcasecmp($other['directory']['dn'] ?? '', $computer['dn'])) {
+                            $duplicate = true;
+                        }
+                    }
+                    $resolved = '' !== $computer['dns_host'] ? $resolver($computer['dns_host']) : [];
+                    $duplicate = $duplicate || isset($claimed[strtolower($computer['dn'])]);
+                    if (!$computer['enabled']) {
+                        $note = 'The computer account is disabled in Active Directory.';
+                    } elseif ($duplicate) {
+                        $note = 'Another active endpoint already uses this computer account (re-installed machine?).';
+                    } elseif (!in_array($endpoint['enrolled_ip'], $resolved, true)) {
+                        $note = 'The computer\'s DNS name (' . ($computer['dns_host'] ?: 'none') . ') does not resolve to the enrolment address ' . $endpoint['enrolled_ip'] . '.';
+                    } else {
+                        $approve = true;
+                        $claimed[strtolower($computer['dn'])] = true;
+                    }
+                }
+            }
+            $target = null;
+            if (null !== $computer && !($endpoint['group_locked'] ?? false)) {
+                $rule = self::matchRule($rules, $computer);
+                if (null !== $rule && $rule['group_id'] !== $endpoint['group_id'] && null !== $this->group($rule['group_id'])) {
+                    $target = $rule;
+                }
+            }
+            self::endpointStore($endpoint['id'])->update(static function (array &$data) use ($computer, $note, $approve, $target, $name): void {
+                if ([] === $data) {
+                    return;
+                }
+                if (null !== $computer && '' === ($data['ad_name'] ?? '')) {
+                    $data['ad_name'] = strtolower($name);
+                }
+                $data['directory'] = null === $computer ? ['found' => false, 'checked_at' => time()] : ['found' => true, 'checked_at' => time()] + $computer;
+                $data['approval_note'] = 'pending' === $data['status'] && !$approve ? $note : '';
+                if ($approve && 'pending' === $data['status']) {
+                    $data['status'] = 'active';
+                    $data['approved_at'] = time();
+                }
+                if (null !== $target) {
+                    $data['group_id'] = $target['group_id'];
+                    $data['assigned_by'] = 'rule:' . $target['id'];
+                }
+            });
+            if ($approve) {
+                $summary['approved'][] = $endpoint['id'];
+                $changed[$endpoint['id']] = true;
+            }
+            if (null !== $target) {
+                $summary['moved'][] = ['endpoint' => $endpoint['id'], 'from' => $endpoint['group_id'], 'to' => $target['group_id'], 'rule' => $target['id']];
+                $changed[$endpoint['id']] = true;
+            }
+        }
+        if ([] !== $changed) {
+            $this->syncRadiusClients(static fn (array $e): bool => isset($changed[$e['id']]));
+        }
+        return $summary;
     }
 
     public function deleteEndpoint(string $id): array
@@ -526,19 +787,21 @@ final class Endpoints
         if (!preg_match('/^([0-9a-f]{12})\.([A-Za-z0-9_-]{32})$/', $token, $m)) {
             throw new AgentError('bad_token', 401, 'Invalid enrolment token.');
         }
-        $groupId = $this->store->update(static function (array &$data) use ($m): string {
+        $groupId = $this->store->update(static function (array &$data) use ($m): array {
             $record = $data['tokens'][$m[1]] ?? null;
             if (null === $record || !hash_equals($record['hash'], hash('sha256', $m[2])) || !self::tokenUsable($record) || !isset($data['groups'][$record['group_id']])) {
                 throw new AgentError('bad_token', 401, 'Invalid, expired or used-up enrolment token.');
             }
             $data['tokens'][$m[1]]['uses']++;
-            return $record['group_id'];
+            return [$record['group_id'], $record['approval'] ?? 'none'];
         });
+        [$groupId, $approval] = $groupId;
 
         $id = bin2hex(random_bytes(10));
         $now = time();
         $record = [
-            'id' => $id, 'group_id' => $groupId, 'status' => 'active', 'os' => $inventory['os'],
+            'id' => $id, 'group_id' => $groupId, 'status' => 'none' === $approval ? 'active' : 'pending', 'os' => $inventory['os'],
+            'approval' => $approval, 'approval_note' => '', 'assigned_by' => 'token', 'group_locked' => false, 'directory' => null,
             'sign_key' => base64_encode($signKey), 'box_key' => base64_encode($boxKey),
             'enrolled_at' => $now, 'enrolled_ip' => $ip, 'token_id' => $m[1], 'portal_host' => $host,
             'inventory' => $inventory, 'last_seen' => null, 'last_ip' => $ip,
@@ -551,6 +814,9 @@ final class Endpoints
             $data = $record;
         });
         $this->syncRadiusClients(fn (array $e): bool => $e['id'] === $id);
+        if ('directory' === $approval || [] !== $this->rules()) {
+            Jobs::enqueue('endpoints.directory', [], 'agent-enrolment');
+        }
         return [
             'endpoint_id' => $id,
             'portal_key' => base64_encode($this->publicKey()),
@@ -573,7 +839,7 @@ final class Endpoints
             throw new AgentError('bad_request', 400, 'Missing or malformed signature headers.');
         }
         $endpoint = $this->endpoint($id) ?? throw new AgentError('unknown_endpoint', 401, 'Unknown endpoint.');
-        if ('active' !== $endpoint['status']) {
+        if ('disabled' === $endpoint['status']) {
             throw new AgentError('disabled', 403, 'This endpoint has been disabled in the portal.');
         }
         if (abs(time() - (int) $time) > self::TIME_WINDOW) {
@@ -604,6 +870,17 @@ final class Endpoints
 
         $endpoint = $this->endpoint($id) ?? throw new AgentError('unknown_endpoint', 401, 'Unknown endpoint.');
         $group = $this->group($endpoint['group_id']);
+        if ('pending' === $endpoint['status']) {
+            self::endpointStore($id)->update(static function (array &$data) use ($inventory, $ip): void {
+                if ('' !== $inventory['os']) {
+                    $inventory['os'] = $data['os'];
+                    $data['inventory'] = $inventory;
+                }
+                $data['last_seen'] = time();
+                $data['last_ip'] = $ip;
+            });
+            return ['checkin_interval' => (int) ($group['policy']['checkin_interval'] ?? 60), 'state' => 'pending', 'config' => null, 'update' => null];
+        }
         [$policy, $secrets, $error] = $this->desired($endpoint, $group);
         $fingerprint = null === $policy ? '' : hash('sha256', json_encode([$endpoint['os'], $policy, $secrets], JSON_UNESCAPED_SLASHES));
 
@@ -639,6 +916,7 @@ final class Endpoints
         }
         return [
             'checkin_interval' => (int) ($group['policy']['checkin_interval'] ?? 60),
+            'state' => 'active',
             'config' => $config,
             'update' => null,
         ];

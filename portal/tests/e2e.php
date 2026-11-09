@@ -699,5 +699,33 @@ $auditText = (string) file_get_contents(Portal\Config::auditFile());
 check('audit has enrolment and token events, never the token or secrets', str_contains($auditText, '"action":"endpoint.enroll"') && str_contains($auditText, '"action":"endpoint.token_create"')
     && str_contains($auditText, '"action":"endpoint.disable"') && !str_contains($auditText, substr($enrolToken, 13)) && !str_contains($auditText, (string) ($pushed['secrets']['radius_secret'] ?? 'no-secret')));
 
+// ---------------------------------------------------------------- stage 4: approval of new machines, AD rules page
+$admin->get('/portal/index.php?r=endpoint-enrol');
+check('enrol page offers approval modes', str_contains($admin->body, 'name="approval"') && str_contains($admin->body, 'value="directory" selected'));
+$admin->post('/portal/index.php?r=endpoint-enrol', ['op' => 'create', 'group_id' => $endpointGroupId, 'label' => 'needs approval', 'hours' => '1', 'max_uses' => '1', 'approval' => 'manual']);
+preg_match('/<p class="secret"><code>([0-9a-f]{12}\.[A-Za-z0-9_-]{32})<\/code>/', $admin->body, $m);
+$approvalToken = $m[1] ?? '';
+$waiting = new AgentSim();
+$agentHttp->bind = '127.0.0.7';
+$waiting->id = $agentCall('enroll', $waiting->enrollRequest($approvalToken, ['hostname' => 'new-laptop', 'os' => 'linux']))['endpoint_id'] ?? null;
+$reply = $agentCall('checkin', ['inventory' => ['hostname' => 'new-laptop', 'os' => 'linux'], 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $waiting);
+check('machine from an approval token waits: no configuration', 200 === $agentHttp->status && 'pending' === ($reply['state'] ?? '') && array_key_exists('config', $reply) && null === $reply['config'], $agentHttp->body);
+$admin->get('/portal/index.php?r=endpoints');
+check('endpoint list shows the machine waiting for approval', str_contains($admin->body, 'Waiting for approval') && str_contains($admin->body, 'new-laptop'));
+$admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);
+check('endpoint page offers approve and reject', str_contains($admin->body, 'Approve this machine?') && str_contains($admin->body, 'value="approve"'));
+$admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'approve']);
+$reply = $agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $waiting);
+check('approved machine gets its configuration', 'active' === ($reply['state'] ?? '') && is_array($reply['config'] ?? null), $agentHttp->body);
+$admin->get('/portal/index.php?r=endpoint-groups');
+check('AD rules section shown, AD not configured hint', str_contains($admin->body, 'Assignment from Active Directory') && str_contains($admin->body, 'Configure Active Directory'));
+$admin->post('/portal/index.php?r=endpoint-rules', ['op' => 'add', 'type' => 'ou', 'value' => 'OU=Laptops,DC=example,DC=test', 'group_id' => $endpointGroupId]);
+$admin->get('/portal/index.php?r=endpoint-groups');
+check('AD rule added and listed', str_contains($admin->body, 'OU=Laptops,DC=example,DC=test'));
+$help->post('/portal/index.php?r=endpoint-rules', ['op' => 'add', 'type' => 'ou', 'value' => 'OU=Evil,DC=example,DC=test', 'group_id' => $endpointGroupId]);
+check('helpdesk cannot add AD rules', 403 === $help->status);
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('audit has approval and rule events', str_contains($auditText, '"action":"endpoint.approve"') && str_contains($auditText, '"action":"endpoint.rule_add"'));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -142,6 +142,7 @@ final class DirectoryController extends Controller
             'directory.sync'    => 'Directory sync',
             'directory.preview' => 'Sync preview',
             'radius.apply'      => 'RADIUS configuration',
+            'endpoints.directory' => 'Endpoint check in Active Directory',
             default             => $type,
         };
     }

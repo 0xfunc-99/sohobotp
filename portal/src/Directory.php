@@ -297,6 +297,80 @@ final class Directory
         ];
     }
 
+    /**
+     * Look up computer accounts in Active Directory (managed endpoints). Read-only, with the
+     * service account. Keys are the host names asked for (lower case); null = not found.
+     *
+     * @param list<string> $hostnames
+     * @return array<string, ?array{dn: string, dns_host: string, enabled: bool, groups: list<string>}>
+     */
+    public function computers(array $hostnames): array
+    {
+        $settings = $this->settings();
+        if (!$settings['enabled'] || 1 !== $settings['server_type']) {
+            throw new ValidationException('Active Directory is not configured (Directory page).');
+        }
+        $engine = $this->engineWithPassword(); // also applies the TLS options (LDAPTLS_*)
+        $password = (string) $engine->GetLdapServerPassword();
+        $engine->SetLdapServerPassword('');
+        $bindName = $settings['bind_dn'];
+        if (!str_contains($bindName, '=') && !str_contains($bindName, '@') && !str_contains($bindName, '\\')) {
+            $bindName .= $settings['account_suffix'];
+        }
+        $port = (int) ($settings['port'] ?: ($settings['ssl'] ? 636 : 389));
+        $connection = null;
+        foreach (preg_split('/[\s,;]+/', $settings['domain_controllers'], -1, PREG_SPLIT_NO_EMPTY) as $server) {
+            $candidate = @ldap_connect(($settings['ssl'] ? 'ldaps://' : 'ldap://') . $server . ':' . $port);
+            if (false === $candidate) {
+                continue;
+            }
+            ldap_set_option($candidate, LDAP_OPT_PROTOCOL_VERSION, 3);
+            ldap_set_option($candidate, LDAP_OPT_REFERRALS, 0);
+            ldap_set_option($candidate, LDAP_OPT_NETWORK_TIMEOUT, max(1, $settings['network_timeout'] ?: 5));
+            if (@ldap_bind($candidate, $bindName, $password)) {
+                $connection = $candidate;
+                break;
+            }
+        }
+        if (null === $connection) {
+            throw new ValidationException('Could not connect to Active Directory with the service account.');
+        }
+        $results = [];
+        foreach (array_unique(array_map('strtolower', $hostnames)) as $hostname) {
+            // NetBIOS name: first label, at most 15 characters; computer accounts end with "$"
+            $netbios = strtoupper(substr(explode('.', $hostname)[0], 0, 15));
+            if (!preg_match('/^[A-Z0-9][A-Z0-9-]{0,14}$/', $netbios)) {
+                $results[$hostname] = null;
+                continue;
+            }
+            $search = @ldap_search($connection, $settings['base_dn'], '(&(objectCategory=computer)(sAMAccountName=' . ldap_escape($netbios . '$', '', LDAP_ESCAPE_FILTER) . '))', ['distinguishedName', 'dNSHostName', 'userAccountControl'], 0, 2);
+            $entries = false === $search ? ['count' => 0] : ldap_get_entries($connection, $search);
+            if (1 !== (int) $entries['count']) {
+                $results[$hostname] = null;
+                continue;
+            }
+            $dn = (string) $entries[0]['distinguishedname'][0];
+            $groups = [];
+            // LDAP_MATCHING_RULE_IN_CHAIN: direct and nested group memberships
+            $search = @ldap_search($connection, $settings['base_dn'], '(&(objectCategory=group)(member:1.2.840.113556.1.4.1941:=' . ldap_escape($dn, '', LDAP_ESCAPE_FILTER) . '))', ['sAMAccountName'], 0, 500);
+            if (false !== $search) {
+                $found = ldap_get_entries($connection, $search);
+                for ($i = 0; $i < (int) $found['count']; $i++) {
+                    $groups[] = (string) $found[$i]['samaccountname'][0];
+                }
+            }
+            sort($groups, SORT_FLAG_CASE | SORT_STRING);
+            $results[$hostname] = [
+                'dn' => $dn,
+                'dns_host' => strtolower((string) ($entries[0]['dnshostname'][0] ?? '')),
+                'enabled' => 0 === ((int) ($entries[0]['useraccountcontrol'][0] ?? 0) & 2),
+                'groups' => $groups,
+            ];
+        }
+        ldap_unbind($connection);
+        return $results;
+    }
+
     /** Ask a running engine sync to stop (the engine checks this file in its loop). */
     public function requestStop(): void
     {

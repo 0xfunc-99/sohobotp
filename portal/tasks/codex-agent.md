@@ -86,6 +86,18 @@ as in the protocol: they are internal constants covered by the test vectors.
 10. Cross-compile `windows/amd64` in Docker. Real Windows testing will be done later by the
    user on a VM; write down exactly what to check in `agent/README.md`.
 
+### Phase 3: Group Policy rollout (after phase 2)
+
+11. Windows MSI `sohobotp-agent.msi` buildable in Docker (e.g. `msitools`/`wixl`, or WiX if
+    you can run it in a container): installs `sohobotp-agent.exe` under
+    `%ProgramFiles%\SohobOTP\Agent`, registers the service, and runs the enrolment with the
+    public properties `PORTAL`, `TOKEN`, `PIN` and optional `CAFILE` (silent install:
+    `msiexec /i sohobotp-agent.msi /qn PORTAL=... TOKEN=... PIN=...`). The token is used
+    once and never written to disk or logs; repair/upgrade keeps the existing enrolment;
+    uninstall runs `sohobotp-agent uninstall`. Document a GPO startup-script alternative.
+12. `state: "pending"` in the check-in reply (protocol section 3): keep checking in at the
+    interval without applying anything, and show "waiting for approval" in `status`.
+
 ## Tests (all in Docker; Go is not installed on the host)
 
 - `agent/tests/run-in-docker.sh` (official `golang` image, pinned version): `gofmt` check,

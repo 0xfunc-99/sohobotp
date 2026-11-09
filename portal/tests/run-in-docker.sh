@@ -92,5 +92,6 @@ if [ "${MULTIOTP_TEST_AD:-0}" = 1 ]; then
       export LDAPTLS_CACERT=/ad-cert/ad.pem
       cd /app
       php portal/tests/e2e-ad.php
+      php portal/tests/e2e-ad-endpoints.php
     '
 fi

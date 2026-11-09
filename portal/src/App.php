@@ -107,6 +107,7 @@ final class App
             'endpoint-groups'       => $endpoints->groups(),
             'endpoint-group'        => $endpoints->group(),
             'endpoint-group-delete' => $endpoints->groupDelete(),
+            'endpoint-rules'        => $endpoints->rules(),
             'endpoint-enrol'        => $endpoints->enrol(),
             'users'          => $users->index(),
             'user-new'       => $users->create(),

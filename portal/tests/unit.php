@@ -368,5 +368,43 @@ check('moved back: RADIUS client recreated', '' !== $linRecord['radius_client_id
 $endpoints->deleteEndpoint($lin->id);
 check('deleted endpoint: file and RADIUS client gone', null === $endpoints->endpoint($lin->id) && null === $radius->client($linRecord['radius_client_id']));
 
+// --- Endpoints: approval and Active Directory rules (AD itself: tests/e2e-ad-endpoints.php)
+$rules = [
+    ['id' => 'r1', 'type' => 'ou', 'value' => 'OU=Laptops,DC=example,DC=test', 'group_id' => 'laptops'],
+    ['id' => 'r2', 'type' => 'group', 'value' => 'All-Servers', 'group_id' => 'servers'],
+];
+check('rule: computer in the OU', 'r1' === (Endpoints::matchRule($rules, ['dn' => 'CN=PC01,OU=Laptops,DC=example,DC=test', 'groups' => []])['id'] ?? null));
+check('rule: computer in a sub-OU, spaces and case ignored', 'r1' === (Endpoints::matchRule($rules, ['dn' => 'CN=PC09, OU=Paris, ou=laptops, DC=example, DC=test', 'groups' => []])['id'] ?? null));
+check('rule: OU name must match a whole component', null === Endpoints::matchRule($rules, ['dn' => 'CN=PC01,OU=OldLaptops,DC=example,DC=test', 'groups' => []]));
+check('rule: group membership, first match wins', 'r2' === (Endpoints::matchRule($rules, ['dn' => 'CN=SRV01,OU=Servers,DC=example,DC=test', 'groups' => ['MFA-Servers', 'all-servers']])['id'] ?? null)
+    && 'r1' === (Endpoints::matchRule($rules, ['dn' => 'CN=PC01,OU=Laptops,DC=example,DC=test', 'groups' => ['All-Servers']])['id'] ?? null));
+check('rule: OU must be a DN', throws(static fn () => $endpoints->addRule('ou', 'Laptops', $servers['id']), ValidationException::class));
+check('rule: invalid group name refused', throws(static fn () => $endpoints->addRule('group', 'a,b=c', $servers['id']), ValidationException::class));
+check('token: unknown approval mode refused', throws(static fn () => $endpoints->createToken($servers['id'], 'x', 1, 1, 'unit', 'auto'), ValidationException::class));
+
+[, $manualToken] = $endpoints->createToken($servers['id'], 'manual', 1, 2, 'unit', 'manual');
+$pendingAgent = new AgentSim();
+$pendingAgent->id = $endpoints->enroll($pendingAgent->enrollRequest($manualToken, $linInventory + ['hostname' => 'lin-02']), '192.0.2.70', 'portal.example.test')['endpoint_id'];
+$pendingRecord = $endpoints->endpoint($pendingAgent->id);
+check('approval token: machine waits, no RADIUS client yet', 'pending' === $pendingRecord['status'] && 'pending' === $endpoints->health($pendingRecord) && '' === $pendingRecord['radius_client_id']);
+$reply = $checkin($pendingAgent, $none, null, '192.0.2.70');
+check('pending machine: check-in accepted, no configuration', 'pending' === $reply['state'] && null === $reply['config']);
+check('directory check due for machines waiting on AD only', false === $endpoints->isDirectoryCheckDue(time()));
+$endpoints->approve($pendingAgent->id);
+$approvedRecord = $endpoints->endpoint($pendingAgent->id);
+$reply = $checkin($pendingAgent, $none, null, '192.0.2.70');
+check('approved machine: RADIUS client and configuration', '' !== $approvedRecord['radius_client_id'] && 'active' === $reply['state'] && null !== $reply['config']);
+check('approve twice refused', throws(static fn () => $endpoints->approve($pendingAgent->id), ValidationException::class));
+[, $adToken] = $endpoints->createToken($servers['id'], 'ad', 1, 1, 'unit', 'directory');
+$adAgent = new AgentSim();
+$adAgent->id = $endpoints->enroll($adAgent->enrollRequest($adToken, $linInventory + ['hostname' => 'lin-03']), '192.0.2.71', 'portal.example.test')['endpoint_id'];
+check('AD approval token: check due at once after enrolment', true === $endpoints->isDirectoryCheckDue(time()));
+check('AD check without Active Directory configured fails cleanly', throws(static fn () => $endpoints->checkDirectory(), ValidationException::class));
+check('failed AD check does not loop', false === $endpoints->isDirectoryCheckDue(time() + 1));
+$endpoints->moveEndpoint($pendingAgent->id, $laptops['id']);
+check('admin move pins the group against AD rules', true === $endpoints->endpoint($pendingAgent->id)['group_locked']);
+$endpoints->deleteEndpoint($pendingAgent->id);
+$endpoints->deleteEndpoint($adAgent->id);
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

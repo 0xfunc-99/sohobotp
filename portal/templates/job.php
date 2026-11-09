@@ -7,7 +7,9 @@
   };
   $active = in_array($job['status'], Portal\Jobs::ACTIVE, true);
 ?>
-<?php if (str_starts_with($job['type'], 'radius.')): ?>
+<?php if (str_starts_with($job['type'], 'endpoints.')): ?>
+<p><a href="<?= e(route('endpoints')) ?>">← Endpoints</a> · <a href="<?= e(route('endpoint-groups')) ?>">Endpoint groups and AD rules</a></p>
+<?php elseif (str_starts_with($job['type'], 'radius.')): ?>
 <p><a href="<?= e(route('radius')) ?>">← RADIUS servers</a> · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
 <?php else: ?>
 <p><a href="<?= e(route('directory')) ?>">← Directory</a> · <a href="<?= e(route('jobs')) ?>">All jobs</a></p>
@@ -49,6 +51,16 @@
   <?php foreach (['created' => 'Created', 'disabled' => 'Disabled', 'enabled' => 'Re-enabled', 'deleted' => 'Deleted'] as $key => $label): ?>
     <?php if ([] !== $r[$key]): ?><p><strong><?= e($label) ?>:</strong> <?= $names($r[$key]) ?></p><?php endif; ?>
   <?php endforeach; ?>
+<?php endif; ?>
+
+<?php if ('endpoints.directory' === $job['type'] && is_array($r)): ?>
+  <section class="cards">
+    <div class="card"><span class="card-label">Machines checked</span><span class="card-value"><?= (int) $r['checked'] ?></span></div>
+    <div class="card"><span class="card-label">Found in AD</span><span class="card-value"><?= (int) $r['found'] ?></span></div>
+    <div class="card"><span class="card-label">Approved</span><span class="card-value"><?= count($r['approved']) ?></span></div>
+    <div class="card"><span class="card-label">Moved by rules</span><span class="card-value"><?= count($r['moved']) ?></span></div>
+  </section>
+  <?php if ([] !== $r['not_found']): ?><p><strong>No computer account:</strong> <?= $names($r['not_found']) ?></p><?php endif; ?>
 <?php endif; ?>
 
 <?php if ('directory.preview' === $job['type'] && is_array($r) && !empty($r['ok'])): ?>
