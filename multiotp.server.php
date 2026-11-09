@@ -194,6 +194,16 @@ if ($prefer == "api=vuejs") {
   $multiotp->ApiVueJs($postdata);
 exit();
 } elseif (FALSE !== mb_strpos($data,'<multiOTP')) {
+  // Portal stage 4c: with an empty or default server secret ("ClientServerSecret", public), anyone
+  // could act as a Credential Provider: read user data, check codes, fetch cache data. Refused
+  // unless a private global secret is configured or MULTIOTP_ALLOW_DEFAULT_SERVER_SECRET=1.
+  // Managed endpoints use portal/cp.php with their own secret instead.
+  if (('ClientServerSecret' == $multiotp->GetServerSecret()) && ('1' !== getenv('MULTIOTP_ALLOW_DEFAULT_SERVER_SECRET'))) {
+    header('HTTP/1.1 403 Forbidden');
+    header('Content-Type: text/plain');
+    echo 'Client/server mode is disabled while the default server secret is in use.';
+    exit();
+  }
   $multiotp->XmlServer($data);
   exit();
 } elseif ((FALSE !== mb_strpos($postdata,'<SOAP-ENV')) || (isset($_GET['soap'])) || (isset($_GET['wsdl']))) {

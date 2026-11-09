@@ -189,8 +189,13 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
   endpoint group, first match wins, re-checked every 15 minutes and after enrolments
   (worker job `endpoints.directory`, "Check AD now"). Administrator moves are pinned. Rollout
   with Group Policy: see [docs/endpoints.md](docs/endpoints.md#rollout-from-active-directory-group-policy).
-- Not yet: the Credential Provider gateway `portal/cp.php` with per-endpoint secrets (4c),
-  signed self-update (4d), the agent MSI for GPO (agent side).
+- **Credential Provider gateway** `portal/cp.php?e=<endpoint>` (stage 4c): the multiOTP
+  Credential Provider on each Windows machine talks to its own URL with its **own secret**
+  (pushed sealed by the agent), answered by the engine's client/server code. The offline
+  cache follows the endpoint group (off, or 1-30 days); unknown, pending, disabled and Linux
+  endpoints are refused; the last sign-in request is shown on the endpoint page.
+- Not yet: signed self-update (4d), the agent MSI for GPO (agent side), TLS verification in
+  the CP's bundled client (see docs/endpoints.md).
 
 ## Background worker
 
@@ -271,6 +276,14 @@ and page titles (default `SohobOTP`), `MULTIOTP_PORTAL_COMPANY` the logo's text 
 These are applied to every copy: `multiotp.class.php`, the generated `multiotp.php`, and
 the appliance bundles under `raspberry/boot-part/multiotp-tree/usr/local/bin/multiotp/`.
 
+### Stage 4c (both server copies)
+
+- `multiotp.server.php` and the appliance `index.php`: client/server (Credential Provider)
+  mode is refused while the server secret is empty or the public default
+  `ClientServerSecret`, unless `MULTIOTP_ALLOW_DEFAULT_SERVER_SECRET=1`. Managed Windows
+  machines use `portal/cp.php` with their own secrets; an existing legacy rollout must set
+  a private global secret first.
+
 ### Engine fixes in stage 3 (all copies)
 
 - `CheckUserLdapPassword()` wrapped every login DN without `cn=` as `CN=<dn>,<base DN>`, so
@@ -317,7 +330,8 @@ FreeRADIUS: apply with config check and restart, accept/reject, per-server secre
 sources ignored, secret rotation, challenge-response per group, PIN + code, and disabling the
 catch-all client. Then a simulated Linux agent enrols and checks in through nginx, becomes a
 FreeRADIUS client, and logs in with the secret it received; once disabled it is refused by both
-the API and FreeRADIUS. The first build downloads the Debian stack (slow); later builds are cached.
+the API and FreeRADIUS; a simulated Windows machine signs in through `cp.php` (offline cache
+stored), and the legacy root URL refuses the default secret. The first build downloads the Debian stack (slow); later builds are cached.
 
 ## Active Directory tests
 

@@ -981,6 +981,27 @@ final class Endpoints
         ], ['cp_shared_secret' => Crypto::decrypt($endpoint['cp_secret'] ?? self::endpointStore($endpoint['id'])->read()['cp_secret'])], ''];
     }
 
+    /** The endpoint's Credential Provider secret in clear (CP gateway only). */
+    public function cpSecret(string $id): string
+    {
+        return Crypto::decrypt((string) (self::endpointStore($id)->read()['cp_secret'] ?? ''));
+    }
+
+    /** Remember the last Credential Provider request (health), at most once a minute. */
+    public function touchCp(string $id, string $ip): void
+    {
+        $record = self::endpointStore($id)->read();
+        if (($record['cp_last_seen'] ?? 0) > time() - 60 && ($record['cp_last_ip'] ?? '') === $ip) {
+            return;
+        }
+        self::endpointStore($id)->update(static function (array &$data) use ($ip): void {
+            if ([] !== $data) {
+                $data['cp_last_seen'] = time();
+                $data['cp_last_ip'] = $ip;
+            }
+        });
+    }
+
     /** Signed configuration envelope (docs/agent-protocol.md section 4). */
     private function envelope(array $record, array $policy, array $secrets): array
     {

@@ -145,6 +145,40 @@ check('FreeRADIUS apply after disabling succeeded', 'succeeded' === wait_latest_
 $login = RadiusClient::authenticate('127.0.0.1', 1812, $secret, $name, next_code($seed, $step), SOURCE, 3);
 check('disabled endpoint can no longer use RADIUS', 'accepted' !== $login['result'], json_encode($login));
 
+// ---------------------------------------------------------------- Windows: Credential Provider gateway through nginx
+$windowsGroup = $endpoints->saveGroup(null, [
+    'name' => 'Appliance Windows ' . bin2hex(random_bytes(2)), 'checkin_interval' => '60', 'linux_enabled' => '', 'linux_timeout' => '5',
+    'linux_services' => [], 'linux_excluded_users' => '', 'linux_excluded_groups' => '', 'win_cpus_logon' => '0e', 'win_cpus_unlock' => '0e',
+    'win_cpus_credui' => '0e', 'win_excluded_account' => '', 'win_cache_enabled' => '1', 'win_cache_days' => '2', 'win_timeout_unlock' => '0', 'win_server_timeout' => '5',
+]);
+[, $winToken] = $endpoints->createToken($windowsGroup['id'], 'appliance windows', 1, 1, 'appliance-test');
+$windows = new AgentSim();
+[$status, $reply] = agent_post('enroll', $windows->enrollRequest($winToken, ['hostname' => 'APPLIANCE-PC', 'os' => 'windows']));
+$windows->id = $reply['endpoint_id'] ?? null;
+[$status, $reply] = agent_post('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+$winConfig = $windows->openConfig($reply['config'] ?? [], $portalKey, 0, 'windows');
+$gateway = str_replace('https://localhost/', 'https://localhost/', (string) $winConfig['policy']['server_url']);
+$laptop = sys_get_temp_dir() . '/appliance-laptop-' . bin2hex(random_bytes(3));
+foreach (['config', 'users', 'tokens', 'devices', 'groups', 'cache', 'log'] as $sub) {
+    @mkdir("$laptop/$sub", 0700, true);
+}
+$client = new Multiotp('LaptopKey', false, '', "$laptop/config");
+$client->ForceNoDisplayLog();
+foreach (['Config' => 'config', 'Users' => 'users', 'Tokens' => 'tokens', 'Devices' => 'devices', 'Groups' => 'groups', 'Cache' => 'cache', 'Log' => 'log'] as $kind => $sub) {
+    $client->{"Set{$kind}Folder"}("$laptop/$sub/");
+}
+$client->SetServerUrl(str_replace('://' . parse_url($gateway, PHP_URL_HOST), '://localhost', $gateway));
+$client->SetServerSecret((string) $winConfig['secrets']['cp_shared_secret']);
+$client->SetServerTimeout(5);
+$client->SetServerCacheLevel(1);
+$result = $client->CheckUserTokenOnServer($name, next_code($seed, $step));
+check('Credential Provider login through nginx and cp.php accepted', 0 === $result, "result $result, URL $gateway");
+check('offline cache stored on the laptop (group allows 2 days)', is_file("$laptop/users/$name.db"));
+$client->SetServerSecret('ClientServerSecret');
+$client->SetServerUrl('https://localhost/');
+check('legacy client/server endpoint refuses the default secret', 0 !== $client->CheckUserTokenOnServer($name, next_code($seed, $step)));
+$endpoints->deleteEndpoint((string) $windows->id);
+
 $endpoints->deleteEndpoint((string) $agent->id);
 $users->delete($name);
 echo "\n" . ($count - $failures) . "/$count appliance endpoint checks passed\n";

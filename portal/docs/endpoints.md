@@ -73,9 +73,11 @@ writes its registry values under
 **Security problems in the legacy CP ↔ server protocol, and what we do:**
 
 1. One global `server_secret` (default `ClientServerSecret`) for every machine.
-   → The CP gateway gives **each endpoint its own secret** (`SetServerSecret()` per
-   request, looked up from the endpoint id in the URL). One stolen laptop cannot
-   impersonate the others, and its secret can be revoked alone.
+   → **Done (4c):** the CP gateway `portal/cp.php?e=<id>` gives **each endpoint its own
+   secret** (`SetServerSecret()` per request). One stolen laptop cannot impersonate the
+   others, and disabling it replaces its secret. The legacy endpoint refuses client/server
+   mode while the default secret is in use. Note: a disabled laptop that cannot reach the
+   portal still accepts its offline-cached logins until the cache lifetime ends.
 2. The bundled client does **not verify TLS** (`verify_peer => false` in the engine).
    → The agent deploys a hardened client configuration that verifies the portal
    certificate (CA file written by the agent); this is an engine change shipped to

@@ -727,5 +727,69 @@ check('helpdesk cannot add AD rules', 403 === $help->status);
 $auditText = (string) file_get_contents(Portal\Config::auditFile());
 check('audit has approval and rule events', str_contains($auditText, '"action":"endpoint.approve"') && str_contains($auditText, '"action":"endpoint.rule_add"'));
 
+// ---------------------------------------------------------------- stage 4c: Credential Provider gateway (portal/cp.php)
+// The CP's own client is the multiOTP engine in client mode: a second engine with its own
+// folders plays the Windows machine.
+$winReply = $agentCall('checkin', ['inventory' => $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+$winConfig = null;
+try {
+    $winConfig = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows');
+} catch (Throwable $error) {
+    check('Windows config opens', false, $error->getMessage() . ' ' . $agentHttp->body);
+}
+$gatewayUrl = str_replace('https://', 'http://', (string) ($winConfig['policy']['server_url'] ?? ''));
+check('Windows config points the CP at its own gateway URL', str_contains($gatewayUrl, '/portal/cp.php?e=' . $windows->id));
+$cpUsers = new Portal\Users();
+$cpCreated = $cpUsers->create(['user' => 'cp.tester', 'display_name' => 'CP tester', 'token_serial' => '']);
+parse_str((string) parse_url((string) $cpCreated['otpauth'], PHP_URL_QUERY), $cpQuery);
+$cpSeed = base32_decode((string) ($cpQuery['secret'] ?? ''));
+$cpStep = null;
+$cpClient = static function (string $url, string $secret, string $folder): Multiotp {
+    @mkdir($folder . '/config', 0700, true);
+    foreach (['users', 'tokens', 'devices', 'groups', 'log', 'cache'] as $sub) {
+        @mkdir("$folder/$sub", 0700, true);
+    }
+    $client = new Multiotp('LaptopKey', false, '', $folder . '/config');
+    $client->ForceNoDisplayLog();
+    foreach (['Config' => 'config', 'Users' => 'users', 'Tokens' => 'tokens', 'Devices' => 'devices', 'Groups' => 'groups', 'Cache' => 'cache', 'Log' => 'log'] as $kind => $sub) {
+        $client->{"Set{$kind}Folder"}("$folder/$sub/");
+    }
+    $client->SetServerUrl($url);
+    $client->SetServerSecret($secret);
+    $client->SetServerTimeout(5);
+    $client->SetServerCacheLevel(1); // the CP asks for cache data; the portal decides
+    return $client;
+};
+$laptop = sys_get_temp_dir() . '/cp-laptop-' . bin2hex(random_bytes(4));
+$cpSecret = (string) ($winConfig['secrets']['cp_shared_secret'] ?? '');
+$result = $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep));
+check('CP gateway: right code accepted with the endpoint secret', 0 === $result, "result $result");
+check('CP gateway: offline cache off in this group, nothing cached on the laptop', !is_file("$laptop/users/cp.tester.db"));
+$result = $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', '000000' === Portal\Totp::code($cpSeed, intdiv(time(), 30)) ? '111111' : '000000');
+check('CP gateway: wrong code refused', 0 !== $result && _MULTIOTP_SERVER_AUTH_FAILED_ !== $result, "result $result");
+$result = $cpClient($gatewayUrl, 'ClientServerSecret', $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep));
+check('CP gateway: default/other secret refused', _MULTIOTP_SERVER_AUTH_FAILED_ === $result, "result $result");
+$linuxUrl = preg_replace('/e=[0-9a-f]+/', 'e=' . $linux->id, $gatewayUrl);
+check('CP gateway: a Linux endpoint id is refused', 0 !== $cpClient($linuxUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep)));
+$legacy = (new Browser($base))->post('/multiotp.server.php', ['data' => '<multiOTP version="4.0"><CheckUserExists><UserId>cp.tester</UserId></CheckUserExists></multiOTP>'], [], false);
+check('legacy server: client mode refused with the default secret', 403 === $legacy->status && str_contains($legacy->body, 'default server secret'), $legacy->status . ' ' . substr($legacy->body, 0, 120));
+
+// offline cache allowed by the group
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+$admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, ['win_cache_enabled' => '1', 'win_cache_days' => '3'] + $groupForm);
+check('group saved with offline cache', 303 === $admin->status);
+$result = $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep));
+$cached = (string) @file_get_contents("$laptop/users/cp.tester.db");
+check('CP gateway: with offline cache, the laptop stores the user after a login', 0 === $result && str_contains($cached, 'token_seed'), "result $result");
+preg_match('/^autolock_time=(\d+)/m', $cached, $m);
+check('cached copy expires within the group lifetime (3 days)', isset($m[1]) && (int) $m[1] <= time() + 3 * 86400 + 60 && (int) $m[1] > time(), $m[1] ?? 'no autolock_time');
+
+$endpointRecord = (new Portal\Endpoints())->endpoint((string) $windows->id);
+check('endpoint page data: last Credential Provider request recorded', null !== ($endpointRecord['cp_last_seen'] ?? null));
+$admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
+check('endpoint page shows the last Credential Provider request', str_contains($admin->body, 'last request'));
+$admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'disable']);
+check('CP gateway: disabled endpoint refused', 0 !== $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep)));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);
