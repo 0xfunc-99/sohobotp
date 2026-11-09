@@ -15,7 +15,7 @@
     <h1><?= e($title ?? '') ?></h1>
     <?php require PORTAL_ROOT . '/templates/partials/flashes.php'; ?>
     <?= $content ?>
-    <p class="powered">Powered by multiOTP open source</p>
+    <p class="powered">© Sohobcom · <a href="<?= e(route('licences')) ?>">Licences</a></p>
   </main>
 </body>
 </html>

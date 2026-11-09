@@ -107,6 +107,7 @@ COPY raspberry/boot-part/*.sh /boot/
 COPY raspberry/boot-part/multiotp-tree /boot/multiotp-tree/
 # Management portal (served at https://<host>/portal/), kept once in the source tree
 COPY portal /boot/multiotp-tree/usr/local/bin/multiotp/portal/
+COPY LICENSES.md COPYING COPYING.LESSER /boot/multiotp-tree/usr/local/bin/multiotp/
 
 
 ############################################################

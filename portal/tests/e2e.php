@@ -958,5 +958,11 @@ $reply = $agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none'
 check('restore without portal.key: sealed secrets cannot be used (server error, nothing leaked)', 500 === $agentHttp->status && !str_contains($agentHttp->body, 'secret'), $agentHttp->status . ' ' . $agentHttp->body);
 copy("$backup/portal/portal.key", "$data/portal.key");
 
+// ---------------------------------------------------------------- licences page (public), no third-party footer
+$public = (new Browser($base))->get('/portal/index.php?r=licences');
+check('licences page is public and lists the open-source parts', 200 === $public->status && str_contains($public->body, 'LGPL-3.0') && str_contains($public->body, 'phpseclib') && str_contains($public->body, 'Apache-2.0'));
+$admin->get('/portal/index.php?r=dashboard');
+check('footer shows the company and a Licences link, not a third-party credit', str_contains($admin->body, '© Sohobcom') && str_contains($admin->body, 'r=licences') && !str_contains($admin->body, 'Powered by'));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

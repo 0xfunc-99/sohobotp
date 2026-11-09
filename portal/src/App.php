@@ -73,6 +73,12 @@ final class App
             return;
         }
 
+        if ('licences' === $route) {
+            // public: open-source notices, no data
+            $this->view->render('licences', ['title' => 'Licences'], null === $this->admin ? 'auth' : 'app');
+            return;
+        }
+
         switch (Session::stage()) {
             case null:
                 $this->login();

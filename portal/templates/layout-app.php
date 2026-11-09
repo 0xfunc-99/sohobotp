@@ -29,7 +29,7 @@
         <li><a href="<?= e(route($item['route'])) ?>"<?= $current === $item['route'] ? ' aria-current="page"' : '' ?>><?= e($item['label']) ?></a></li>
       <?php endforeach; ?>
     </ul>
-    <p class="powered">Powered by multiOTP open source</p>
+    <p class="powered">© Sohobcom · <a href="<?= e(route('licences')) ?>">Licences</a></p>
   </nav>
   <main class="content">
     <h1><?= e($title ?? '') ?></h1>
