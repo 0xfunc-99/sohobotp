@@ -21,6 +21,8 @@ licence texts stay available. Files that SohobOTP changed keep their original li
 | Other `contrib/` files | `contrib/` | as in each file header | their authors |
 | Go standard library, golang.org/x/crypto, golang.org/x/sys | compiled into the SohobOTP agent | BSD-3-Clause | The Go Authors |
 | Windows sign-in component (from the multiOTP Credential Provider) | Windows | Apache-2.0 | SysCo systemes de communication sa, NetKnights GmbH, ArcadeJust, Last Squirrel IT |
+| PHP for Windows (embedded runtime, unchanged) | SohobOTP Sign-in installer | PHP License 3.01 | The PHP Group |
+| SetACL (unchanged) | SohobOTP Sign-in installer (sets permissions during install) | LGPL-3.0 | Helge Klein |
 
 ## Used by the SohobOTP appliance (separate programs)
 

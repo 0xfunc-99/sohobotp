@@ -25,7 +25,7 @@ Linux or macOS. Two ways:
 
 - **GitHub Actions** (`.github/workflows/windows.yml`): builds the DLLs and the MSI on a
   Windows runner when this folder changes and keeps them as artefacts.
-- **By hand** on Windows: run `get-php.ps1` once (embedded PHP runtime, not stored in git), then
+- **By hand** on Windows: run `get-php.ps1` once (embedded PHP runtime and SetACL, not stored in git), then
   `msbuild SohobOTPSignIn.sln /p:Configuration=Release /p:Platform=x64`; the MSI is in
   `WixInstall\multiOTPCredentialProviderInstaller\bin\x64\Release\`.
 

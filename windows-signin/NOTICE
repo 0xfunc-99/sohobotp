@@ -16,3 +16,8 @@ Original copyright notices:
 Changes by Sohobcom (2026): product name, file names, CLSIDs, version
 information, installer names and texts, logos and default sign-in text;
 see the git history of this folder for the exact changes.
+
+Third-party programs included in the installer, unchanged, fetched from the
+upstream project at the same commit by get-php.ps1:
+  PHP for Windows (embedded runtime)  PHP License 3.01  The PHP Group
+  SetACL                              LGPL-3.0          Helge Klein
