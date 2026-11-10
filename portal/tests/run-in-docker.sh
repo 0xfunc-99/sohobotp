@@ -42,6 +42,23 @@ docker run --rm --network "$RUN" -v "$REPO":/src:ro multiotp-portal-php sh -euc 
   printf "\$INCLUDE /etc/shadow\n" >> /etc/multiotp/portal/radius/clients.candidate.conf
   OUT=$(sh portal/bin/multiotp-portal-radius apply 2>&1 || true)
   if echo "$OUT" | grep -q "candidate file rejected"; then echo "ok   injected \$INCLUDE line rejected"; else echo "FAIL injected line accepted: $OUT"; exit 1; fi
+  echo "== FreeRADIUS helper: Symantec VIP file whitelist and site hooks"
+  sed -i "/INCLUDE \/etc\/shadow/d" /etc/multiotp/portal/radius/clients.candidate.conf
+  mkdir -p /etc/freeradius/3.0/sites-available /etc/freeradius/3.0/mods-enabled
+  printf "authorize {\n\tpreprocess\n}\npost-auth {\n\texec\n\tPost-Auth-Type REJECT {\n\t\tattr_filter.access_reject\n\t}\n}\n" > /etc/freeradius/3.0/sites-available/default
+  printf "proxy server {\n}\n" > /etc/freeradius/3.0/proxy.conf
+  cp /etc/freeradius/3.0/sites-available/default /tmp/site.orig
+  cp /tmp/unit-vip-candidate.conf /etc/multiotp/portal/radius/vip.candidate.conf
+  OUT=$(sh portal/bin/multiotp-portal-radius apply 2>&1 || true)
+  if echo "$OUT" | grep -q "candidate file rejected\|could not add"; then echo "FAIL generated VIP file or hooks rejected: $OUT"; exit 1; fi
+  echo "$OUT" | grep -q "added the Symantec VIP forwarding hooks" && echo "ok   forwarding hooks added to the site"
+  if cmp -s /etc/freeradius/3.0/sites-available/default /tmp/site.orig && [ ! -f /etc/freeradius/3.0/sohobotp-vip-proxy.conf ] && [ ! -f /etc/freeradius/3.0/mods-enabled/sohobotp_vip ] && ! grep -q sohobotp /etc/freeradius/3.0/proxy.conf; then
+    echo "ok   VIP changes rolled back when FreeRADIUS refuses (missing here)"
+  else echo "FAIL VIP changes left after a refused apply"; ls -l /etc/freeradius/3.0 /etc/freeradius/3.0/mods-enabled; exit 1; fi
+  printf "home_server x {\n\tsecret = \"a%%{exec:/bin/id}b\"\n}\n" >> /etc/multiotp/portal/radius/vip.candidate.conf
+  OUT=$(sh portal/bin/multiotp-portal-radius apply 2>&1 || true)
+  if echo "$OUT" | grep -q "VIP candidate file rejected"; then echo "ok   injected VIP lines rejected"; else echo "FAIL injected VIP lines accepted: $OUT"; exit 1; fi
+  rm -f /etc/multiotp/portal/radius/vip.candidate.conf
   OUT=$(sh portal/bin/multiotp-portal-radius apply extra 2>&1 || true)
   if echo "$OUT" | grep -q "no extra arguments"; then echo "ok   extra arguments refused"; else echo "FAIL extra arguments accepted"; exit 1; fi
 

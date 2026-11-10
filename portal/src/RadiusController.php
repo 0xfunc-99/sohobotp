@@ -21,6 +21,70 @@ final class RadiusController extends Controller
             'state'    => $radius->state(),
             'active'   => self::activeApply(),
             'canManage'=> $this->can('radius.manage'),
+            'vip'      => $radius->vipSettings(),
+            'vipActive'=> $radius->vipActive(),
+            'vipGroups'=> $radius->forwardingGroups(),
+            'vipCounts'=> (new VipMigration())->counts(),
+        ]);
+    }
+
+    /** Symantec VIP migration: the VIP Enterprise Gateway servers, test, users already on SohobOTP. */
+    public function vip(): void
+    {
+        $this->requirePermission('radius.manage');
+        $radius = new Radius();
+        $migration = new VipMigration();
+        $error = null;
+        $test = null;
+        $input = null;
+        if ($this->isPost()) {
+            $op = $this->post('op', 16);
+            try {
+                switch ($op) {
+                    case 'save':
+                        $input = $_POST;
+                        $details = $radius->saveVip($_POST);
+                        $this->audit->record('radius.vip_save', 'success', '', $details);
+                        Session::flash('success', 'Symantec VIP servers saved. Apply the configuration to activate them on FreeRADIUS.');
+                        $this->redirect('radius-vip');
+                    case 'test':
+                        $server = '2' === $this->post('server', 1) ? 2 : 1;
+                        $user = $this->post('user', 128);
+                        $test = $radius->testVip($server, $user, mb_substr((string) ($_POST['password'] ?? ''), 0, 256));
+                        $test['user'] = $user;
+                        $test['server'] = $server;
+                        $this->audit->record('radius.vip_test', 'accepted' === $test['result'] ? 'success' : 'failure', $user, ['server' => $server, 'result' => $test['result']]);
+                        break;
+                    case 'seed':
+                        $job = Jobs::enqueue('radius.vip_seed', [], $this->admin['username']);
+                        if (empty($job['already_active'])) {
+                            $this->audit->record('radius.vip_seed_requested', 'success', '', ['job' => $job['id']]);
+                        }
+                        $this->redirect('job', ['id' => $job['id']]);
+                    default:
+                        $this->notFound('Unknown action.');
+                }
+            } catch (ValidationException $invalid) {
+                $error = $invalid->getMessage();
+            }
+        }
+        $vip = $radius->vipSettings();
+        if (null !== $input) { // keep what was typed (never the secrets)
+            foreach ([1, 2] as $n) {
+                $vip['form']["address_$n"] = mb_substr((string) ($input["address_$n"] ?? ''), 0, 64);
+                $vip['form']["port_$n"] = mb_substr((string) ($input["port_$n"] ?? ''), 0, 8);
+            }
+            $vip['form']['response_window'] = mb_substr((string) ($input['response_window'] ?? ''), 0, 4);
+        }
+        $this->view->render('radius-vip', [
+            'title'   => 'Symantec VIP migration',
+            'vip'     => $vip,
+            'active'  => $radius->vipActive(),
+            'state'   => $radius->state(),
+            'groups'  => $radius->forwardingGroups(),
+            'counts'  => $migration->counts(),
+            'error'   => $error,
+            'test'    => $test,
         ]);
     }
 
@@ -36,6 +100,11 @@ final class RadiusController extends Controller
             try {
                 $saved = $radius->saveGroup($group['id'] ?? null, $_POST + ['name' => '', 'description' => '']);
                 $this->audit->record(null === $group ? 'radius.group_create' : 'radius.group_update', 'success', $saved['name'], ['policy' => $saved['policy']]);
+                if ($saved['policy']['vip_forward'] && !(new VipMigration())->isSeeded()) {
+                    // first time forwarding is switched on: users already on SohobOTP stay on it
+                    $job = Jobs::enqueue('radius.vip_seed', [], $this->admin['username']);
+                    $this->audit->record('radius.vip_seed_requested', 'success', '', ['job' => $job['id'], 'reason' => 'forwarding switched on']);
+                }
                 Session::flash('success', 'Server group saved. Apply the configuration to activate it on FreeRADIUS.');
                 $this->redirect('radius');
             } catch (ValidationException $invalid) {
@@ -166,6 +235,7 @@ final class RadiusController extends Controller
             'status'    => Radius::status(),
             'state'     => $radius->state(),
             'logins'    => Radius::recentLogins($filterUser, $filterResult),
+            'forwarded' => VipMigration::recentForwarded($filterUser),
             'filterUser'=> $filterUser,
             'filterResult' => $filterResult,
             'test'      => $test,

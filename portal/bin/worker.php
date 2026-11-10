@@ -124,6 +124,17 @@ function run_job(array $job, Directory $directory): void
                 log_line("radius apply {$job['id']} " . ($result['ok'] ? 'applied' : 'failed'));
                 break;
 
+            case 'radius.vip_seed':
+                Jobs::progress($job['id'], 'Finding the users who already sign in with SohobOTP');
+                $migration = new Portal\VipMigration();
+                $marked = $migration->seed((string) $job['requested_by']);
+                $counts = $migration->counts();
+                $result = ['marked' => $marked, 'on_sohobotp' => $counts['sohobotp'], 'sent_back' => $counts['vip']];
+                Jobs::finish($job['id'], 'succeeded', $result);
+                $audit->record('radius.vip_seed', 'success', '', $result + ['job' => $job['id']]);
+                log_line("vip seed {$job['id']}: " . json_encode($result));
+                break;
+
             case 'endpoints.directory':
                 Jobs::progress($job['id'], 'Reading computer accounts in Active Directory');
                 $only = $job['params']['endpoint'] ?? null;

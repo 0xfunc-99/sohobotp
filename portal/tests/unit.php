@@ -468,5 +468,73 @@ check('release download refused to a disabled endpoint', throws(static fn () => 
 $endpoints->deleteEndpoint($upd->id);
 putenv('MULTIOTP_PORTAL_RELEASE_KEY');
 
+// --- Symantec VIP migration: servers, generated proxy file, routing file and program
+use Portal\VipMigration;
+
+$routeFile = sys_get_temp_dir() . '/unit-route-' . bin2hex(random_bytes(3)) . '/route.json';
+putenv('MULTIOTP_PORTAL_RADIUS_ROUTE=' . $routeFile);
+@unlink(Config::dataDir() . '/vip-migration.json');
+$radius = new Radius();
+$migration = new VipMigration();
+$vipServer = ['address_1' => '192.0.2.50', 'port_1' => '1812', 'secret_1' => 'Vip-Secret-123456', 'response_window' => '10', 'message_authenticator' => 'yes'];
+check('VIP: host names refused (IPv4 only)', throws(static fn () => $radius->saveVip(['address_1' => 'vip.example.com'] + $vipServer), ValidationException::class));
+check('VIP: secret with a quote refused', throws(static fn () => $radius->saveVip(['secret_1' => 'abc"defghij'] + $vipServer), ValidationException::class));
+check('VIP: secret with % refused (no FreeRADIUS expansion)', throws(static fn () => $radius->saveVip(['secret_1' => 'abc%{exec:x}defg'] + $vipServer), ValidationException::class));
+check('VIP: a new server needs its secret', throws(static fn () => $radius->saveVip(['secret_1' => ''] + $vipServer), ValidationException::class));
+check('VIP: server 2 alone refused', throws(static fn () => $radius->saveVip(['address_1' => '', 'secret_1' => '', 'address_2' => '192.0.2.51', 'secret_2' => 'Vip-Second-654321']), ValidationException::class));
+check('VIP: answer timeout 5-60 s', throws(static fn () => $radius->saveVip(['response_window' => '2'] + $vipServer), ValidationException::class));
+check('VIP: the local FreeRADIUS port is refused', throws(static fn () => $radius->saveVip(['address_1' => '127.0.0.1', 'port_1' => '1812'] + $vipServer), ValidationException::class));
+$details = $radius->saveVip(['address_2' => '192.0.2.51', 'port_2' => '1645', 'secret_2' => 'Vip-Second-654321'] + $vipServer);
+check('VIP: two servers saved, secrets sealed, not in the audit details', 2 === count($radius->vipSettings()['servers'])
+    && !isset($radius->vipSettings()['servers'][0]['secret'])
+    && !str_contains((string) file_get_contents(Config::dataDir() . '/radius.json'), 'Vip-Secret-123456')
+    && !str_contains(json_encode($details), 'Vip-'));
+$proxy = $radius->renderVip();
+check('VIP: proxy file has both home servers, a fail-over pool and the realm (no stripping)',
+    str_contains($proxy, "home_server sohobotp_vip_1 {\n\ttype = auth\n\tipaddr = 192.0.2.50\n\tport = 1812\n\tsecret = \"Vip-Secret-123456\"")
+    && str_contains($proxy, "home_server sohobotp_vip_2 {") && str_contains($proxy, "\tport = 1645\n")
+    && str_contains($proxy, "type = fail-over\n\thome_server = sohobotp_vip_1\n\thome_server = sohobotp_vip_2\n")
+    && str_contains($proxy, "realm sohobotp_vip {\n\tauth_pool = sohobotp_vip_pool\n\tnostrip\n}")
+    && str_contains($proxy, 'require_message_authenticator = yes') && str_contains($proxy, 'response_window = 10'));
+file_put_contents(sys_get_temp_dir() . '/unit-vip-candidate.conf', $proxy);
+$radius->saveVip(['secret_1' => ''] + $vipServer);
+check('VIP: blank secret keeps the saved one; removing server 2', str_contains($radius->renderVip(), 'Vip-Secret-123456') && !str_contains($radius->renderVip(), 'sohobotp_vip_2'));
+check('VIP: not active before an apply', !$radius->vipActive());
+$vipGroup = $radius->saveGroup(null, ['name' => 'Migrating VPN', 'vip_forward' => '1', 'cache_timeout' => '3600']);
+[$vipClient] = $radius->createClient(['name' => 'vpn-migrating', 'address' => '192.0.2.60', 'group_id' => $vipGroup['id'], 'nas_type' => 'other', 'require_message_authenticator' => '1']);
+$sn = Radius::shortname($vipClient);
+check('VIP: group with forwarding saved, its servers listed', true === $vipGroup['policy']['vip_forward'] && in_array($sn, $radius->forwardingClients(), true) && in_array('Migrating VPN', $radius->forwardingGroups(), true));
+$export = $migration->export();
+$route = json_decode((string) @file_get_contents($routeFile), true);
+check('VIP: no forwarding until the servers are applied on FreeRADIUS', $export['written'] && false === ($route['enabled'] ?? null));
+$appliedHash = hash('sha256', $radius->renderVip()); // what a successful apply records
+(new Portal\JsonStore(Config::dataDir() . '/radius.json'))->update(static function (array &$data) use ($appliedHash): void {
+    $data['vip_applied'] = $appliedHash;
+});
+check('VIP: active once applied', $radius->vipActive());
+$migration->set(['Alice.Smith'], 'sohobotp', 'unit', 'test');
+$route = json_decode((string) file_get_contents($routeFile), true);
+check('VIP: routing file lists the forwarding server and the users on SohobOTP (lower case)', true === $route['enabled'] && isset($route['clients'][$sn]) && isset($route['sohobotp']['alice.smith']) && 1 === count($route['clients']));
+check('VIP: routing file not readable by other users', 0 === (fileperms($routeFile) & 0o007) && 0 === (fileperms(dirname($routeFile)) & 0o007));
+$run = static fn (string $user, string $client): string => (string) shell_exec('SOHOBOTP_VIP_ROUTE_FILE=' . escapeshellarg($routeFile) . ' php ' . escapeshellarg(PORTAL_ROOT . '/bin/sohobotp-vip-route') . ' ' . escapeshellarg($user) . ' ' . escapeshellarg($client) . ' 2>&1');
+check('route: a user on SohobOTP is not forwarded (any case, DOMAIN\\user, user@domain)', '' === $run('alice.smith', $sn) && '' === $run('ALICE.Smith', $sn) && '' === $run('CORP\\alice.smith', $sn) && '' === $run('alice.smith@corp.example', $sn));
+check('route: other users (also unknown ones) are forwarded', "Proxy-To-Realm := \"sohobotp_vip\"\n" === $run('bob', $sn) && "Proxy-To-Realm := \"sohobotp_vip\"\n" === $run('never.seen', $sn));
+check('route: a server without forwarding never forwards', '' === $run('bob', 'fw-somewhere-else'));
+check('route: odd user names are just data', "Proxy-To-Realm := \"sohobotp_vip\"\n" === $run("x\"; \$(id) `id`", $sn));
+$migration->set(['alice.smith'], 'vip', 'unit', 'test');
+check('route: a user sent back is forwarded again', str_contains($run('alice.smith', $sn), 'Proxy-To-Realm'));
+check('VIP: counts', 0 === $migration->counts()['sohobotp'] && 1 === $migration->counts()['vip']);
+file_put_contents($routeFile, '{damaged');
+check('route: a damaged routing file forwards nobody', '' === $run('bob', $sn));
+$migration->forget('Alice.Smith');
+check('VIP: deleted user forgotten', null === $migration->stateOf('alice.smith'));
+$radius->saveGroup($vipGroup['id'], ['name' => 'Migrating VPN', 'cache_timeout' => '3600']);
+check('VIP: forwarding switched off: routing disabled at once', false === json_decode((string) file_get_contents($routeFile), true)['enabled']);
+$radius->deleteClient($vipClient['id']);
+$radius->deleteGroup($vipGroup['id']);
+$radius->saveVip(['address_1' => '', 'secret_1' => '']);
+check('VIP: no server: proxy file without realm', !str_contains($radius->renderVip(), 'realm') && !$radius->vipActive());
+putenv('MULTIOTP_PORTAL_RADIUS_ROUTE');
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

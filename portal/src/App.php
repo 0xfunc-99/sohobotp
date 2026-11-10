@@ -108,6 +108,7 @@ final class App
             'radius-client-action' => $radius->clientAction(),
             'radius-apply'         => $radius->apply(),
             'radius-diagnostics'   => $radius->diagnostics(),
+            'radius-vip'           => $radius->vip(),
             'endpoints'             => $endpoints->index(),
             'endpoint'              => $endpoints->endpoint(),
             'endpoint-groups'       => $endpoints->groups(),

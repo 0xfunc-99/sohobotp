@@ -1,0 +1,47 @@
+#!/usr/bin/php
+<?php
+/**
+ * SohobOTP - Symantec VIP migration routing, run by FreeRADIUS for every Access-Request
+ * (exec module sohobotp_vip_route, installed by multiotp-portal-radius; this file is
+ * installed root-owned as /usr/local/sbin/sohobotp-vip-route).
+ *
+ *   sohobotp-vip-route <User-Name> <client shortname>
+ *
+ * Prints  Proxy-To-Realm := "sohobotp_vip"  when the request must go to the Symantec VIP
+ * Enterprise Gateway: the RADIUS client is in a server group with forwarding on, and the
+ * user is not on SohobOTP yet. Prints nothing otherwise (SohobOTP checks the login).
+ * Always exits 0; any problem (no file, bad file) means "SohobOTP", never "Symantec".
+ *
+ * The routing file is written by the portal (Portal\VipMigration::export):
+ *   {"enabled": true, "clients": {"<shortname>": 1}, "sohobotp": {"<lower-case user>": 1}}
+ *
+ * @license GNU Lesser General Public License (same as multiOTP)
+ */
+declare(strict_types=1);
+
+$file = getenv('SOHOBOTP_VIP_ROUTE_FILE') ?: '/etc/multiotp/radius-route/route.json';
+$user = (string) ($argv[1] ?? '');
+$client = (string) ($argv[2] ?? '');
+$raw = @file_get_contents($file);
+$route = false === $raw ? null : json_decode($raw, true);
+if (!is_array($route) || true !== ($route['enabled'] ?? false) || '' === $user || !isset($route['clients'][$client])) {
+    exit(0);
+}
+// The same user may arrive as "user", "DOMAIN\user" or "user@domain"
+$lower = mb_strtolower($user, 'UTF-8');
+$names = [$lower];
+if (false !== ($slash = strrpos($lower, '\\'))) {
+    $names[] = substr($lower, $slash + 1);
+}
+foreach ($names as $name) {
+    if (false !== ($at = strpos($name, '@'))) {
+        $names[] = substr($name, 0, $at);
+    }
+}
+foreach ($names as $name) {
+    if ('' !== $name && isset($route['sohobotp'][$name])) {
+        exit(0);
+    }
+}
+echo "Proxy-To-Realm := \"sohobotp_vip\"\n";
+exit(0);

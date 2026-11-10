@@ -147,6 +147,43 @@ or directory password + code (users synced from AD/LDAP only).
 Not yet possible: restricting which user groups may sign in through a server group (needs an
 engine change; planned).
 
+### Symantec VIP migration (forwarding)
+
+For moving from Symantec VIP without changing the devices twice: a server group can **forward
+users who are not on SohobOTP yet** to the Symantec VIP Enterprise Gateway (1 or 2 RADIUS
+servers, fail-over; page *RADIUS servers → Symantec VIP migration*).
+
+- **Who is forwarded** (`src/VipMigration.php`): every user who is not *on SohobOTP*, including
+  users SohobOTP does not know. A user is on SohobOTP when an authenticator is enrolled or a
+  hardware token assigned in the portal, when an administrator moves them (user page, bulk
+  action), or, once when forwarding is first switched on (job `radius.vip_seed`, also a button),
+  when they already have a hardware token or a SohobOTP login. "Send back to Symantec VIP" is
+  remembered. Deleting a user forgets the choice.
+- **How**: FreeRADIUS proxies the request unchanged (realm `sohobotp_vip`, `nostrip`); the
+  answer, a challenge and its State, and the gateway's reply attributes go back to the device.
+  For every request the exec module `sohobotp_vip_route` runs `/usr/local/sbin/sohobotp-vip-route`
+  (`bin/sohobotp-vip-route`, root-owned copy installed by `install.sh`), which reads the routing
+  file `/etc/multiotp/radius-route/route.json` written by the portal (www-data, 0640; FreeRADIUS
+  reads it through its group): moving a user needs no restart. A missing or damaged file, or a
+  RADIUS client outside a forwarding group, means "check with SohobOTP", never "forward".
+  Forwarding is off until the gateway configuration has been applied (no realm before that).
+- **Installed by the root helper** at apply: the home servers from the portal
+  (`vip.candidate.conf`, every line checked against a fixed grammar; secrets cannot contain
+  quotes, backslash, `$` or `%`) as `sohobotp-vip-proxy.conf`, included from `proxy.conf`; the
+  fixed module `mods-enabled/sohobotp_vip`; three hooks marked `#sohobotp-vip` in
+  `sites-available/default` (forwarding decision at the top of `authorize`, logging in
+  `post-auth` and `Post-Auth-Type REJECT`). Everything is rolled back if `freeradius -C` fails.
+- **Security**: Message-Authenticator in the gateway's answers is required by default once the
+  gateway sends it (`auto`; `yes` or `no` for old gateways). A user on SohobOTP with a wrong
+  code is refused, never retried at Symantec. Forwarded users are refused when the gateway
+  does not answer (answer timeout 5–60 s, then the second gateway). The test login on the
+  settings page goes straight from the portal to the gateway.
+- **Diagnostics**: *Forwarded to Symantec VIP* (`/var/log/multiotp/sohobotp-vip.log`, linelog).
+- Tests: `tests/unit.php` (settings, generated file, routing file and program),
+  `tests/e2e.php` (pages, moves, permissions, audit), `tests/appliance-vip.php` (real
+  FreeRADIUS forwarding to the stand-in gateway `tests/fake-vip-radius.php`: accept, reject,
+  challenge, users on SohobOTP not forwarded, groups without forwarding, gateway down).
+
 ## Endpoints (Windows and Linux agents)
 
 Design: [docs/endpoints.md](docs/endpoints.md). Exact agent protocol, with libsodium test

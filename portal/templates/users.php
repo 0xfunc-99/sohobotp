@@ -21,7 +21,7 @@
     <div class="toolbar">
       <select name="op" aria-label="Action for selected users">
         <option value="">With selected…</option>
-        <?php foreach ($bulk as $op): ?><option value="<?= e($op) ?>"><?= e(ucfirst($op)) ?></option><?php endforeach; ?>
+        <?php foreach ($bulk as $op): ?><option value="<?= e($op) ?>"><?= e(Portal\UsersController::BULK_LABELS[$op] ?? ucfirst($op)) ?></option><?php endforeach; ?>
       </select>
       <button type="submit" class="button">Apply</button>
     </div>

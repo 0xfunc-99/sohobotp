@@ -42,6 +42,21 @@
         </form>
       <?php endif; ?>
     </dd>
+    <?php if ([] !== $vipGroups || null !== $vipRoute): ?>
+      <dt>Symantec VIP migration</dt>
+      <dd>
+        <?php $onSohobotp = 'sohobotp' === ($vipRoute['state'] ?? null); ?>
+        <?= $onSohobotp ? '<strong>On SohobOTP</strong>' : '<strong>Still on Symantec VIP</strong>: forwarded on ' . e(implode(', ', $vipGroups) ?: 'server groups with forwarding on') ?>
+        <?php if (null !== $vipRoute): ?><span class="muted">(<?= e($vipRoute['how']) ?>, <?= e(format_time($vipRoute['at'])) ?>)</span><?php endif; ?>
+        <?php if ($perm['manage']): ?>
+          <form method="post" action="<?= e(route('user-action')) ?>" class="inline" data-confirm="<?= $onSohobotp ? 'Send ' . e($user['user']) . ' back to Symantec VIP?' : 'Move ' . e($user['user']) . ' to SohobOTP? They need a working SohobOTP authenticator.' ?>">
+            <?= csrf_field() ?><input type="hidden" name="u" value="<?= e($user['user']) ?>"><input type="hidden" name="op" value="vip-route">
+            <input type="hidden" name="route" value="<?= $onSohobotp ? 'vip' : 'sohobotp' ?>">
+            <button type="submit" class="button-small"><?= $onSohobotp ? 'Send back to Symantec VIP' : 'Move to SohobOTP' ?></button>
+          </form>
+        <?php endif; ?>
+      </dd>
+    <?php endif; ?>
     <dt>Recovery codes left</dt><dd><?= (int) $user['recovery_codes'] ?></dd>
     <dt>Failed attempts</dt><dd><?= (int) $user['error_counter'] ?></dd>
     <dt>Last login</dt><dd><?= e(format_time($user['last_login'])) ?></dd>

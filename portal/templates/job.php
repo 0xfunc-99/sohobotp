@@ -92,6 +92,12 @@
   <?php endif; ?>
 <?php endif; ?>
 
+<?php if ('radius.vip_seed' === $job['type'] && is_array($r) && isset($r['marked'])): ?>
+  <p><?= (int) $r['marked'] ?> user(s) already using SohobOTP were moved to SohobOTP.
+    In all, <?= (int) $r['on_sohobotp'] ?> user(s) sign in with SohobOTP; <?= (int) $r['sent_back'] ?> were sent back to Symantec VIP by hand.
+    Everyone else is forwarded to Symantec VIP on server groups with forwarding on. <a href="<?= e(route('radius-vip')) ?>">Symantec VIP migration</a></p>
+<?php endif; ?>
+
 <?php if (is_array($r) && !empty($r['log'])): ?>
   <h2>Engine messages</h2>
   <pre class="log"><?= e(implode("\n", $r['log'])) ?></pre>

@@ -563,6 +563,44 @@ check('helpdesk has no RADIUS access', 403 === $help->status);
 $auditText = (string) file_get_contents(Portal\Config::auditFile());
 check('audit has RADIUS changes, never the secret', str_contains($auditText, '"action":"radius.client_create"') && str_contains($auditText, '"action":"radius.group_create"') && !str_contains($auditText, $fwSecret));
 
+// Symantec VIP migration: settings, server group switch, users moved (FreeRADIUS itself: appliance-vip.php)
+$admin->get('/portal/index.php?r=radius-vip');
+check('Symantec VIP page served', 200 === $admin->status && str_contains($admin->body, 'Symantec VIP Enterprise Gateway') && str_contains($admin->body, 'Not configured'));
+$admin->post('/portal/index.php?r=radius-vip', ['op' => 'save', 'address_1' => '192.0.2.70', 'port_1' => '1812', 'secret_1' => 'Vip"broken', 'response_window' => '15', 'message_authenticator' => 'auto']);
+check('Symantec VIP: invalid secret refused, address kept in the form, secret not echoed', 200 === $admin->status && str_contains($admin->body, 'shared secret needs') && str_contains($admin->body, 'value="192.0.2.70"') && !str_contains($admin->body, 'Vip"broken') && !str_contains($admin->body, 'Vip&quot;broken'));
+$admin->post('/portal/index.php?r=radius-vip', ['op' => 'save', 'address_1' => '192.0.2.70', 'port_1' => '1812', 'secret_1' => 'E2e-Vip-Secret-778899', 'response_window' => '5', 'message_authenticator' => 'auto']);
+check('Symantec VIP servers saved', 303 === $admin->status);
+$admin->get('/portal/index.php?r=radius');
+check('RADIUS page shows Symantec VIP not applied yet', str_contains($admin->body, '192.0.2.70:1812') && str_contains($admin->body, 'not applied yet'));
+$admin->get('/portal/index.php?r=radius-group&id=' . $groupId);
+check('server group page offers forwarding', str_contains($admin->body, 'name="vip_forward"'));
+$admin->post('/portal/index.php?r=radius-group&id=' . $groupId, ['name' => 'VPN gateways', 'description' => '<b>Remote</b> access', 'challenge_response' => '1', 'text_token_challenge' => 'Code?', 'cache_timeout' => '3600', 'vip_forward' => '1']);
+check('forwarding switched on for a server group', 303 === $admin->status);
+$seedJob = Portal\Jobs::latest('radius.vip_seed');
+check('first forwarding: users already on SohobOTP are found in the worker', null !== $seedJob && 'succeeded' === wait_job($admin, $seedJob['id']));
+$admin->get('/portal/index.php?r=users');
+$admin->post('/portal/index.php?r=user-bulk', ['op' => 'to-vip', 'users' => ['bob', 'carol']]);
+check('bulk: sent back to Symantec VIP', 303 === $admin->status && 'vip' === ((new Portal\VipMigration())->stateOf('bob')['state'] ?? '') && 'vip' === ((new Portal\VipMigration())->stateOf('carol')['state'] ?? ''));
+$admin->get('/portal/index.php?r=users');
+check('bulk menu offers the migration actions', str_contains($admin->body, 'Move to SohobOTP (Symantec VIP migration)'));
+$admin->get('/portal/index.php?r=user&u=bob');
+check('user page: still on Symantec VIP, with a move button', str_contains($admin->body, 'Still on Symantec VIP') && str_contains($admin->body, 'VPN gateways') && str_contains($admin->body, 'Move to SohobOTP'));
+$admin->post('/portal/index.php?r=user-action', ['u' => 'bob', 'op' => 'vip-route', 'route' => 'sohobotp']);
+$admin->get('/portal/index.php?r=user&u=bob');
+check('user moved to SohobOTP', str_contains($admin->body, 'On SohobOTP') && str_contains($admin->body, 'Send back to Symantec VIP'));
+$help->get('/portal/index.php?r=radius-vip');
+check('helpdesk cannot open the Symantec VIP settings', 403 === $help->status);
+$help->get('/portal/index.php?r=user&u=bob');
+$help->post('/portal/index.php?r=user-action', ['u' => 'bob', 'op' => 'vip-route', 'route' => 'vip']);
+check('helpdesk cannot move users between Symantec VIP and SohobOTP', 403 === $help->status && 'sohobotp' === ((new Portal\VipMigration())->stateOf('bob')['state'] ?? ''));
+$admin->get('/portal/index.php?r=radius-vip');
+$admin->post('/portal/index.php?r=radius-vip', ['op' => 'test', 'server' => '1', 'user' => 'nobody', 'password' => 'x']);
+check('Symantec VIP test login reports an unreachable gateway', 200 === $admin->status && (str_contains($admin->body, 'timeout') || str_contains($admin->body, 'error')));
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('audit: Symantec VIP settings and moves recorded, never the secret', str_contains($auditText, '"action":"radius.vip_save"') && str_contains($auditText, '"action":"user.vip_route"') && !str_contains($auditText, 'E2e-Vip-Secret-778899'));
+$admin->get('/portal/index.php?r=radius-group&id=' . $groupId);
+$admin->post('/portal/index.php?r=radius-group&id=' . $groupId, ['name' => 'VPN gateways', 'description' => '<b>Remote</b> access', 'challenge_response' => '1', 'text_token_challenge' => 'Code?', 'cache_timeout' => '3600']);
+
 // per-user login format: PIN + code for a local user
 $admin->get('/portal/index.php?r=user&u=contractor.eve');
 $admin->post('/portal/index.php?r=user-action', ['u' => 'contractor.eve', 'op' => 'enable']);
@@ -893,7 +931,7 @@ $postRoutes = [
     'directory-save' => [], 'directory-test' => [], 'directory-run' => ['op' => 'sync'], 'job-cancel' => ['id' => 'none'],
     'radius-group' => ['name' => 'Evil'], 'radius-group-delete' => ['id' => 'none'], 'radius-client' => ['name' => 'evil'],
     'radius-client-action' => ['id' => $radiusClients[0]['id'] ?? 'none', 'op' => 'delete'], 'radius-apply' => [],
-    'radius-diagnostics' => ['op' => 'disable-default-client'],
+    'radius-diagnostics' => ['op' => 'disable-default-client'], 'radius-vip' => ['op' => 'save', 'address_1' => '192.0.2.99', 'secret_1' => 'Evil-Secret-12345'],
     'endpoint&id=' . $linux->id => ['op' => 'delete'], 'endpoint-group' => ['name' => 'Evil'], 'endpoint-group-delete' => ['id' => $endpointGroupId],
     'endpoint-rules' => ['op' => 'check'], 'endpoint-enrol' => ['op' => 'create', 'group_id' => $endpointGroupId],
     'admin-new' => ['username' => 'evil', 'role' => 'superadmin'], 'admin-edit' => [], 'admin-action' => ['op' => 'delete'],

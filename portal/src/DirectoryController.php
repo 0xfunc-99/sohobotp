@@ -142,6 +142,7 @@ final class DirectoryController extends Controller
             'directory.sync'    => 'Directory sync',
             'directory.preview' => 'Sync preview',
             'radius.apply'      => 'RADIUS configuration',
+            'radius.vip_seed'   => 'Symantec VIP migration: users already on SohobOTP',
             'endpoints.directory' => 'Endpoint check in Active Directory',
             default             => $type,
         };

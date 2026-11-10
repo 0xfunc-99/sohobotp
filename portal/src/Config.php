@@ -33,6 +33,12 @@ final class Config
         return rtrim(self::env('MULTIOTP_LOG_DIR') ?? '/var/log/multiotp', '/') . '/';
     }
 
+    /** Symantec VIP migration routing file, read by FreeRADIUS (see VipMigration). */
+    public static function vipRouteFile(): string
+    {
+        return self::env('MULTIOTP_PORTAL_RADIUS_ROUTE') ?? self::etcDir() . '/radius-route/route.json';
+    }
+
     /** Portal data: administrator accounts, audit trail, throttling, key. */
     public static function dataDir(): string
     {

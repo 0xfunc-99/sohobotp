@@ -4,9 +4,9 @@
 # Installed as /usr/local/sbin/multiotp-portal-radius (root:root 0755). The web server user
 # may run it with a single fixed command and no other argument:
 #
-#   apply                   validate the portal's candidate client file, install it,
-#                           check the whole FreeRADIUS configuration, restart FreeRADIUS;
-#                           roll back if the check fails
+#   apply                   validate the portal's candidate client file and Symantec VIP
+#                           forwarding file, install them, check the whole FreeRADIUS
+#                           configuration, restart FreeRADIUS; roll back if the check fails
 #   check                   check the FreeRADIUS configuration (freeradius -C)
 #   status                  print freeradius=running|stopped and default_client=active|inactive
 #   restart                 restart FreeRADIUS
@@ -24,6 +24,20 @@ TARGET="$RADDB/multiotp-portal-clients.conf"
 CLIENTS="$RADDB/clients.conf"
 INCLUDE_LINE="\$INCLUDE $TARGET"
 MARKER="# multiotp my-first-network"
+
+# Symantec VIP migration (forwarding of users not on SohobOTP yet): the home servers come from
+# the portal (strictly validated); the module and the site hooks below are fixed text.
+VIP_CANDIDATE=/etc/multiotp/portal/radius/vip.candidate.conf
+VIP_TARGET="$RADDB/sohobotp-vip-proxy.conf"
+PROXY="$RADDB/proxy.conf"
+VIP_INCLUDE_LINE="\$INCLUDE $VIP_TARGET"
+VIP_MODULE="$RADDB/mods-enabled/sohobotp_vip"
+SITE="$RADDB/sites-available/default"
+VIP_TAG="#sohobotp-vip"
+ROUTE_DIR=/etc/multiotp/radius-route
+# Backups during an apply: outside mods-enabled (FreeRADIUS loads every file in it)
+VIP_BACKUP_DIR="$RADDB/.portal-vip-backup"
+vip_bak() { printf '%s/%s' "$VIP_BACKUP_DIR" "$(basename "$1")"; }
 
 say() { printf '%s\n' "$*"; }
 fail() { say "ERROR: $*"; exit 1; }
@@ -81,6 +95,115 @@ EOF
   [ -z "$bad" ] || fail "candidate file rejected, unexpected content at line(s): $(printf '%s' "$bad" | cut -d: -f1 | tr '\n' ' ')"
 }
 
+VIP_NEW=""
+
+validate_vip_candidate() {
+  size=$(wc -c < "$VIP_CANDIDATE")
+  [ "$size" -lt 20000 ] || fail "VIP candidate file too large"
+  patterns=$(mktemp)
+  cat > "$patterns" <<'PATTERNS'
+^$
+^# [ -~]*$
+^home_server sohobotp_vip_[12] \{$
+^	type = auth$
+^	ipaddr = [0-9a-fA-F:.]{2,45}$
+^	port = [0-9]{1,5}$
+^	secret = "[]A-Za-z0-9!#&'()*+,./:;<=>?@^_`{|}~[-]{8,128}"$
+^	response_window = [0-9]{1,2}$
+^	zombie_period = [0-9]{1,3}$
+^	revive_interval = [0-9]{1,3}$
+^	status_check = none$
+^	require_message_authenticator = (yes|auto|no)$
+^\}$
+^home_server_pool sohobotp_vip_pool \{$
+^	type = fail-over$
+^	home_server = sohobotp_vip_[12]$
+^realm sohobotp_vip \{$
+^	auth_pool = sohobotp_vip_pool$
+^	nostrip$
+PATTERNS
+  bad=$(grep -Evn -f "$patterns" "$VIP_CANDIDATE" | head -n 5)
+  rm -f "$patterns"
+  [ -z "$bad" ] || fail "VIP candidate file rejected, unexpected content at line(s): $(printf '%s' "$bad" | cut -d: -f1 | tr '\n' ' ')"
+}
+
+# Fixed module: the routing program (decides per request) and the forwarding log
+write_vip_module() {
+  cat > "$VIP_MODULE.new" <<'MODULE'
+# Managed by multiotp-portal-radius (SohobOTP Symantec VIP migration). Do not edit.
+exec sohobotp_vip_route {
+	wait = yes
+	program = "/usr/local/sbin/sohobotp-vip-route %{User-Name} %{client:shortname}"
+	input_pairs = request
+	output_pairs = control
+	shell_escape = no
+	timeout = 5
+}
+linelog sohobotp_vip_log_accept {
+	filename = /var/log/multiotp/sohobotp-vip.log
+	permissions = 0640
+	format = "%S	accept	%{User-Name}	%{client:shortname}"
+}
+linelog sohobotp_vip_log_reject {
+	filename = /var/log/multiotp/sohobotp-vip.log
+	permissions = 0640
+	format = "%S	reject	%{User-Name}	%{client:shortname}"
+}
+MODULE
+  chown root:"$(radius_group)" "$VIP_MODULE.new" && chmod 0640 "$VIP_MODULE.new" && mv -f "$VIP_MODULE.new" "$VIP_MODULE"
+}
+
+# Site hooks: forward before any local module runs, log the forwarded results
+ensure_vip_site_hooks() {
+  grep -qF "$VIP_TAG" "$SITE" && return 0
+  sed -i '0,/^authorize {/s//authorize {\n\tsohobotp_vip_route #sohobotp-vip\n\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\treturn #sohobotp-vip\n\t} #sohobotp-vip/' "$SITE"
+  sed -i '0,/^post-auth {/s//post-auth {\n\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\tsohobotp_vip_log_accept #sohobotp-vip\n\t} #sohobotp-vip/' "$SITE"
+  sed -i '0,/Post-Auth-Type REJECT {/s//Post-Auth-Type REJECT {\n\t\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\t\tsohobotp_vip_log_reject #sohobotp-vip\n\t\t} #sohobotp-vip/' "$SITE"
+  [ "$(grep -cF "$VIP_TAG" "$SITE")" -eq 10 ] || fail "could not add the forwarding hooks to $SITE"
+  say "added the Symantec VIP forwarding hooks to $SITE"
+}
+
+# The portal (web server user) writes the routing file; FreeRADIUS reads it (group)
+ensure_route_dir() {
+  owner=www-data
+  getent passwd "$owner" >/dev/null 2>&1 || owner=root
+  mkdir -p "$ROUTE_DIR" && chown "$owner":"$owner" "$ROUTE_DIR" && chmod 0750 "$ROUTE_DIR"
+}
+
+install_vip() {
+  [ -f "$VIP_CANDIDATE" ] || return 0
+  if [ ! -f "$SITE" ] || [ ! -f "$PROXY" ]; then
+    say "no $SITE or $PROXY: Symantec VIP forwarding not installed"
+    return 0
+  fi
+  validate_vip_candidate
+  VIP_NEW=""
+  rm -rf "$VIP_BACKUP_DIR" && mkdir -m 0700 "$VIP_BACKUP_DIR" || fail "cannot create $VIP_BACKUP_DIR"
+  for f in "$VIP_TARGET" "$PROXY" "$SITE" "$VIP_MODULE"; do
+    if [ -f "$f" ]; then cp -p "$f" "$(vip_bak "$f")"; else VIP_NEW="$VIP_NEW $f"; fi
+  done
+  install -o root -g "$(radius_group)" -m 0640 "$VIP_CANDIDATE" "$VIP_TARGET" || fail "cannot install $VIP_TARGET"
+  if ! grep -qxF "$VIP_INCLUDE_LINE" "$PROXY"; then
+    printf '\n# Symantec VIP servers managed by the SohobOTP portal\n%s\n' "$VIP_INCLUDE_LINE" >> "$PROXY"
+    say "added include to $PROXY"
+  fi
+  write_vip_module
+  ensure_vip_site_hooks
+  ensure_route_dir
+}
+
+restore_vip() {
+  for f in "$VIP_TARGET" "$PROXY" "$SITE" "$VIP_MODULE"; do
+    if [ -f "$(vip_bak "$f")" ]; then mv -f "$(vip_bak "$f")" "$f"; fi
+  done
+  for f in ${VIP_NEW:-}; do rm -f "$f"; done # created by this apply: removed again
+  rm -rf "$VIP_BACKUP_DIR"
+}
+
+forget_vip_backups() {
+  rm -rf "$VIP_BACKUP_DIR"
+}
+
 ensure_include() {
   if ! grep -qxF "$INCLUDE_LINE" "$CLIENTS" 2>/dev/null; then
     cp -p "$CLIENTS" "$CLIENTS.portal-bak" 2>/dev/null || true
@@ -97,17 +220,20 @@ case "${1:-}" in
     [ -f "$CLIENTS" ] && cp -p "$CLIENTS" "$CLIENTS.bak-portal-apply"
     install -o root -g "$(radius_group)" -m 0640 "$CANDIDATE" "$TARGET" || fail "cannot install $TARGET"
     ensure_include
+    install_vip
     say "== freeradius -C"
     if ! check_config; then
       say "configuration check FAILED: previous configuration restored"
       if [ -f "$TARGET.bak" ]; then mv -f "$TARGET.bak" "$TARGET"; else rm -f "$TARGET"; fi
       [ -f "$CLIENTS.bak-portal-apply" ] && mv -f "$CLIENTS.bak-portal-apply" "$CLIENTS"
+      restore_vip
       exit 2
     fi
     rm -f "$TARGET.bak" "$CLIENTS.bak-portal-apply"
+    forget_vip_backups
     say "== restart"
     restart_radius || exit 3
-    say "applied $(grep -c '^client ' "$TARGET") client(s)"
+    say "applied $(grep -c '^client ' "$TARGET") client(s), $(grep -c '^home_server sohobotp_vip' "$VIP_TARGET" 2>/dev/null || echo 0) Symantec VIP server(s)"
     ;;
   check)
     [ $# -eq 1 ] || fail "no extra arguments allowed"
@@ -122,6 +248,7 @@ case "${1:-}" in
       say "default_client=inactive"
     fi
     if grep -qxF "$INCLUDE_LINE" "$CLIENTS" 2>/dev/null; then say "portal_clients=included"; else say "portal_clients=not-included"; fi
+    if grep -qF "$VIP_TAG" "$SITE" 2>/dev/null && [ -f "$VIP_MODULE" ]; then say "vip_forwarding=installed"; else say "vip_forwarding=not-installed"; fi
     ;;
   restart)
     [ $# -eq 1 ] || fail "no extra arguments allowed"

@@ -932,6 +932,14 @@ if [ -e /usr/local/bin/multiotp/portal/bin/multiotp-portal-radius ] ; then
   mkdir -p /etc/multiotp/portal/radius
   chown -R www-data:www-data /etc/multiotp/portal
 fi
+# SohobOTP Symantec VIP migration: routing program run by FreeRADIUS (root-owned copy), and
+# the folder where the portal writes the routing file (read by FreeRADIUS through its group)
+if [ -e /usr/local/bin/multiotp/portal/bin/sohobotp-vip-route ] ; then
+  install -o root -g root -m 0755 /usr/local/bin/multiotp/portal/bin/sohobotp-vip-route /usr/local/sbin/sohobotp-vip-route
+  mkdir -p /etc/multiotp/radius-route
+  chown www-data:www-data /etc/multiotp/radius-route
+  chmod 0750 /etc/multiotp/radius-route
+fi
 
 if [ -e /etc/logrotate.d/multiotp ] ; then
   chmod 644 /etc/logrotate.d/multiotp

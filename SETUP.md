@@ -233,6 +233,36 @@ It shows "version 1, applied". From another terminal: `ssh <user>@<machine>` ask
 password, then **code:**. The agent installs `libpam-radius-auth` (Debian/Ubuntu) or
 `pam_radius` (RHEL/Rocky, from EPEL) if missing.
 
+## Optional — Keep Symantec VIP running during the migration
+
+Your VPNs, firewalls and other RADIUS devices can point to SohobOTP right away, even before
+every user has a SohobOTP authenticator. On a **server group with forwarding on**, SohobOTP
+checks the users who are **on SohobOTP**, and forwards everybody else's login, unchanged, to
+your **Symantec VIP Enterprise Gateway** (its answer, including a "security code" challenge,
+goes back to the device).
+
+1. On the **Symantec VIP Enterprise Gateway** (validation server): add the SohobOTP server's IP
+   address as a **RADIUS client** and choose a shared secret (8–128 characters, no quotes,
+   backslash, `$`, `%` or spaces).
+2. Portal → **RADIUS servers** → *Symantec VIP migration* → **Settings**: the gateway's IPv4
+   address, port (usually 1812) and that shared secret; optionally a second gateway (fail-over).
+   **Save**, then **Apply configuration**.
+3. *Test the Symantec VIP server* on the same page with a Symantec user: "accepted" (or a
+   challenge) means the address and secret are right.
+4. Edit the server group of the devices (e.g. *VPN gateways*) and tick **Forward users who are
+   not on SohobOTP yet**. Users who already use SohobOTP (hardware token, or a SohobOTP login
+   before) are moved to SohobOTP automatically the first time.
+5. Move users as they get their authenticator: enrolling an authenticator or assigning a
+   hardware token in the portal moves them; or **Move to SohobOTP** on the user page, or select
+   users in **Users** → *With selected* → **Move to SohobOTP**. **Send back to Symantec VIP**
+   undoes it. Moves take effect at the next login (no restart).
+6. **RADIUS servers** → *Diagnostics* → *Forwarded to Symantec VIP* lists the forwarded logins.
+   When nobody is left on Symantec, untick the option and remove the gateway.
+
+Good to know: a user on SohobOTP with a wrong code is refused (never retried at Symantec); a
+user who is not on SohobOTP is refused when the gateway does not answer; users SohobOTP does
+not know at all are forwarded.
+
 ## Step 8 — Test checklist
 
 - [ ] Right code accepted, wrong code refused (Windows sign-in, SSH, sudo)
@@ -246,6 +276,8 @@ password, then **code:**. The agent installs `libpam-radius-auth` (Debian/Ubuntu
       break-glass account can then sign in; enable it again afterwards)
 - [ ] Uninstall and reinstall a machine with a new token: it appears as a new machine
 - [ ] Windows: unlock, Remote Desktop, offline login (if the group allows the offline cache)
+- [ ] Symantec VIP migration (if used): a Symantec user signs in through SohobOTP, a user
+      moved to SohobOTP signs in with the SohobOTP code, *Forwarded to Symantec VIP* lists them
 
 ## Troubleshooting
 

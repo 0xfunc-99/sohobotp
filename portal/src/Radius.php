@@ -19,7 +19,9 @@ defined('PORTAL_ROOT') || exit;
  *   FreeRADIUS, or rolls back.
  *
  * radius.json: { groups: {id: group}, clients: {id: client}, diagnostics_secret, pending,
- *                last_apply: {job, status, at, output} }
+ *                last_apply: {job, status, at, output},
+ *                vip: {servers: [{address, port, secret}], response_window, message_authenticator},
+ *                vip_applied: hash of the Symantec VIP file FreeRADIUS runs with }
  */
 final class Radius
 {
@@ -33,6 +35,14 @@ final class Radius
         'cache_timeout'        => 3600,
         'dont_send_groups'     => false,
         'force_no_prefix_pin'  => false,
+        // Symantec VIP migration: users not on SohobOTP yet are forwarded (VipMigration)
+        'vip_forward'          => false,
+    ];
+    public const VIP_DEFAULTS = ['servers' => [], 'response_window' => 15, 'message_authenticator' => 'auto'];
+    public const VIP_MESSAGE_AUTHENTICATOR = [
+        'auto' => 'Required once the Symantec server has sent it (recommended)',
+        'yes'  => 'Always required',
+        'no'   => 'Not required (only for old gateways that never send it)',
     ];
     /** Used by the portal's own test login; must not be used by a real client. */
     public const DIAGNOSTICS_ADDRESS = '127.0.0.2';
@@ -54,6 +64,11 @@ final class Radius
             throw new \RuntimeException('Cannot create the RADIUS folder.');
         }
         return $dir . '/clients.candidate.conf';
+    }
+
+    public static function vipCandidateFile(): string
+    {
+        return dirname(self::candidateFile()) . '/vip.candidate.conf';
     }
 
     // ------------------------------------------------------------------
@@ -111,6 +126,7 @@ final class Radius
                 $this->writeDevice($client, $group);
             }
         }
+        (new VipMigration())->export();
         return $group;
     }
 
@@ -255,18 +271,23 @@ final class Radius
     {
         $candidate = self::candidateFile();
         $content = $this->render();
-        $tmp = $candidate . '.tmp';
-        file_put_contents($tmp, $content);
-        @chmod($tmp, 0600);
-        rename($tmp, $candidate);
+        $vip = $this->renderVip();
+        foreach ([$candidate => $content, self::vipCandidateFile() => $vip] as $file => $text) {
+            $tmp = $file . '.tmp';
+            file_put_contents($tmp, $text);
+            @chmod($tmp, 0600);
+            rename($tmp, $file);
+        }
         $result = self::helper('apply');
-        $this->store->update(static function (array &$data) use ($result, $content): void {
+        $this->store->update(static function (array &$data) use ($result, $content, $vip): void {
             if ($result['ok']) {
                 $data['pending'] = false;
+                $data['vip_applied'] = hash('sha256', $vip);
             }
             $data['last_apply'] = ['status' => $result['ok'] ? 'applied' : ($result['available'] ? 'rejected' : 'not available'),
                 'at' => time(), 'hash' => hash('sha256', $content), 'output' => $result['output']];
         });
+        (new VipMigration())->export(); // forwarding starts (or stops) with what FreeRADIUS now runs
         return $result;
     }
 
@@ -318,6 +339,160 @@ final class Radius
             return ['ok' => false, 'available' => false, 'output' => 'sudo does not allow the web server user to run the FreeRADIUS helper. ' . trim($output)];
         }
         return ['ok' => 0 === $code, 'available' => true, 'output' => trim(mb_substr($output, 0, 20000))];
+    }
+
+    // ------------------------------------------------------------------
+    // Symantec VIP migration (forwarding to the VIP Enterprise Gateway)
+    // ------------------------------------------------------------------
+
+    /** @return array{servers: list<array{address: string, port: int, secret_set_at: int}>, response_window: int, message_authenticator: string} secrets removed */
+    public function vipSettings(): array
+    {
+        $vip = ($this->store->read()['vip'] ?? []) + self::VIP_DEFAULTS;
+        $vip['servers'] = array_map(static fn (array $s): array => array_diff_key($s, ['secret' => true]), $vip['servers']);
+        return $vip;
+    }
+
+    /**
+     * Save the Symantec VIP RADIUS servers (1 or 2, the second is a fail-over). A blank
+     * secret keeps the one already saved for that server. Needs an apply.
+     * @return array audit details (never the secrets)
+     */
+    public function saveVip(array $input): array
+    {
+        $current = ($this->store->read()['vip'] ?? []) + self::VIP_DEFAULTS;
+        $servers = [];
+        foreach ([1, 2] as $n) {
+            $address = trim((string) ($input["address_$n"] ?? ''));
+            $port = trim((string) ($input["port_$n"] ?? '')) ?: '1812';
+            $secret = (string) ($input["secret_$n"] ?? '');
+            if ('' === $address) {
+                if ('' !== $secret) {
+                    throw new ValidationException("Server $n: enter its address, or leave its secret empty.");
+                }
+                continue;
+            }
+            if (2 === $n && [] === $servers) {
+                throw new ValidationException('Fill in server 1 first (server 2 is its fail-over).');
+            }
+            if (!filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || str_starts_with($address, '0.') || '255.255.255.255' === $address) {
+                throw new ValidationException("Server $n: enter the IPv4 address of the Symantec VIP Enterprise Gateway (host names are not accepted).");
+            }
+            if (!ctype_digit($port) || (int) $port < 1 || (int) $port > 65535 || in_array((int) $port, [1812, 1813, 18120], true) && str_starts_with($address, '127.')) {
+                throw new ValidationException("Server $n: invalid port (1-65535; not the local FreeRADIUS ports).");
+            }
+            $previous = $current['servers'][count($servers)] ?? null;
+            if ('' === $secret) {
+                if (null === $previous || $previous['address'] !== $address) {
+                    throw new ValidationException("Server $n: enter the shared secret configured for this server on the Symantec VIP Enterprise Gateway.");
+                }
+                $sealed = $previous['secret'];
+                $setAt = $previous['secret_set_at'];
+            } else {
+                if (!preg_match('/^[A-Za-z0-9!#&\'()*+,\-.\/:;<=>?@\[\]^_`{|}~]{8,128}$/', $secret)) {
+                    throw new ValidationException("Server $n: the shared secret needs 8-128 characters: letters, digits and punctuation except quotes, backslash, \$, % and spaces.");
+                }
+                $sealed = Crypto::encrypt($secret);
+                $setAt = time();
+            }
+            $servers[] = ['address' => $address, 'port' => (int) $port, 'secret' => $sealed, 'secret_set_at' => $setAt];
+        }
+        if (2 === count($servers) && $servers[0]['address'] === $servers[1]['address'] && $servers[0]['port'] === $servers[1]['port']) {
+            throw new ValidationException('The two servers are the same.');
+        }
+        $window = trim((string) ($input['response_window'] ?? '15'));
+        if (!ctype_digit($window) || (int) $window < 5 || (int) $window > 60) {
+            throw new ValidationException('The answer timeout must be between 5 and 60 seconds.');
+        }
+        $ma = (string) ($input['message_authenticator'] ?? 'auto');
+        if (!isset(self::VIP_MESSAGE_AUTHENTICATOR[$ma])) {
+            throw new ValidationException('Choose how Message-Authenticator is required.');
+        }
+        $vip = ['servers' => $servers, 'response_window' => (int) $window, 'message_authenticator' => $ma, 'updated_at' => time()];
+        $this->store->update(static function (array &$data) use ($vip): void {
+            $data['vip'] = $vip;
+            $data['pending'] = true;
+        });
+        (new VipMigration())->export();
+        return ['servers' => array_map(static fn (array $s): string => $s['address'] . ':' . $s['port'], $servers),
+            'response_window' => $vip['response_window'], 'message_authenticator' => $ma,
+            'secrets_changed' => array_values(array_keys(array_filter([1 => '' !== (string) ($input['secret_1'] ?? ''), 2 => '' !== (string) ($input['secret_2'] ?? '')])))];
+    }
+
+    /** The proxy file for FreeRADIUS (installed by the helper as sohobotp-vip-proxy.conf). */
+    public function renderVip(): string
+    {
+        $vip = ($this->store->read()['vip'] ?? []) + self::VIP_DEFAULTS;
+        $out = "# Generated by the SohobOTP portal (Symantec VIP migration). Do not edit: changes are overwritten.\n";
+        if ([] === $vip['servers']) {
+            return $out . "# No Symantec VIP server configured: nothing is forwarded.\n";
+        }
+        $names = [];
+        foreach ($vip['servers'] as $i => $server) {
+            $name = 'sohobotp_vip_' . ($i + 1);
+            $names[] = $name;
+            $out .= "home_server $name {\n"
+                . "\ttype = auth\n"
+                . "\tipaddr = {$server['address']}\n"
+                . "\tport = {$server['port']}\n"
+                . "\tsecret = \"" . Crypto::decrypt($server['secret']) . "\"\n"
+                . "\tresponse_window = {$vip['response_window']}\n"
+                . "\tzombie_period = 40\n"
+                . "\trevive_interval = 60\n"
+                . "\tstatus_check = none\n"
+                . "\trequire_message_authenticator = {$vip['message_authenticator']}\n"
+                . "}\n\n";
+        }
+        $out .= "home_server_pool sohobotp_vip_pool {\n\ttype = fail-over\n";
+        foreach ($names as $name) {
+            $out .= "\thome_server = $name\n";
+        }
+        $out .= "}\n\nrealm sohobotp_vip {\n\tauth_pool = sohobotp_vip_pool\n\tnostrip\n}\n";
+        return $out;
+    }
+
+    /** Servers are configured, and FreeRADIUS runs with exactly this configuration. */
+    public function vipActive(): bool
+    {
+        $data = $this->store->read();
+        return [] !== ($data['vip']['servers'] ?? []) && hash('sha256', $this->renderVip()) === ($data['vip_applied'] ?? '');
+    }
+
+    /** @return list<string> FreeRADIUS shortnames of the clients whose group forwards to Symantec VIP */
+    public function forwardingClients(): array
+    {
+        $data = $this->store->read();
+        $out = [];
+        foreach ($data['clients'] ?? [] as $client) {
+            if (!empty($data['groups'][$client['group_id']]['policy']['vip_forward'])) {
+                $out[] = self::shortname($client);
+            }
+        }
+        sort($out);
+        return $out;
+    }
+
+    /** @return list<string> names of the server groups with forwarding on */
+    public function forwardingGroups(): array
+    {
+        $names = [];
+        foreach ($this->groups() as $group) {
+            if (!empty($group['policy']['vip_forward'])) {
+                $names[] = $group['name'];
+            }
+        }
+        return $names;
+    }
+
+    /**
+     * Test login sent straight from the portal to a Symantec VIP server (the gateway must
+     * know this server's address as a RADIUS client, with the same shared secret).
+     */
+    public function testVip(int $server, string $user, string $password): array
+    {
+        $vip = ($this->store->read()['vip'] ?? []) + self::VIP_DEFAULTS;
+        $s = $vip['servers'][$server - 1] ?? throw new ValidationException('This Symantec VIP server is not configured.');
+        return RadiusClient::authenticate($s['address'], $s['port'], Crypto::decrypt($s['secret']), $user, $password, '0.0.0.0', min(30, $vip['response_window']));
     }
 
     // ------------------------------------------------------------------
@@ -501,6 +676,7 @@ final class Radius
             'cache_timeout'        => (int) $timeout,
             'dont_send_groups'     => !empty($input['dont_send_groups']),
             'force_no_prefix_pin'  => !empty($input['force_no_prefix_pin']),
+            'vip_forward'          => !empty($input['vip_forward']),
         ];
     }
 

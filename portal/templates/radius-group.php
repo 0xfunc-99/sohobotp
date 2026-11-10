@@ -23,6 +23,11 @@
     <legend>Reply</legend>
     <label class="choice"><input type="checkbox" name="dont_send_groups" value="1"<?= $on('dont_send_groups') ?>><span>Do not send the user's multiOTP group in the RADIUS reply</span></label>
   </fieldset>
+  <fieldset>
+    <legend>Symantec VIP migration</legend>
+    <label class="choice"><input type="checkbox" name="vip_forward" value="1"<?= $on('vip_forward') ?>>
+      <span><strong>Forward users who are not on SohobOTP yet</strong> to the Symantec VIP Enterprise Gateway. Users on SohobOTP are checked here; all others (also users SohobOTP does not know) are sent, unchanged, to Symantec VIP. <a href="<?= e(route('radius-vip')) ?>">Symantec VIP servers</a></span></label>
+  </fieldset>
   <p class="hint">Not yet available: limiting which user groups may sign in through a server group (needs an engine change; planned).</p>
   <div class="actions">
     <button type="submit" class="button-primary">Save group</button>

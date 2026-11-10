@@ -37,6 +37,7 @@
               <?= $p['cache_result'] ? ' · result cached ' . (int) $p['cache_timeout'] . ' s' : '' ?>
               <?= $p['force_no_prefix_pin'] ? ' · no PIN prefix' : '' ?>
               <?= $p['dont_send_groups'] ? ' · no group attribute' : '' ?>
+              <?= !empty($p['vip_forward']) ? ' · <strong>forwards users not on SohobOTP to Symantec VIP</strong>' : '' ?>
             </td>
             <?php if ($canManage): ?>
               <td class="row-actions">
@@ -55,6 +56,22 @@
       </tbody>
     </table>
   </div>
+</section>
+
+<section class="panel">
+  <div class="toolbar">
+    <h2>Symantec VIP migration</h2>
+    <?php if ($canManage): ?><a class="button" href="<?= e(route('radius-vip')) ?>">Settings</a><?php endif; ?>
+  </div>
+  <p>
+    <?php if ([] === $vip['servers']): ?>Not configured. Use it to keep Symantec VIP working for users who are not on SohobOTP yet, behind the same RADIUS server.
+    <?php else: ?>
+      Symantec VIP Enterprise Gateway: <?= e(implode(', ', array_map(static fn (array $s): string => $s['address'] . ':' . $s['port'], $vip['servers']))) ?>
+      — <?= $vipActive ? '<span class="status status-success">active</span>' : '<span class="status status-failure">not applied yet</span>' ?>
+      · forwarding in: <?= [] === $vipGroups ? 'no server group yet' : e(implode(', ', $vipGroups)) ?>
+      · users on SohobOTP: <?= (int) $vipCounts['sohobotp'] ?>
+    <?php endif; ?>
+  </p>
 </section>
 
 <section class="panel">

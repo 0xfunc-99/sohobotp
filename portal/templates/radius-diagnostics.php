@@ -81,3 +81,25 @@
     </table>
   </div>
 </section>
+
+<?php if ([] !== $forwarded): ?>
+<section class="panel">
+  <h2>Forwarded to Symantec VIP</h2>
+  <p class="hint">Logins of users not on SohobOTP yet, answered by the Symantec VIP Enterprise Gateway (<a href="<?= e(route('radius-vip')) ?>">migration settings</a>).</p>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Time</th><th>User</th><th>Result</th><th>From server</th></tr></thead>
+      <tbody>
+        <?php foreach ($forwarded as $f): ?>
+          <tr>
+            <td class="nowrap"><?= e($f['time']) ?></td>
+            <td><?= e($f['user']) ?></td>
+            <td><span class="status status-<?= 'accept' === $f['result'] ? 'success' : 'failure' ?>"><?= 'accept' === $f['result'] ? 'accepted by Symantec' : 'rejected' ?></span></td>
+            <td><code><?= e($f['server']) ?></code></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</section>
+<?php endif; ?>

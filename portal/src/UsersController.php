@@ -9,7 +9,10 @@ defined('PORTAL_ROOT') || exit;
 final class UsersController extends Controller
 {
     private const PER_PAGE = 50;
-    private const BULK = ['unlock' => 'users.unlock', 'enable' => 'users.manage', 'disable' => 'users.manage', 'delete' => 'users.manage'];
+    private const BULK = ['unlock' => 'users.unlock', 'enable' => 'users.manage', 'disable' => 'users.manage', 'delete' => 'users.manage',
+        'to-sohobotp' => 'users.manage', 'to-vip' => 'users.manage'];
+    public const BULK_LABELS = ['unlock' => 'Unlock', 'enable' => 'Enable', 'disable' => 'Disable', 'delete' => 'Delete',
+        'to-sohobotp' => 'Move to SohobOTP (Symantec VIP migration)', 'to-vip' => 'Send back to Symantec VIP'];
 
     public function index(): void
     {
@@ -69,6 +72,8 @@ final class UsersController extends Controller
             'title'      => $user['user'],
             'user'       => $user,
             'freeTokens' => $this->can('tokens.manage') ? $users->freeTokens() : [],
+            'vipRoute'   => (new VipMigration())->stateOf($user['user']),
+            'vipGroups'  => (new Radius())->forwardingGroups(),
             'perm'       => [
                 'manage' => $this->can('users.manage'),
                 'unlock' => $this->can('users.unlock'),
@@ -92,7 +97,7 @@ final class UsersController extends Controller
         $op = $this->post('op', 32);
         $permission = match ($op) {
             'unlock'                        => 'users.unlock',
-            'enable', 'disable', 'delete', 'save', 'login-format' => 'users.manage',
+            'enable', 'disable', 'delete', 'save', 'login-format', 'vip-route' => 'users.manage',
             'enroll', 'recovery-codes'      => 'tokens.enroll',
             'resync'                        => 'tokens.resync',
             'assign-token', 'remove-token'  => 'tokens.manage',
@@ -111,6 +116,7 @@ final class UsersController extends Controller
                     $this->done('user.' . $op, $name, 'enable' === $op ? 'User enabled.' : 'User disabled. RADIUS logins are refused until it is enabled again.');
                 case 'delete':
                     $users->delete($name);
+                    (new VipMigration())->forget($name);
                     $this->audit->record('user.delete', 'success', $name);
                     Session::flash('success', "User $name deleted.");
                     $this->redirect('users');
@@ -131,8 +137,15 @@ final class UsersController extends Controller
                     }
                     Session::flash('success', 'Login format changed to: ' . Users::LOGIN_FORMATS[$format] . '.');
                     $this->redirect('user', ['u' => $name]);
+                case 'vip-route':
+                    $route = 'vip' === $this->post('route', 16) ? 'vip' : 'sohobotp';
+                    (new VipMigration())->set([$name], $route, $this->admin['username'], 'by an administrator');
+                    $this->done('user.vip_route', $name, 'vip' === $route
+                        ? 'Sent back to Symantec VIP: on server groups with forwarding on, this user signs in with Symantec again.'
+                        : 'Moved to SohobOTP: this user now signs in with SohobOTP everywhere.', ['route' => $route]);
                 case 'enroll':
                     $uri = $users->enrollSoftwareToken($name);
+                    (new VipMigration())->set([$name], 'sohobotp', $this->admin['username'], 'authenticator enrolled');
                     $this->audit->record('user.token_enrolled', 'success', $name, ['type' => 'software TOTP']);
                     $this->showEnrolment($name, $uri, 'New authenticator enrolment');
                 case 'recovery-codes':
@@ -148,6 +161,7 @@ final class UsersController extends Controller
                 case 'assign-token':
                     $serial = $this->post('serial', 128);
                     $users->assignToken($name, $serial);
+                    (new VipMigration())->set([$name], 'sohobotp', $this->admin['username'], 'hardware token assigned');
                     $this->done('user.token_assigned', $name, "Hardware token $serial assigned.", ['serial' => $serial]);
                 case 'remove-token':
                     $serial = $users->removeToken($name);
@@ -178,6 +192,17 @@ final class UsersController extends Controller
         }
         $users = new Users();
         $done = $failed = [];
+        if ('to-sohobotp' === $op || 'to-vip' === $op) {
+            $route = 'to-vip' === $op ? 'vip' : 'sohobotp';
+            $known = array_values(array_filter($names, [$users, 'exists']));
+            (new VipMigration())->set($known, $route, $this->admin['username'], 'by an administrator');
+            foreach ($known as $name) {
+                $this->audit->record('user.vip_route', 'success', $name, ['route' => $route, 'bulk' => true]);
+            }
+            $missing = array_diff($names, $known);
+            Session::flash([] === $missing ? 'success' : 'error', self::BULK_LABELS[$op] . ': ' . count($known) . ' done' . ([] === $missing ? '.' : ', unknown: ' . implode(', ', array_slice($missing, 0, 20)) . '.'));
+            $this->redirect('users', array_filter(['q' => $this->post('q', 128), 'status' => $this->post('status', 16)]));
+        }
         foreach ($names as $name) {
             try {
                 if (!$users->exists($name)) {
@@ -189,6 +214,9 @@ final class UsersController extends Controller
                     'disable' => $users->setEnabled($name, false),
                     'delete'  => $users->delete($name),
                 };
+                if ('delete' === $op) {
+                    (new VipMigration())->forget($name);
+                }
                 $this->audit->record('user.' . $op, 'success', $name, ['bulk' => true]);
                 $done[] = $name;
             } catch (\Throwable $error) {
