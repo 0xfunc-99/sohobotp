@@ -110,10 +110,43 @@ $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$AgentMsi`" /
 Check "agent MSI uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
 Check "service removed" ($null -eq (Get-Service SohobOTPAgent -ErrorAction SilentlyContinue))
 Check "agent program removed" (-not (Test-Path $exe))
+Check "agent identity removed (C:\ProgramData\SohobOTP\agent)" (-not (Test-Path "$env:ProgramData\SohobOTP\agent"))
+
+Write-Host "== SohobOTP Sign-in removed, then the agent reinstalled BEFORE it"
 if ($SignInMsi -ne "") {
   $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$SignInMsi`" /qn"
   Check "SohobOTP Sign-in uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
   Check "SohobOTP Sign-in unregistered" (-not (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\$clsid"))
+}
+Remove-Item -Recurse -Force $cpKey -ErrorAction SilentlyContinue
+$firstId = $expected.endpoint_id
+$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$AgentMsi`" /qn PORTAL=https://127.0.0.1:8443 TOKEN=$token PIN=$pin CAFILE=`"$work\ca.pem`" /l*v `"$work\agent-reinstall.log`""
+Check "agent MSI installs again (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+$state2 = { if (Test-Path "$work\portal\state.json") { Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json } }
+Check "reinstall enrols as a NEW machine; without Sign-in the configuration fails and is reported" (Wait-Until {
+  $s = & $state2
+  return ($null -ne $s -and $s.endpoint_id -ne $firstId -and $s.applied.version -eq 1 -and $s.applied.status -eq "failed")
+} 120) "$((& $state2) | ConvertTo-Json -Compress -Depth 4)"
+$retry = & $exe status 2>&1 | Out-String
+Check "status shows the error and the next retry" ($retry -match "not installed" -and $retry -match "Next retry") $retry
+if ($SignInMsi -ne "") {
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$SignInMsi`" /qn /l*v `"$work\signin-install2.log`""
+  Check "SohobOTP Sign-in installed after the agent (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+} else {
+  New-Item -Force $cpKey | Out-Null
+  New-ItemProperty -Force -Path $cpKey -Name multiOTPServerTimeout -PropertyType DWord -Value 5 | Out-Null
+}
+Check "the agent retries by itself and applies the configuration" (Wait-Until {
+  $s = & $state2
+  return ($null -ne $s -and $s.applied.version -eq 1 -and $s.applied.status -eq "applied")
+} 240)
+$expected = Get-Content "$work\portal\expected.json" -Raw | ConvertFrom-Json
+Check "registry multiOTPServers points to the new machine" ((Get-ItemProperty $cpKey).multiOTPServers -eq $expected.multiOTPServers) "got '$((Get-ItemProperty $cpKey).multiOTPServers)'"
+$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$AgentMsi`" /qn /l*v `"$work\agent-uninstall2.log`""
+Check "agent MSI uninstalls again (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+if ($SignInMsi -ne "") {
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$SignInMsi`" /qn"
+  Check "SohobOTP Sign-in uninstalls again (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
 }
 
 Stop-Process -Id $portal.Id -Force -ErrorAction SilentlyContinue

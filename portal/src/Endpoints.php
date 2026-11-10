@@ -71,6 +71,8 @@ final class Endpoints
     public const NONCE_TTL = 600;
     public const MAX_BODY = 262144;
     private const ID = '/^[0-9a-f]{20}$/';
+    /** Deleted endpoint ids remembered (see wasDeleted). */
+    private const DELETED_KEEP = 10000;
 
     private JsonStore $store;
 
@@ -706,9 +708,25 @@ final class Endpoints
         return $summary;
     }
 
+    /** True for the id of an endpoint deleted in the last year. */
+    public function wasDeleted(string $id): bool
+    {
+        return preg_match(self::ID, $id) && isset($this->store->read()['deleted'][$id]);
+    }
+
     public function deleteEndpoint(string $id): array
     {
         $endpoint = $this->endpoint($id) ?? throw new ValidationException('This endpoint does not exist.');
+        // remembered, so that the agent and SohobOTP Sign-in still installed on the machine are
+        // refused without counting as an attack on the IP throttle (Throttle in AgentApi, CpGateway)
+        $this->store->update(static function (array &$data) use ($id): void {
+            $data['deleted'] = array_filter($data['deleted'] ?? [], static fn (int $at): bool => $at > time() - 366 * 86400);
+            if (count($data['deleted']) >= self::DELETED_KEEP) {
+                asort($data['deleted']);
+                $data['deleted'] = array_slice($data['deleted'], -(self::DELETED_KEEP - 1), null, true);
+            }
+            $data['deleted'][$id] = time();
+        });
         @unlink(self::dir() . "/$id.json");
         @unlink(self::dir() . "/$id.json.lock");
         if ('' !== ($endpoint['radius_client_id'] ?? '')) {

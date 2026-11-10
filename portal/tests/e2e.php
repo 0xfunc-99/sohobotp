@@ -790,6 +790,12 @@ $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
 check('endpoint page shows the last Credential Provider request', str_contains($admin->body, 'last request'));
 $admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'disable']);
 check('CP gateway: disabled endpoint refused', 0 !== $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep)));
+$signInRetries = new Browser($base);
+$signInRetries->bind = '127.0.0.11';
+for ($i = 0; $i < 25; $i++) { // users keep trying to sign in on the disabled machine
+    $signInRetries->post('/portal/cp.php?e=' . $windows->id, ['data' => '<multiOTP/>'], [], false);
+}
+check('CP gateway: a disabled machine refused 25 times does not block its IP (NAT)', 403 === $signInRetries->status, (string) $signInRetries->status);
 
 // ================================================================ P1 cases (tests/CATALOGUE.md)
 
@@ -847,6 +853,24 @@ for ($i = 0; $i < 21; $i++) {
     $gatewayProber->post('/portal/cp.php?e=' . bin2hex(random_bytes(10)), ['data' => '<multiOTP/>'], [], false);
 }
 check('CP gateway: probing unknown endpoint ids is blocked (429)', 429 === $gatewayProber->status, (string) $gatewayProber->status);
+// a deleted machine whose agent and SohobOTP Sign-in are still installed
+$admin->post('/portal/index.php?r=endpoint-enrol', ['op' => 'create', 'group_id' => $endpointGroupId, 'label' => 'to delete', 'hours' => '1', 'max_uses' => '1']);
+preg_match('/<p class="secret"><code>([0-9a-f]{12}\.[A-Za-z0-9_-]{32})<\/code>/', $admin->body, $m);
+$gone = new AgentSim();
+$previousBind = $agentHttp->bind;
+$agentHttp->bind = '127.0.0.12';
+$goneSignIn = new Browser($base);
+$goneSignIn->bind = '127.0.0.12';
+$gone->id = $agentCall('enroll', $gone->enrollRequest($m[1] ?? '', ['hostname' => 'retired-pc', 'os' => 'windows']))['endpoint_id'] ?? null;
+(new Portal\Endpoints())->deleteEndpoint((string) $gone->id);
+for ($i = 0; $i < 25; $i++) {
+    $agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $gone);
+    $goneSignIn->post('/portal/cp.php?e=' . $gone->id, ['data' => '<multiOTP/>'], [], false);
+}
+$agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $gone);
+check('agent API: a deleted machine still checking in is refused but does not block its IP', 401 === $agentHttp->status && str_contains($agentHttp->body, 'unknown_endpoint'), $agentHttp->status . ' ' . $agentHttp->body);
+check('CP gateway: SohobOTP Sign-in of a deleted machine refused, IP not blocked', 403 === $goneSignIn->status, (string) $goneSignIn->status);
+$agentHttp->bind = $previousBind;
 check('agent API: malformed request from a clean IP gets 400, not 429', 400 === $agentHttp->raw('POST', '/portal/agent.php?a=enroll', 'not json', ['Content-Type' => 'application/json'])->status);
 check('agent API: unknown action 404, body over 256 KiB 413', 404 === $agentHttp->raw('POST', '/portal/agent.php?a=nope', '{}', [])->status
     && 413 === $agentHttp->raw('POST', '/portal/agent.php?a=enroll', str_repeat('x', 262145), ['Content-Type' => 'application/json'])->status);

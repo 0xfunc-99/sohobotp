@@ -200,6 +200,20 @@ account in the break-glass group before installing:
 sudo groupadd -f mfa-breakglass && sudo usermod -aG mfa-breakglass $USER
 ```
 
+Install the RADIUS module first (the agent installs it too, but a fresh machine is faster and
+clearer this way):
+
+```bash
+# Debian / Ubuntu
+sudo apt-get update && sudo apt-get install -y libpam-radius-auth
+# Rocky / Alma (RHEL: enable EPEL with subscription-manager first)
+sudo dnf install -y epel-release && sudo dnf install -y pam_radius
+```
+
+On Rocky/RHEL with SELinux on (`getenforce` says `Enforcing`), the agent turns on the SELinux
+switch `authlogin_radius` (otherwise SSH and sudo cannot reach the RADIUS server). Check it
+afterwards with `getsebool authlogin_radius` (`--> on`).
+
 Copy `agent/linux-amd64/sohobotp-agent` (or `linux-arm64`; `uname -m` says `x86_64` or
 `aarch64`) and `ca.pem` to the machine, then:
 
@@ -226,7 +240,11 @@ password, then **code:**. The agent installs `libpam-radius-auth` (Debian/Ubuntu
 - [ ] Portal → **Endpoints**: machine online, inventory shown, configuration "up to date"
 - [ ] Change the endpoint group (e.g. untick sudo): applied within 60 s (`run --once` to force)
 - [ ] **RADIUS servers** → *Diagnostics*: test login and recent logins
-- [ ] Disable the machine in the portal: its check-ins are refused
+- [ ] Agent installed **before** SohobOTP Sign-in (Windows): `status` shows "failed", and the
+      configuration is applied by itself within a few minutes after installing Sign-in
+- [ ] Disable the machine in the portal: its check-ins are refused (on Windows only the
+      break-glass account can then sign in; enable it again afterwards)
+- [ ] Uninstall and reinstall a machine with a new token: it appears as a new machine
 - [ ] Windows: unlock, Remote Desktop, offline login (if the group allows the offline cache)
 
 ## Troubleshooting
@@ -241,6 +259,9 @@ password, then **code:**. The agent installs `libpam-radius-auth` (Debian/Ubuntu
 | Logs | Linux: `journalctl -u sohobotp-agent`; Windows: `C:\ProgramData\SohobOTP\agent\agent.log`; portal: `sudo docker logs sohobotp` |
 | Locked out of Linux | use the open root session or a break-glass account; `sudo sohobotp-agent uninstall` removes the PAM changes |
 | Locked out of Windows | break-glass account, or restore the VM snapshot |
+| Status says "failed" | the error is shown by `status`; the agent retries by itself (1, 2, 4 … 30 minutes), `run --once` retries now. Typical: SohobOTP Sign-in not installed yet, package lock, no EPEL |
+| Check-ins refused "clock" after restoring a VM snapshot | the machine's clock is behind: wait for time sync (`w32tm /resync` on Windows, `chronyc makestep` on Linux) |
+| Reinstalling a machine | uninstall (Windows MSI or `sohobotp-agent uninstall`) removes its identity; delete the old machine in the portal, then install with a new token |
 
 ## Limitations of this version
 
@@ -255,7 +276,9 @@ password, then **code:**. The agent installs `libpam-radius-auth` (Debian/Ubuntu
   directly stop working on protected machines.
 - The agents in this kit are built **without self-update** (no release key).
 - Changes reach machines at their next check-in (60 s by default), not instantly.
-- A disabled or deleted machine keeps its last configuration; uninstall the agent to remove 2FA.
+- A disabled or deleted machine keeps its last configuration, and its sign-in requests are
+  refused: on a disabled **Windows** machine only the break-glass account can sign in.
+  Uninstall SohobOTP Sign-in (and the agent) to remove 2FA from a machine.
 - Data is stored in files: fine for hundreds of machines; MariaDB/HA, REST API and the
   Raspberry Pi image are not built yet.
 

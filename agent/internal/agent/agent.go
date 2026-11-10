@@ -82,6 +82,8 @@ func (a *Agent) Once() (time.Duration, error) {
 	}
 	if reply.Config != nil {
 		a.handle(reply.Config)
+	} else if a.St.RetryConfig != nil && a.now().Unix() >= a.St.RetryAt {
+		a.retry()
 	}
 	if reply.Update != nil && a.Updated == "" {
 		a.update(reply.Update)
@@ -98,16 +100,8 @@ func (a *Agent) handle(env *protocol.Envelope) {
 		var cfg *protocol.Config
 		cfg, err = protocol.OpenConfig(env, portalKey, a.St.EndpointID, runtime.GOOS, a.St.Applied.Version, a.Keys.BoxPub, a.Keys.BoxPriv)
 		if err == nil {
-			now := a.now().Unix()
-			summary, applyErr := a.Applier.Apply(cfg)
-			a.St.Applied = protocol.Applied{Version: cfg.Version, Status: "applied", At: &now}
-			if applyErr != nil {
-				a.St.Applied.Status = "failed"
-				a.St.Applied.Error = applyErr.Error()
-				a.Log("configuration %d FAILED, previous configuration kept: %v", cfg.Version, applyErr)
-			} else {
-				a.Log("configuration %d applied: %s", cfg.Version, summary)
-			}
+			a.St.RetryConfig, a.St.RetryCount = nil, 0 // a newer configuration replaces a failed one
+			a.apply(cfg, env)
 			return
 		}
 	}
@@ -115,6 +109,55 @@ func (a *Agent) handle(env *protocol.Envelope) {
 	// not changed: the portal keeps offering it, the administrator sees the error.
 	a.St.LastError = "configuration refused: " + err.Error()
 	a.Log("SECURITY: %s", a.St.LastError)
+}
+
+// apply applies a verified configuration and records the result. A failure keeps the
+// previous configuration in force and schedules a retry of this one.
+func (a *Agent) apply(cfg *protocol.Config, env *protocol.Envelope) {
+	now := a.now().Unix()
+	summary, applyErr := a.Applier.Apply(cfg)
+	a.St.Applied = protocol.Applied{Version: cfg.Version, Status: "applied", At: &now}
+	if applyErr == nil {
+		a.St.RetryConfig, a.St.RetryAt, a.St.RetryCount = nil, 0, 0
+		a.Log("configuration %d applied: %s", cfg.Version, summary)
+		return
+	}
+	a.St.Applied.Status = "failed"
+	a.St.Applied.Error = applyErr.Error()
+	delay := retryDelay(a.St.RetryCount)
+	a.St.RetryConfig, a.St.RetryAt = env, now+int64(delay/time.Second)
+	a.St.RetryCount++
+	a.Log("configuration %d FAILED, previous configuration kept, retry in %s: %v", cfg.Version, delay, applyErr)
+}
+
+// retry applies again the configuration that failed. It is the envelope this agent already
+// verified and accepted: it is verified again and must be exactly the failed version.
+func (a *Agent) retry() {
+	env := a.St.RetryConfig
+	version := a.St.Applied.Version
+	portalKey, err := a.St.PortalPublicKey()
+	var cfg *protocol.Config
+	if err == nil {
+		cfg, err = protocol.OpenConfig(env, portalKey, a.St.EndpointID, runtime.GOOS, version-1, a.Keys.BoxPub, a.Keys.BoxPriv)
+	}
+	if err != nil || cfg.Version != version || a.St.Applied.Status != "failed" {
+		a.St.RetryConfig, a.St.RetryAt, a.St.RetryCount = nil, 0, 0
+		return
+	}
+	a.Log("retrying configuration %d (attempt %d)", version, a.St.RetryCount+1)
+	a.apply(cfg, env)
+}
+
+// retryDelay: 1, 2, 4, 8, 16 then every 30 minutes.
+func retryDelay(attempt int) time.Duration {
+	if attempt > 5 {
+		attempt = 5
+	}
+	d := time.Minute << attempt
+	if d > 30*time.Minute {
+		d = 30 * time.Minute
+	}
+	return d
 }
 
 func (a *Agent) interval() time.Duration {
@@ -145,11 +188,11 @@ func (a *Agent) nextBackoff() time.Duration {
 func (a *Agent) Run(stop <-chan struct{}) bool {
 	a.Log("SohobOTP agent %s started for endpoint %s (%s)", inventory.Version, a.St.EndpointID, a.St.PortalURL)
 	for {
-		applied := a.St.Applied.Version
+		applied := a.St.Applied
 		wait, err := a.Once()
 		if err != nil {
 			a.Log("check-in failed, retry in %s: %v", wait, err)
-		} else if a.St.Applied.Version != applied {
+		} else if a.St.Applied.Version != applied.Version || a.St.Applied.Status != applied.Status {
 			wait = time.Second // report the result right away
 		}
 		if a.Updated != "" {

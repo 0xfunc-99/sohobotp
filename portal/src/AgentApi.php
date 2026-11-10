@@ -79,7 +79,13 @@ final class AgentApi
                     throw new AgentError('bad_request', 404, 'Unknown action.');
             }
         } catch (AgentError $error) {
-            if (in_array($error->errorCode, ['bad_token', 'bad_signature', 'unknown_endpoint'], true)) {
+            // Counted against the IP: guessed tokens, forged signatures, made-up endpoint ids.
+            // Not counted: machines the portal knows (disabled, pending, or deleted with the
+            // agent still installed); many of them behind one NAT address must not block
+            // every other machine there.
+            $counted = in_array($error->errorCode, ['bad_token', 'bad_signature'], true)
+                || ('unknown_endpoint' === $error->errorCode && !(new Endpoints())->wasDeleted((string) ($_SERVER['HTTP_X_AGENT_ID'] ?? '')));
+            if ($counted) {
                 $throttle->fail($ip);
             }
             self::respond($error->status, ['error' => $error->errorCode, 'message' => $error->getMessage()]);

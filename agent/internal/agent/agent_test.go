@@ -128,16 +128,66 @@ func TestCheckinAppliesAndReports(t *testing.T) {
 	}
 }
 
-func TestFailedApplyIsReportedNotRetried(t *testing.T) {
+func TestFailedApplyIsReportedAndRetriedLater(t *testing.T) {
 	a, fp, rec := setup(t)
-	rec.err = errors.New("sshd -t refused the configuration")
+	clock := time.Now()
+	a.now = func() time.Time { return clock }
+	rec.err = errors.New("SohobOTP Sign-in is not installed")
 	a.Once()
-	if a.St.Applied.Status != "failed" || a.St.Applied.Error == "" {
+	if a.St.Applied.Status != "failed" || a.St.Applied.Error == "" || a.St.RetryConfig == nil {
 		t.Fatalf("%+v", a.St.Applied)
 	}
-	a.Once()
+	a.Once() // too early: reported, not retried
 	if fp.seen.Applied.Status != "failed" || len(rec.got) != 1 {
-		t.Fatal("failure not reported, or retried")
+		t.Fatal("failure not reported, or retried too early")
+	}
+	clock = clock.Add(61 * time.Second)
+	a.Once() // retry, fails again: next delay doubles
+	if len(rec.got) != 2 || a.St.Applied.Status != "failed" || a.St.RetryAt != clock.Unix()+120 {
+		t.Fatalf("retry: %d applies, %+v, retry at %d", len(rec.got), a.St.Applied, a.St.RetryAt-clock.Unix())
+	}
+	saved, _ := state.Load()
+	if saved.RetryConfig == nil {
+		t.Fatal("retry not saved (lost on restart)")
+	}
+	rec.err = nil
+	clock = clock.Add(121 * time.Second)
+	a.Once()
+	if len(rec.got) != 3 || a.St.Applied.Status != "applied" || a.St.Applied.Version != 1 || a.St.RetryConfig != nil {
+		t.Fatalf("retry did not apply: %+v", a.St.Applied)
+	}
+	if rec.got[2].Secrets["radius_secret"] != "Radius-Secret-0123" {
+		t.Fatal("secret not opened on retry")
+	}
+	a.Once()
+	if fp.seen.Applied.Status != "applied" || len(rec.got) != 3 {
+		t.Fatal("success not reported, or applied again")
+	}
+}
+
+func TestNewerConfigReplacesFailedOne(t *testing.T) {
+	a, fp, rec := setup(t)
+	rec.err = errors.New("apt locked")
+	a.Once()
+	rec.err = nil
+	fp.version = 2
+	a.Once()
+	if a.St.Applied.Version != 2 || a.St.Applied.Status != "applied" || a.St.RetryConfig != nil || len(rec.got) != 2 {
+		t.Fatalf("%+v", a.St.Applied)
+	}
+}
+
+func TestTamperedRetryIsDropped(t *testing.T) {
+	a, _, rec := setup(t)
+	clock := time.Now()
+	a.now = func() time.Time { return clock }
+	rec.err = errors.New("x")
+	a.Once()
+	a.St.RetryConfig.Signature = a.St.RetryConfig.Signature[:10] + "AAAA" + a.St.RetryConfig.Signature[14:]
+	clock = clock.Add(time.Hour)
+	a.Once()
+	if len(rec.got) != 1 || a.St.RetryConfig != nil {
+		t.Fatal("a changed stored configuration was applied")
 	}
 }
 

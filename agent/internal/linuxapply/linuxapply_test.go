@@ -49,6 +49,7 @@ const sshdConfig = "Include /etc/ssh/sshd_config.d/*.conf\nPermitRootLogin prohi
 
 type fakeSystem struct {
 	failSSHD bool
+	selinux  string // "" no SELinux tools, "off" / "on": authlogin_radius state, "disabled"
 	calls    []string
 }
 
@@ -57,10 +58,43 @@ func (f *fakeSystem) Run(name string, args ...string) (string, error) {
 	if name == "sshd" && f.failSSHD {
 		return "/etc/ssh/sshd_config.d/50-sohobotp.conf line 3: Bad configuration option", errors.New("exit status 255")
 	}
+	switch name {
+	case "selinuxenabled":
+		if f.selinux == "disabled" {
+			return "", errors.New("exit status 1")
+		}
+	case "getsebool":
+		return "authlogin_radius --> " + f.selinux + "\n", nil
+	}
 	return "", nil
 }
 
-func (f *fakeSystem) Exists(name string) bool { return name == "sshd" }
+func (f *fakeSystem) Exists(name string) bool {
+	switch name {
+	case "sshd":
+		return true
+	case "getsebool", "setsebool", "selinuxenabled":
+		return f.selinux != ""
+	}
+	return false
+}
+
+func TestSELinuxBooleanForRadius(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		set   bool
+	}{{"", false}, {"disabled", false}, {"on", false}, {"off", true}} {
+		dir := debian(t)
+		sys := &fakeSystem{selinux: tc.state}
+		if _, err := (&Applier{Root: dir, Sys: sys}).Apply(policy(), secret); err != nil {
+			t.Fatal(err)
+		}
+		set := strings.Contains(strings.Join(sys.calls, ";"), "setsebool -P authlogin_radius on")
+		if set != tc.set {
+			t.Fatalf("SELinux %q: setsebool called %v, want %v (%v)", tc.state, set, tc.set, sys.calls)
+		}
+	}
+}
 
 func root(t *testing.T, files map[string]string) string {
 	t.Helper()

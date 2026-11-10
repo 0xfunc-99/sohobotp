@@ -13,7 +13,8 @@ defined('PORTAL_ROOT') || exit;
  * single global secret, and with the endpoint group's offline-cache policy.
  *
  * A stolen laptop therefore only holds its own secret, which disabling the endpoint
- * replaces. Unknown, disabled, pending or Linux endpoints get 403 with no XML.
+ * replaces. Unknown, disabled, pending or Linux endpoints get 403 with no XML; only
+ * made-up ids count against the IP throttle.
  */
 final class CpGateway
 {
@@ -37,7 +38,11 @@ final class CpGateway
         $endpoints = new Endpoints();
         $endpoint = preg_match('/^[0-9a-f]{20}$/', $id) ? $endpoints->endpoint($id) : null;
         if (null === $endpoint || 'windows' !== $endpoint['os'] || 'active' !== $endpoint['status']) {
-            $throttle->fail($ip);
+            // only made-up ids count against the IP: a disabled or deleted machine whose users
+            // keep trying to sign in must not block the other machines behind the same address
+            if (null === $endpoint && !$endpoints->wasDeleted($id)) {
+                $throttle->fail($ip);
+            }
             self::refuse(403, 'Unknown or inactive endpoint.');
         }
         $data = (string) ($_POST['data'] ?? '');

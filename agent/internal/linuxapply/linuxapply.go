@@ -314,6 +314,9 @@ func (a *Applier) Apply(p *protocol.LinuxPolicy, secret string) ([]Change, error
 		if err := a.ensureModule(); err != nil {
 			return nil, err
 		}
+		if err := a.ensureSELinux(); err != nil {
+			return nil, err
+		}
 	}
 	var snaps []snapshot
 	for _, c := range changes {
@@ -386,14 +389,42 @@ func (a *Applier) ensureModule() error {
 	var err error
 	switch {
 	case a.Sys.Exists("apt-get"):
-		out, err = a.Sys.Run("apt-get", "install", "-y", "libpam-radius-auth")
+		// a fresh machine may have no package lists yet, and unattended upgrades may hold the
+		// lock for a while after the first boot: wait for it instead of failing at once
+		lock := "DPkg::Lock::Timeout=300"
+		_, _ = a.Sys.Run("apt-get", "-o", lock, "update")
+		out, err = a.Sys.Run("apt-get", "-o", lock, "install", "-y", "libpam-radius-auth")
 	case a.Sys.Exists("dnf"):
 		out, err = a.Sys.Run("dnf", "install", "-y", "pam_radius")
+		if err != nil { // pam_radius is in EPEL (Rocky/Alma: epel-release; RHEL: enable EPEL)
+			_, _ = a.Sys.Run("dnf", "install", "-y", "epel-release")
+			out, err = a.Sys.Run("dnf", "install", "-y", "pam_radius")
+		}
 	default:
 		return errors.New("pam_radius_auth.so is not installed and no apt-get or dnf to install it")
 	}
 	if err != nil {
-		return fmt.Errorf("installing pam_radius failed: %s", firstLine(out))
+		return fmt.Errorf("installing pam_radius failed (install it by hand: Debian/Ubuntu libpam-radius-auth, RHEL/Rocky pam_radius from EPEL): %s", firstLine(out))
+	}
+	return nil
+}
+
+// ensureSELinux: with SELinux enforcing (RHEL/Rocky default), sshd and sudo may only reach a
+// RADIUS server when the boolean authlogin_radius is on; it is off by default. Left on when
+// 2FA is turned off again (it only allows the connection).
+func (a *Applier) ensureSELinux() error {
+	if !a.Sys.Exists("getsebool") || !a.Sys.Exists("setsebool") {
+		return nil
+	}
+	if _, err := a.Sys.Run("selinuxenabled"); err != nil {
+		return nil // SELinux disabled (or selinuxenabled missing)
+	}
+	out, err := a.Sys.Run("getsebool", "authlogin_radius")
+	if err == nil && strings.Contains(out, "--> on") {
+		return nil
+	}
+	if out, err := a.Sys.Run("setsebool", "-P", "authlogin_radius", "on"); err != nil {
+		return fmt.Errorf("SELinux: cannot turn on authlogin_radius (setsebool -P authlogin_radius on): %s", firstLine(out))
 	}
 	return nil
 }

@@ -2,3 +2,4 @@ Action	Type	Source	Target	ExtendedType
 s72	i2	S72	S255	I4
 CustomAction	Action
 SaveToken	11282	AgentExe	save-token "[TOKEN]"	
+ForgetState	3154	AgentExe	forget	

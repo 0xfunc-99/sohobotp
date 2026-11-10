@@ -100,7 +100,8 @@ State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 32
 | Config versions: new on policy change, not resent, failed not retried, restored backup | as designed | auto (unit) |
 | Secrets sealed at rest and in transit, never in the audit trail | yes | auto (unit, e2e) |
 | Linux endpoint becomes a RADIUS client; removed on disable / delete / move | yes, and FreeRADIUS really refuses it | auto (unit, appliance) |
-| Endpoint deleted, then the agent checks in | `unknown_endpoint`, agent keeps last config | partial (portal side) **P2** |
+| Endpoint deleted, then the agent checks in | `unknown_endpoint`, agent keeps last config; not counted by the IP throttle | auto (e2e, portal side) |
+| Disabled or deleted Windows machine, users keep signing in | cp.php 403, IP not blocked (other machines behind the same NAT keep working) | auto (e2e) |
 | Two check-ins at the same time from one endpoint | both answered, nonces not lost | **gap P3** |
 | Pages: escaping of every inventory field and apply error | escaped | auto (e2e) |
 | 5000 endpoints: list page, check-ins per second | page under 2 s, no lock contention errors | **gap P2** (stage 6) |

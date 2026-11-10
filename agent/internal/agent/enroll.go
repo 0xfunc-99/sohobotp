@@ -88,11 +88,11 @@ func Enroll(e Enrolment) (*state.State, error) {
 // CheckinAndReport checks in once and, when a configuration was applied, reports the
 // result to the portal right away.
 func (a *Agent) CheckinAndReport() error {
-	before := a.St.Applied.Version
+	before := a.St.Applied
 	if _, err := a.Once(); err != nil {
 		return err
 	}
-	if a.St.Applied.Version != before {
+	if a.St.Applied.Version != before.Version || a.St.Applied.Status != before.Status {
 		time.Sleep(time.Second)
 		if _, err := a.Once(); err != nil {
 			return err

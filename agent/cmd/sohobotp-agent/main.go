@@ -57,6 +57,10 @@ func main() {
 				err = agent.SaveBootstrapToken(os.Args[2])
 			}
 		}
+	case "forget": // run by the Windows MSI on uninstall: the next install enrols afresh
+		if err = agent.RequireAdmin(); err == nil {
+			err = state.Remove()
+		}
 	case "version":
 		fmt.Println("sohobotp-agent", inventory.Version)
 		if release.PublicKey == "" {
@@ -79,6 +83,7 @@ func usage() {
   status             enrolment, last check-in, applied configuration
   apply --dry-run --config FILE   show what a Linux policy would change
   uninstall          remove the PAM changes (Linux), the service and the agent state
+  forget             delete the agent state only (the Windows MSI runs it on uninstall)
   version
   release keygen --out DIR                       create the OFFLINE release key (keep it off the portal)
   release sign --key FILE --file BIN --version X.Y.Z --os linux|windows --arch amd64|arm64 [--out manifest.json]`)
@@ -136,6 +141,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	a.St.RetryAt = 0 // run --once retries a failed configuration now
 	if err := a.CheckinAndReport(); err != nil {
 		return err
 	}
@@ -165,6 +171,10 @@ func report(st *state.State) {
 		st.PortalURL, st.EndpointID, portalState, last, st.Applied.Version, st.Applied.Status)
 	if st.Applied.Error != "" {
 		fmt.Printf("Apply error:     %s\n", st.Applied.Error)
+	}
+	if st.RetryConfig != nil {
+		fmt.Printf("Next retry:      %s (attempt %d; run --once retries now)\n",
+			time.Unix(st.RetryAt, 0).UTC().Format("2006-01-02 15:04:05 UTC"), st.RetryCount+1)
 	}
 	if st.LastError != "" {
 		fmt.Printf("Last error:      %s\n", st.LastError)

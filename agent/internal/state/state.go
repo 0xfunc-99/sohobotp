@@ -36,6 +36,11 @@ type State struct {
 	// self-update: a refused version is not retried for an hour
 	UpdateFailedVersion string `json:"update_failed_version,omitempty"`
 	UpdateFailedAt      int64  `json:"update_failed_at,omitempty"`
+	// A configuration that failed to apply (e.g. SohobOTP Sign-in not installed yet, apt
+	// locked) is kept as received (signed, secrets still sealed) and retried with a delay.
+	RetryConfig *protocol.Envelope `json:"retry_config,omitempty"`
+	RetryAt     int64              `json:"retry_at,omitempty"`
+	RetryCount  int                `json:"retry_count,omitempty"`
 }
 
 // Keys are the endpoint's private keys, loaded from the state.

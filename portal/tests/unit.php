@@ -367,6 +367,7 @@ $linRecord = $endpoints->endpoint($lin->id);
 check('moved back: RADIUS client recreated', '' !== $linRecord['radius_client_id'] && null !== $radius->client($linRecord['radius_client_id']));
 $endpoints->deleteEndpoint($lin->id);
 check('deleted endpoint: file and RADIUS client gone', null === $endpoints->endpoint($lin->id) && null === $radius->client($linRecord['radius_client_id']));
+check('deleted endpoint id remembered (not counted as probing)', $endpoints->wasDeleted($lin->id) && !$endpoints->wasDeleted(str_repeat('ab', 10)) && !$endpoints->wasDeleted('../x'));
 
 // --- Endpoints: approval and Active Directory rules (AD itself: tests/e2e-ad-endpoints.php)
 $rules = [
