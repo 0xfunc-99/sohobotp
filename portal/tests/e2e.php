@@ -854,6 +854,7 @@ for ($i = 0; $i < 21; $i++) {
 }
 check('CP gateway: probing unknown endpoint ids is blocked (429)', 429 === $gatewayProber->status, (string) $gatewayProber->status);
 // a deleted machine whose agent and SohobOTP Sign-in are still installed
+$admin->get('/portal/index.php?r=endpoint-enrol');
 $admin->post('/portal/index.php?r=endpoint-enrol', ['op' => 'create', 'group_id' => $endpointGroupId, 'label' => 'to delete', 'hours' => '1', 'max_uses' => '1']);
 preg_match('/<p class="secret"><code>([0-9a-f]{12}\.[A-Za-z0-9_-]{32})<\/code>/', $admin->body, $m);
 $gone = new AgentSim();
@@ -862,7 +863,10 @@ $agentHttp->bind = '127.0.0.12';
 $goneSignIn = new Browser($base);
 $goneSignIn->bind = '127.0.0.12';
 $gone->id = $agentCall('enroll', $gone->enrollRequest($m[1] ?? '', ['hostname' => 'retired-pc', 'os' => 'windows']))['endpoint_id'] ?? null;
-(new Portal\Endpoints())->deleteEndpoint((string) $gone->id);
+check('machine to delete enrolled', is_string($gone->id) && '' !== $gone->id, $agentHttp->status . ' ' . $agentHttp->body);
+if (is_string($gone->id) && '' !== $gone->id) {
+    (new Portal\Endpoints())->deleteEndpoint($gone->id);
+}
 for ($i = 0; $i < 25; $i++) {
     $agentCall('checkin', ['applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $gone);
     $goneSignIn->post('/portal/cp.php?e=' . $gone->id, ['data' => '<multiOTP/>'], [], false);
