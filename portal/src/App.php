@@ -100,7 +100,9 @@ final class App
         $directory = new DirectoryController($this->admin, $this->audit, $this->view);
         $radius = new RadiusController($this->admin, $this->audit, $this->view);
         $endpoints = new EndpointsController($this->admin, $this->audit, $this->view);
+        $apiKeys = new ApiKeysController($this->admin, $this->audit, $this->view);
         match ($route) {
+            'api-keys'             => $apiKeys->index(),
             'radius'               => $radius->index(),
             'radius-group'         => $radius->group(),
             'radius-group-delete'  => $radius->groupDelete(),

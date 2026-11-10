@@ -934,7 +934,7 @@ $postRoutes = [
     'radius-diagnostics' => ['op' => 'disable-default-client'], 'radius-vip' => ['op' => 'save', 'address_1' => '192.0.2.99', 'secret_1' => 'Evil-Secret-12345'],
     'endpoint&id=' . $linux->id => ['op' => 'delete'], 'endpoint-group' => ['name' => 'Evil'], 'endpoint-group-delete' => ['id' => $endpointGroupId],
     'endpoint-rules' => ['op' => 'check'], 'endpoint-enrol' => ['op' => 'create', 'group_id' => $endpointGroupId],
-    'admin-new' => ['username' => 'evil', 'role' => 'superadmin'], 'admin-edit' => [], 'admin-action' => ['op' => 'delete'],
+    'api-keys' => ['op' => 'create', 'name' => 'evil', 'scopes' => ['users.write']], 'admin-new' => ['username' => 'evil', 'role' => 'superadmin'], 'admin-edit' => [], 'admin-action' => ['op' => 'delete'],
 ];
 $deniedBefore = substr_count((string) file_get_contents(Portal\Config::auditFile()), '"action":"access.denied"');
 foreach ($postRoutes as $route => $fields) {
@@ -1027,6 +1027,109 @@ copy("$backup/portal/portal.key", "$data/portal.key");
 // ---------------------------------------------------------------- licences page (public), no third-party footer
 $public = (new Browser($base))->get('/portal/index.php?r=licences');
 check('licences page is public and lists the open-source parts', 200 === $public->status && str_contains($public->body, 'LGPL-3.0') && str_contains($public->body, 'phpseclib') && str_contains($public->body, 'Apache-2.0'));
+// ---------------------------------------------------------------- REST API (stage 5)
+$admin->get('/portal/index.php?r=api-keys');
+check('API keys page served to the super administrator', 200 === $admin->status && str_contains($admin->body, 'New key'));
+$newKey = static function (array $fields) use ($admin): string {
+    $admin->get('/portal/index.php?r=api-keys');
+    $admin->post('/portal/index.php?r=api-keys', $fields + ['op' => 'create', 'networks' => '', 'expires_days' => '30', 'rate' => '200']);
+    return preg_match('/<p class="secret"><code>(sohob_[0-9a-f]{12}_[A-Za-z0-9_-]{32})<\/code>/', $admin->body, $m) ? $m[1] : '';
+};
+$apiKey = $newKey(['name' => 'HR onboarding', 'scopes' => ['users.read', 'users.write', 'tokens.write', 'auth.check']]);
+check('API key created and shown once', '' !== $apiKey);
+$admin->get('/portal/index.php?r=api-keys');
+check('key listed without its secret', str_contains($admin->body, 'HR onboarding') && !str_contains($admin->body, substr($apiKey, 19)));
+$api = new Browser($base);
+$api->bind = '127.0.0.13';
+$call = static function (string $method, string $path, ?array $body = null, ?string $key = null) use ($api, $apiKey): array {
+    $headers = ['Content-Type' => 'application/json'];
+    $key ??= $apiKey;
+    if ('' !== $key) {
+        $headers['Authorization'] = 'Bearer ' . $key;
+    }
+    $api->raw($method, '/portal/api.php' . $path, null === $body ? null : json_encode($body), $headers);
+    return json_decode($api->body, true) ?? [];
+};
+$reply = $call('GET', '/v1/health', null, '');
+check('API: health without a key', 200 === $api->status && 'ok' === ($reply['status'] ?? ''));
+$call('GET', '/v1/users', null, '');
+check('API: no key, 401', 401 === $api->status);
+$call('GET', '/v1/users', null, 'sohob_000000000000_' . str_repeat('x', 32));
+check('API: unknown key, 401', 401 === $api->status);
+$reply = $call('GET', '/v1/me');
+check('API: /v1/me shows the key and its permissions', 200 === $api->status && 'HR onboarding' === ($reply['name'] ?? '') && in_array('auth.check', $reply['scopes'] ?? [], true));
+$reply = $call('POST', '/v1/users', ['user' => 'api.created', 'display_name' => 'Created by API', 'email' => 'api.created@example.test', 'group' => 'VPN-Users']);
+check('API: user created, provisioning link returned', 201 === $api->status && str_starts_with((string) ($reply['provisioning_uri'] ?? ''), 'otpauth://') && 'VPN-Users' === ($reply['user']['group'] ?? ''), $api->status . ' ' . $api->body);
+parse_str((string) parse_url((string) ($reply['provisioning_uri'] ?? ''), PHP_URL_QUERY), $apiQuery);
+$apiSeed = base32_decode((string) ($apiQuery['secret'] ?? ''));
+$call('POST', '/v1/users', ['user' => 'api.created']);
+check('API: duplicate user, 409', 409 === $api->status);
+$call('POST', '/v1/users', ['user' => 'bad user"name']);
+check('API: invalid user name, 422', 422 === $api->status, $api->status . ' ' . $api->body);
+$reply = $call('GET', '/v1/users/api.created');
+check('API: read one user', 200 === $api->status && 'api.created@example.test' === ($reply['email'] ?? ''));
+$reply = $call('GET', '/v1/users?q=api.created');
+check('API: search users', 200 === $api->status && 1 === ($reply['total'] ?? 0) && 'api.created' === ($reply['users'][0]['user'] ?? ''));
+$reply = $call('PATCH', '/v1/users/api.created', ['display_name' => 'Renamed', 'enabled' => false]);
+check('API: user changed and disabled', 200 === $api->status && 'Renamed' === ($reply['display_name'] ?? '') && false === ($reply['enabled'] ?? null));
+$reply = $call('POST', '/v1/auth/check', ['user' => 'api.created', 'code' => Portal\Totp::code($apiSeed, intdiv(time(), 30))]);
+check('API: code check of a disabled user is not accepted', 200 === $api->status && 'accepted' !== ($reply['result'] ?? ''), $api->body);
+$call('PATCH', '/v1/users/api.created', ['enabled' => true]);
+$apiStep = null;
+$reply = $call('POST', '/v1/auth/check', ['user' => 'api.created', 'code' => next_code($apiSeed, $apiStep)]);
+check('API: right code accepted', 'accepted' === ($reply['result'] ?? ''), $api->body);
+$reply = $call('POST', '/v1/auth/check', ['user' => 'api.created', 'code' => '000000' === Portal\Totp::code($apiSeed, intdiv(time(), 30)) ? '111111' : '000000']);
+check('API: wrong code rejected', 'rejected' === ($reply['result'] ?? ''), $api->body);
+$reply = $call('POST', '/v1/auth/check', ['user' => 'nobody.here', 'code' => '123456']);
+check('API: unknown user reported as unknown', 'unknown' === ($reply['result'] ?? ''));
+$reply = $call('POST', '/v1/users/api.created/route', ['route' => 'vip']);
+check('API: user sent back to Symantec VIP', 200 === $api->status && 'vip' === ((new Portal\VipMigration())->stateOf('api.created')['state'] ?? ''));
+$reply = $call('POST', '/v1/users/api.created/enroll');
+check('API: new authenticator enrolled, user moved to SohobOTP', 200 === $api->status && str_starts_with((string) ($reply['provisioning_uri'] ?? ''), 'otpauth://') && (new Portal\VipMigration())->isOnSohobotp('api.created'));
+$api->raw('POST', '/portal/api.php/v1/users', '{not json', ['Authorization' => 'Bearer ' . $apiKey]);
+check('API: malformed JSON, 400', 400 === $api->status);
+$call('GET', '/v1/nothing');
+check('API: unknown call, 404', 404 === $api->status);
+$api->raw('GET', '/portal/api.php?path=/v1/users/api.created', null, ['Authorization' => 'Bearer ' . $apiKey]);
+check('API: ?path= works without PATH_INFO', 200 === $api->status && str_contains($api->body, '"user":"api.created"'));
+$call('GET', '/v1/audit');
+check('API: a call outside the key permissions, 403', 403 === $api->status && str_contains($api->body, 'audit.read'));
+$readOnly = $newKey(['name' => 'Reporting', 'scopes' => ['users.read', 'audit.read']]);
+$call('DELETE', '/v1/users/api.created', null, $readOnly);
+check('API: read-only key cannot delete users', 403 === $api->status);
+$reply = $call('GET', '/v1/audit?action=user.create&limit=20', null, $readOnly);
+$apiAudit = json_encode($reply);
+check('API: audit shows the API changes under the key name, never the key or seed', 200 === $api->status && str_contains($apiAudit, 'api:HR onboarding') && !str_contains($apiAudit, substr($apiKey, 19)) && !str_contains($apiAudit, (string) ($apiQuery['secret'] ?? 'no-seed')));
+$fenced = $newKey(['name' => 'Fenced', 'scopes' => ['users.read'], 'networks' => '192.0.2.0/24']);
+$call('GET', '/v1/users', null, $fenced);
+check('API: key used outside its allowed networks, 403', 403 === $api->status);
+$slow = $newKey(['name' => 'Throttled', 'scopes' => ['users.read'], 'rate' => '3']);
+for ($i = 0; $i < 4; $i++) {
+    $call('GET', '/v1/me', null, $slow);
+}
+check('API: rate limit per key, 429', 429 === $api->status);
+$reply = $call('DELETE', '/v1/users/api.created');
+check('API: user deleted', 200 === $api->status && null === (new Portal\Users())->get('api.created'));
+$prober = new Browser($base);
+$prober->bind = '127.0.0.14';
+for ($i = 0; $i < 21; $i++) {
+    $prober->raw('GET', '/portal/api.php/v1/users', null, ['Authorization' => 'Bearer sohob_' . bin2hex(random_bytes(6)) . '_' . str_repeat('y', 32)]);
+}
+check('API: guessing keys from one address is blocked (429)', 429 === $prober->status);
+$admin->get('/portal/index.php?r=api-keys');
+$keyIds = [];
+preg_match_all('/name="id" value="([0-9a-f]{12})"/', $admin->body, $keyIds);
+foreach ($keyIds[1] as $id) {
+    $admin->get('/portal/index.php?r=api-keys');
+    $admin->post('/portal/index.php?r=api-keys', ['op' => 'revoke', 'id' => $id]);
+}
+$call('GET', '/v1/me');
+check('API: revoked key refused at once', 401 === $api->status);
+$help->get('/portal/index.php?r=api-keys');
+check('helpdesk cannot open API keys', 403 === $help->status);
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('audit: API keys created and revoked, never the key', str_contains($auditText, '"action":"api_key.create"') && str_contains($auditText, '"action":"api_key.revoke"') && !str_contains($auditText, substr($apiKey, 19)));
+
 $admin->get('/portal/index.php?r=dashboard');
 check('footer shows the company and a Licences link, not a third-party credit', str_contains($admin->body, '© Sohobcom') && str_contains($admin->body, 'r=licences') && !str_contains($admin->body, 'Powered by'));
 

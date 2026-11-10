@@ -39,7 +39,7 @@ docker exec "$NAME" php -r '
   $check("security headers through nginx", (bool) preg_match("/content-security-policy/i", $headers));
   $check("__Host- session cookie over HTTPS", (bool) preg_match("/set-cookie: __Host-motp_portal/i", $headers));
   $check("HSTS header", (bool) preg_match("/strict-transport-security/i", $headers));
-  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md", "/portal/tests/AgentSim.php", "/portal/bin/sohobotp-vip-route", "/portal/tests/fake-vip-radius.php", "/portal/src/Endpoints.php", "/portal/docs/agent-protocol-vectors.json"] as $p) {
+  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md", "/portal/tests/AgentSim.php", "/portal/bin/sohobotp-vip-route", "/portal/tests/fake-vip-radius.php", "/portal/src/Api.php", "/portal/tests/appliance-api.php", "/portal/src/Endpoints.php", "/portal/docs/agent-protocol-vectors.json"] as $p) {
     [$c] = $get("https://localhost" . $p);
     $check("$p refused by nginx ($c)", 404 === $c);
   }
@@ -66,6 +66,9 @@ docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/porta
 
 echo "== Endpoint agent API through nginx, RADIUS client in real FreeRADIUS"
 docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-endpoints.php" || STATUS=1
+
+echo "== REST API through nginx"
+docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-api.php" || STATUS=1
 
 echo "== Symantec VIP migration: forwarding through real FreeRADIUS to a stand-in gateway"
 docker exec -d "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/fake-vip-radius.php 18121 Vip-Gateway-Secret-0123 /tmp/fake-vip.count"

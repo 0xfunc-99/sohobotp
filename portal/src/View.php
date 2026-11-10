@@ -40,6 +40,7 @@ final class View
             ['route' => 'radius', 'label' => 'RADIUS servers', 'permission' => ['radius.view']],
             ['route' => 'endpoints', 'label' => 'Endpoints', 'permission' => ['endpoints.view']],
             ['route' => 'admins', 'label' => 'Administrators', 'permission' => ['admins.manage']],
+            ['route' => 'api-keys', 'label' => 'API keys', 'permission' => ['api.manage']],
             ['route' => 'audit', 'label' => 'Audit trail', 'permission' => ['audit.view']],
             ['route' => 'account', 'label' => 'My account', 'permission' => []],
         ];

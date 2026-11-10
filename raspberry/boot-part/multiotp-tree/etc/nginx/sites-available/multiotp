@@ -44,9 +44,21 @@ server {
         expires -1;
     }
 
-    # multiOTP management portal: allowlist. Only /portal/, portal/index.php, portal/agent.php, portal/cp.php and portal/assets/
-    # are public; source, templates, CLI, tests, docs, task files and README are not.
-    location ~ ^/portal/(?!$|index\.php$|agent\.php$|cp\.php$|assets/) {
+    # SohobOTP REST API: /portal/api.php/v1/... (path after api.php = PATH_INFO). Before the other
+    # rules: its paths contain words like /users that are refused for the legacy folders below.
+    location ~ ^/portal/api\.php(/[A-Za-z0-9._~%@/-]*)?$ {
+            include /etc/nginx/fastcgi_params;
+            fastcgi_param HTTPS on;
+            fastcgi_split_path_info ^(/portal/api\.php)(/.*)$;
+            fastcgi_param SCRIPT_FILENAME $document_root/portal/api.php;
+            fastcgi_param PATH_INFO $fastcgi_path_info;
+            fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+            fastcgi_pass unix:/var/run/php5-fpm.sock;
+    }
+
+    # multiOTP management portal: allowlist. Only /portal/, portal/index.php, portal/agent.php, portal/cp.php, portal/api.php
+    # and portal/assets/ are public; source, templates, CLI, tests, docs, task files and README are not.
+    location ~ ^/portal/(?!$|index\.php$|agent\.php$|cp\.php$|api\.php|assets/) {
       deny all;
       return 404;
     }

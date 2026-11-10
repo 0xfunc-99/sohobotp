@@ -16,8 +16,8 @@ in those folders also refuses to run on its own.
 | 1 | Admin accounts, roles, admin MFA, sessions, CSRF, audit trail, dashboard counts | **done** |
 | 2 | Users and tokens, AD/LDAP settings, test, preview, sync now/scheduled, history, background worker | **done** (tested against Samba AD and OpenLDAP) |
 | 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
-| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **done** (agent in `agent/`: Debian and Rocky tested end to end, signed self-update, MSI for Group Policy); Windows needs a real-machine test |
-| 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | |
+| 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **done** (agent in `agent/`: Debian and Rocky tested end to end, signed self-update with self-test and roll back, MSI for Group Policy with upgrades; Windows tested automatically on Windows Server 2022, sign-in screen by hand) |
+| 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | **done** (see REST API below) |
 | 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
 | 7 | Raspberry Pi / virtual appliance image with the portal and worker | |
 | 8 | Integration testing on test systems (real AD, RADIUS clients, Credential Provider) | |
@@ -244,6 +244,45 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
 - **SohobOTP Sign-in hardening**: its bundled engine verifies the portal certificate with
   the CA the agent writes (`portal-ca.pem`), and the shared secret is kept in a key only
   SYSTEM and Administrators can read (docs/endpoints.md, risks 2 and 4).
+
+## REST API (stage 5)
+
+`https://<portal>/portal/api.php/v1/…` (JSON; `?path=/v1/…` where PATH_INFO is not available),
+for automation and for applications that check codes. Keys are created by a super
+administrator on **API keys** (shown once; `sohob_<id>_<secret>`, only a hash is stored):
+permissions (scopes), optional allowed client networks, optional expiry, rate limit per
+minute. Send `Authorization: Bearer <key>`. Every change is audited as `api:<key name>`;
+failed key guesses count against the client address (20 in 15 minutes: 429).
+
+| Call | Permission | |
+|---|---|---|
+| `GET /v1/health` | none | `{"status":"ok"}` |
+| `GET /v1/me` | any key | the key's name, permissions, limits |
+| `GET /v1/users?q=&status=&page=&per_page=` | `users.read` | search (status: enabled, disabled, locked, synced, local) |
+| `GET /v1/users/{user}` | `users.read` | one user (no secrets) |
+| `POST /v1/users` | `users.write` | `{"user", "display_name", "email", "sms", "description", "group", "token_serial"}`; 201 with `provisioning_uri` (software token) |
+| `PATCH /v1/users/{user}` | `users.write` | any of `display_name`, `email`, `sms`, `description`, `group`, `enabled` (bool) |
+| `DELETE /v1/users/{user}` | `users.write` | |
+| `POST /v1/users/{user}/unlock` | `users.write` | |
+| `POST /v1/users/{user}/route` | `users.write` | `{"route": "sohobotp" \| "vip"}` (Symantec VIP migration) |
+| `POST /v1/users/{user}/enroll` | `tokens.write` | new software authenticator: `provisioning_uri` (moves the user to SohobOTP) |
+| `POST /v1/auth/check` | `auth.check` | `{"user", "code"}` → `accepted`, `rejected`, `locked`, `disabled`, `unknown` (the engine's lockout applies) |
+| `GET /v1/endpoints` | `endpoints.read` | machines with the agent (no keys) |
+| `GET /v1/radius/servers` | `radius.read` | server groups and RADIUS clients (no secrets) |
+| `GET /v1/audit?action=&limit=` | `audit.read` | audit entries, newest first |
+
+Errors: `{"error": code, "message": text}` with 400, 401, 403, 404, 409, 413, 422, 429.
+Example:
+
+```sh
+curl -s -H "Authorization: Bearer $KEY" https://portal.example.com/portal/api.php/v1/users/alice
+curl -s -H "Authorization: Bearer $KEY" -d '{"user":"alice","code":"123456"}' https://portal.example.com/portal/api.php/v1/auth/check
+```
+
+nginx: the API has its own location (before the rules that refuse legacy paths such as
+`/users`), with PATH_INFO and the Authorization header passed to PHP. Tests: `tests/e2e.php`
+(29 API checks: permissions, networks, rate limit, key guessing, revoke, audit),
+`tests/appliance-api.php` (through nginx and PHP-FPM).
 
 ## Background worker
 
