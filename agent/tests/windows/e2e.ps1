@@ -90,6 +90,7 @@ Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
 if ($SignInMsi -ne "") {
   Write-Host "== SohobOTP Sign-in pinned to the portal certificate"
   $mp = (Get-ItemProperty $cpKey).multiOTPPath
+  Check "Sign-in finds its program: multiotp.exe and PHP in the folder multiOTPPath names" ((Test-Path (Join-Path $mp "multiotp.exe")) -and (Test-Path (Join-Path $mp "php\php.exe"))) $mp
   $caFile = Join-Path $mp "portal-ca.pem"
   $norm = { param($f) ((Get-Content $f -Raw) -replace "`r", "").Trim() }
   Check "agent wrote the portal CA into the Sign-in folder" (Wait-Until { (Test-Path $caFile) -and ((& $norm $caFile) -eq (& $norm "$work\portal\ca.pem")) } 60) $caFile

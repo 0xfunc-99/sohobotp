@@ -196,11 +196,11 @@
       <![CDATA[MULTIOTP_BITMAP_PATH=""]]>
     </SetProperty>
     <?if $(var.Platform) = x64 ?>
-      <SetProperty Id="MULTIOTP_PATH" After="AppSearch" Value="[ProgramFiles64Folder]multiOTP\">
+      <SetProperty Id="MULTIOTP_PATH" After="AppSearch" Value="[ProgramFiles64Folder]SohobOTP Sign-in\">
         <![CDATA[MULTIOTP_PATH=""]]>
       </SetProperty>
     <?else?>
-      <SetProperty Id="MULTIOTP_PATH" After="AppSearch" Value="[ProgramFilesFolder]multiOTP\">
+      <SetProperty Id="MULTIOTP_PATH" After="AppSearch" Value="[ProgramFilesFolder]SohobOTP Sign-in\">
         <![CDATA[MULTIOTP_PATH=""]]>
       </SetProperty>
     <?endif?>
