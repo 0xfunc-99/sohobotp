@@ -1,2 +1,6 @@
 SaveToken	TOKEN AND NOT REMOVE~="ALL"	5850
 ForgetState	REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE	3400
+FindRelatedProducts		25
+LaunchConditions		100
+MigrateFeatureStates		1200
+RemoveExistingProducts		1450

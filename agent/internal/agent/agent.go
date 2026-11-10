@@ -71,6 +71,7 @@ func (a *Agent) Once() (time.Duration, error) {
 		return a.nextBackoff(), err
 	}
 	a.backoff = 0
+	a.confirmUpdate()
 	a.St.LastCheckin = a.now().Unix()
 	a.St.LastError = ""
 	a.St.PortalState = "active"

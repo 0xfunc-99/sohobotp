@@ -18,7 +18,9 @@ case "$(docker info --format '{{.Architecture}}')" in
   *) ARCH=amd64 ;;
 esac
 # Self-update test material: a TEST release key, agents 0.1.0 and 0.2.0 built with it,
-# 0.2.0 signed with it, and a 0.3.0 signed with ANOTHER key (must be refused by the agent).
+# 0.2.0 signed with it, and a 0.3.0 signed with ANOTHER key (must be refused by the agent);
+# 0.4.0 signed, passes its self-test, then crashes at every start (test-only build flag):
+# must be rolled back; 0.5.0 signed but not a working program: refused by the self-test.
 E2E="$REPO/agent/dist/e2e"
 rm -rf "$E2E" && mkdir -p "$E2E"
 docker run --rm -v "$REPO":/src -w /src/agent -e GOFLAGS=-buildvcs=false -e ARCH="$ARCH" \
@@ -31,7 +33,13 @@ docker run --rm -v "$REPO":/src -w /src/agent -e GOFLAGS=-buildvcs=false -e ARCH
         -o dist/e2e/agent-$v ./cmd/sohobotp-agent
     done
     go run ./cmd/sohobotp-agent release sign --key dist/e2e/release-private.key --file dist/e2e/agent-0.2.0 --version 0.2.0 --os linux --arch $ARCH --out dist/e2e/agent-0.2.0.json
-    go run ./cmd/sohobotp-agent release sign --key dist/e2e/other/release-private.key --file dist/e2e/agent-0.3.0 --version 0.3.0 --os linux --arch $ARCH --out dist/e2e/agent-0.3.0.json'
+    go run ./cmd/sohobotp-agent release sign --key dist/e2e/other/release-private.key --file dist/e2e/agent-0.3.0 --version 0.3.0 --os linux --arch $ARCH --out dist/e2e/agent-0.3.0.json
+    CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -ldflags "-s -w -X multiotp-portal/agent/internal/inventory.Version=0.4.0 -X multiotp-portal/agent/internal/release.PublicKey=$KEY -X multiotp-portal/agent/internal/agent.crashAfterStartForTests=yes" \
+      -o dist/e2e/agent-0.4.0 ./cmd/sohobotp-agent
+    printf "#!/bin/sh\necho this release is broken >&2\nexit 1\n" > dist/e2e/agent-0.5.0
+    for v in 0.4.0 0.5.0; do
+      go run ./cmd/sohobotp-agent release sign --key dist/e2e/release-private.key --file dist/e2e/agent-$v --version $v --os linux --arch $ARCH --out dist/e2e/agent-$v.json
+    done'
 BIN="$E2E/agent-0.1.0"
 docker build -q -t multiotp-portal-appliance:dev "$REPO" >/dev/null
 docker build -q -t "sohobotp-test-$DISTRO" "$REPO/agent/tests/docker/$DISTRO" >/dev/null
@@ -110,7 +118,7 @@ check "agent picks up version 2" "agent run --once | grep -q 'version 2, applied
 client sudo-removed
 
 echo "== self-update with signed releases"
-for v in 0.2.0 0.3.0; do
+for v in 0.2.0 0.3.0 0.4.0 0.5.0; do
   docker cp "$E2E/agent-$v" "$APP:/tmp/agent-$v" && docker cp "$E2E/agent-$v.json" "$APP:/tmp/agent-$v.json"
   docker exec "$APP" chmod 0644 "/tmp/agent-$v" "/tmp/agent-$v.json"
   check "portal stores release $v" "docker exec $APP su -s /bin/sh www-data -c 'php /usr/local/bin/multiotp/portal/bin/portal-admin.php agent-release-add --file=/tmp/agent-$v --manifest=/tmp/agent-$v.json' | grep -q Added"
@@ -124,6 +132,21 @@ check "agent downloads, verifies and installs 0.2.0" "agent version | grep -q 's
 agent run --once >/dev/null 2>&1 || true
 check "portal sees the new agent version" "portal endpoint | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)[\"inventory\"][\"agent_version\"]==\"0.2.0\" else 1)'"
 check "updated agent keeps working (SSH still needs the code)" "docker exec $CLI python3 /opt/client.py sudo-removed /e2e/seeds.json >/dev/null 2>&1"
+
+echo "== self-update safety: self-test and roll back"
+check "portal policy: target 0.5.0 (signed, but does not start)" "portal policy update-0.5.0 | grep -q 'policy saved'"
+OUT="$(agent run --once 2>&1 || true)"
+check "release that does not start refused by the self-test, 0.2.0 kept" "echo \"\$OUT\" | grep -q 'update to 0.5.0 refused: the new version does not start' && agent version | grep -q 'sohobotp-agent 0.2.0'"
+check "portal policy: target 0.4.0 (starts, then crashes)" "portal policy update-0.4.0 | grep -q 'policy saved'"
+OUT="$(agent run --once 2>&1 || true)"
+check "0.4.0 passes its self-test and is installed" "agent version | grep -q 'sohobotp-agent 0.4.0'"
+for i in 1 2 3; do agent run --once >/dev/null 2>&1 || true; done
+OUT="$(agent run --once 2>&1 || true)"
+check "after 3 starts without a check-in, the agent rolls back to 0.2.0 by itself" "echo \"\$OUT\" | grep -q 'rolled back' && agent version | grep -q 'sohobotp-agent 0.2.0'"
+OUT="$(agent run --once 2>&1 || true)"
+check "the rolled-back version is not installed again, 0.2.0 checks in" "agent version | grep -q 'sohobotp-agent 0.2.0' && agent status | grep -q 'Update blocked:  0.4.0'"
+check "rolled-back agent keeps working (SSH still needs the code)" "docker exec $CLI python3 /opt/client.py sudo-removed /e2e/seeds.json >/dev/null 2>&1"
+check "portal policy: target 0.2.0 again" "portal policy update-0.2.0 | grep -q 'policy saved'"
 
 echo "== 2FA turned off in the portal"
 check "portal policy changed to 2FA off" "portal policy off | grep -q 'policy saved'"

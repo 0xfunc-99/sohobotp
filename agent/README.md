@@ -46,8 +46,10 @@ Administrators only). The service enrols on its first start and **deletes the to
 approval*: anyone can read a GPO's files, so a copied token must not admit unknown machines.
 Build: `sh agent/packaging/windows/build-msi.sh` (msitools in Docker; the installer windows
 are tables in `packaging/windows/ui/` added with msibuild). `check-msi-ui.sh` shows them under
-Wine and takes screenshots. The MSI has no upgrade table (wixl limitation): new versions arrive
-by self-update.
+Wine and takes screenshots. **Upgrades**: a newer MSI (`AGENT_VERSION=x.y.z`, the version
+must grow) installed over an older one, by hand or by Group Policy, replaces it in place and
+keeps the machine's identity; an older MSI over a newer one is refused (tables added by
+build-msi.sh, see `packaging/windows/tables/README.md`). Self-update works as well.
 
 Other commands: `status`, `run --once` (check in now), `apply --dry-run --config FILE`
 (Linux: show what a policy would change), `uninstall`, `version`.
@@ -104,9 +106,16 @@ the Credential Provider; failures restore the previous values.
 3. On the portal: `portal-admin.php agent-release-add --file=... --manifest=...`
    (set `MULTIOTP_PORTAL_RELEASE_KEY` to the public key so the portal also refuses bad uploads).
 4. Choose the version as the endpoint group's **Agent version**. Older agents download it
-   through the signed agent API, verify it, replace their binary atomically and restart
-   (systemd `Restart=always`; Windows recovery actions). A refused release is retried after
-   an hour at the earliest; the reason is in `status`.
+   through the signed agent API and verify it, then:
+   - **self-test**: the new binary is run once (`selftest --expect-version x.y.z`: right
+     version, opens this agent's keys); a release that does not start is never installed;
+   - the running binary is kept as `<binary>.previous`, the new one takes its place, and the
+     agent restarts (systemd `Restart=always`; Windows recovery actions);
+   - **roll back**: if the new version stops 3 times before its first successful check-in, it
+     puts `.previous` back and exits, so the old version runs again; that version is then
+     never installed again on this machine (`status`: "Update blocked"; publish a fixed
+     version with a new number). The first successful check-in confirms the update.
+   A refused release is retried after an hour at the earliest; the reason is in `status`.
 
 ## Tests
 
@@ -122,7 +131,9 @@ The end-to-end test (43 checks; `DISTRO=rocky` runs it on Rocky Linux 9) covers:
 - RADIUS down (only users needing a code refused) and back;
 - a policy change from the portal (sudo restored byte for byte), 2FA off (all files restored);
 - self-update: a release signed with another key refused, a signed one installed and
-  reported, the updated agent still enforcing the policy;
+  reported, the updated agent still enforcing the policy; a signed release that does not
+  start refused by the self-test; a release that crashes after starting rolled back by
+  itself after 3 starts and not installed again;
 - uninstall.
 
 Unit tests reproduce every libsodium protocol vector and cover the PAM and registry appliers
@@ -165,6 +176,5 @@ Windows 11 / Server 2022 test machine:
 
 - Windows: signing in with password + code at the sign-in screen (manual test above); the
   rest is tested automatically on Windows Server 2022.
-- MSI upgrade table (wixl cannot write it): versions are upgraded by self-update.
-- Automatic rollback if an updated agent cannot start (the service manager keeps restarting
-  it; set the previous signed version as the target again if that happens).
+- Roll back after a self-update is tested on Linux end to end; on Windows its code is the
+  same and unit-tested, the MSI upgrade itself is tested on Windows Server 2022.

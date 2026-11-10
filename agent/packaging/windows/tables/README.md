@@ -14,3 +14,12 @@ upgrade), after the service is stopped and deleted and before the files are remo
 (sequence 3400). It deletes `C:\ProgramData\SohobOTP\agent` (keys, endpoint id, log): a
 later install enrols as a new machine with its new token instead of silently reusing the
 old identity. Delete the old machine in the portal.
+
+**Upgrades** (`Upgrade`, `LaunchCondition`, sequence rows): every build has a new ProductCode
+and the same UpgradeCode. `FindRelatedProducts` finds an installed older or same version
+(attributes 769: migrate features, min and max inclusive -> `WIX_UPGRADE_DETECTED`), which
+`RemoveExistingProducts` (1450, before `InstallInitialize`) removes first; its uninstall keeps
+the agent state (`ForgetState` does not run with `UPGRADINGPRODUCTCODE`), so the machine
+keeps its identity and the new service starts with it. A newer installed version
+(`NEWERVERSIONDETECTED`) blocks the install (no downgrade). Raise `AGENT_VERSION` for every
+release (the first three numbers count).

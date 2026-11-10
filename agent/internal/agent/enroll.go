@@ -135,6 +135,10 @@ func Serve(stop <-chan struct{}) bool {
 		<-stop
 		return false
 	}
+	if exe, err := os.Executable(); err == nil && StartupCheck(a.St, exe, time.Now().Unix(), Logf) {
+		return true // rolled back: the service manager starts the previous version
+	}
+	CrashHookForTests()
 	return a.Run(stop)
 }
 

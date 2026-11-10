@@ -9,6 +9,7 @@ import (
 	"multiotp-portal/agent/internal/inventory"
 	"multiotp-portal/agent/internal/protocol"
 	"multiotp-portal/agent/internal/release"
+	"multiotp-portal/agent/internal/state"
 )
 
 // update applies a signed release offered by the portal. Nothing is downloaded unless the
@@ -22,6 +23,9 @@ func (a *Agent) update(u *protocol.Update) {
 	now := a.now().Unix()
 	if a.St.UpdateFailedVersion == u.Version && now-a.St.UpdateFailedAt < 3600 {
 		return
+	}
+	if a.St.UpdateBlockedVersion == u.Version {
+		return // rolled back once: never again (publish a fixed version)
 	}
 	fail := func(err error) {
 		a.St.UpdateFailedVersion, a.St.UpdateFailedAt = u.Version, now
@@ -46,13 +50,26 @@ func (a *Agent) update(u *protocol.Update) {
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
-	if err == nil {
-		err = replaceBinary(exe, data)
-	}
 	if err != nil {
 		fail(err)
 		return
 	}
-	a.Log("updated %s -> %s, restarting", inventory.Version, u.Version)
+	candidate := candidatePath(exe)
+	if err := os.WriteFile(candidate, data, 0o755); err != nil {
+		fail(err)
+		return
+	}
+	if err := selfTestCandidate(candidate, u.Version); err != nil {
+		_ = os.Remove(candidate)
+		fail(err)
+		return
+	}
+	if err := installCandidate(exe, candidate); err != nil {
+		_ = os.Remove(candidate)
+		fail(err)
+		return
+	}
+	a.St.UpdatePending = &state.UpdatePending{From: inventory.Version, To: u.Version, At: now}
+	a.Log("updated %s -> %s (self-test passed), restarting", inventory.Version, u.Version)
 	a.Updated = u.Version
 }

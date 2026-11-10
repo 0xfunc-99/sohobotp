@@ -10,6 +10,7 @@ param(
   [Parameter(Mandatory = $true)][string]$AgentMsi,
   [Parameter(Mandatory = $true)][string]$FakePortal,
   [string]$SignInMsi = "",
+  [string]$UpgradeMsi = "",
   [string]$Work = (Join-Path $env:TEMP "sohobotp-e2e")
 )
 $ErrorActionPreference = "Continue"
@@ -105,8 +106,25 @@ Check "service restarted after being killed" (Wait-Until {
   return ($s.State -eq "Running" -and $s.ProcessId -ne $pid1)
 } 60)
 
+$installed = $AgentMsi
+if ($UpgradeMsi -ne "") {
+  Write-Host "== upgrade with a newer MSI (as Group Policy would)"
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$UpgradeMsi`" /qn /l*v `"$work\agent-upgrade.log`""
+  Check "newer agent MSI installs over the old one (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+  $entries = @(Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object { $_.DisplayName -eq "SohobOTP Agent" })
+  Check "one SohobOTP Agent in Programs, version 0.1.1" ($entries.Count -eq 1 -and $entries[0].DisplayVersion -eq "0.1.1") (($entries | ForEach-Object { $_.DisplayVersion }) -join ", ")
+  Check "upgraded program installed" ((& $exe version 2>&1 | Out-String) -match "sohobotp-agent 0.1.1")
+  Check "service running after the upgrade" (Wait-Until { (Get-Service SohobOTPAgent -ErrorAction SilentlyContinue).Status -eq "Running" } 30)
+  $after = Get-Content $stateFile -Raw | ConvertFrom-Json
+  Check "machine identity kept by the upgrade" ($after.endpoint_id -eq $state.endpoint_id -and $after.sign_seed -eq $state.sign_seed)
+  Check "upgraded agent checks in with its new version" (Wait-Until { (Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json).inventory.agent_version -eq "0.1.1" } 90)
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$AgentMsi`" /qn /l*v `"$work\agent-downgrade.log`""
+  Check "older MSI refused over the newer one (exit $($p.ExitCode))" ($p.ExitCode -ne 0 -and ((& $exe version 2>&1 | Out-String) -match "sohobotp-agent 0.1.1"))
+  $installed = $UpgradeMsi
+}
+
 Write-Host "== uninstall"
-$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$AgentMsi`" /qn /l*v `"$work\agent-uninstall.log`""
+$p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$installed`" /qn /l*v `"$work\agent-uninstall.log`""
 Check "agent MSI uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
 Check "service removed" ($null -eq (Get-Service SohobOTPAgent -ErrorAction SilentlyContinue))
 Check "agent program removed" (-not (Test-Path $exe))

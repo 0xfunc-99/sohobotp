@@ -95,6 +95,8 @@ switch ($argv[1] ?? '') {
             'ssh-only' => ['linux_services' => ['sshd']],
             'update-0.3.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.3.0'],
             'update-0.2.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.2.0'],
+            'update-0.4.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.4.0'],
+            'update-0.5.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.5.0'],
             'off' => ['linux_enabled' => ''],
         ];
         $over = $presets[$argv[2] ?? ''] ?? throw new InvalidArgumentException('policy presets: ' . implode(', ', array_keys($presets)));

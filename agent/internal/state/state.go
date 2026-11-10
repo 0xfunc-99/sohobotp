@@ -41,6 +41,17 @@ type State struct {
 	RetryConfig *protocol.Envelope `json:"retry_config,omitempty"`
 	RetryAt     int64              `json:"retry_at,omitempty"`
 	RetryCount  int                `json:"retry_count,omitempty"`
+	// Self-update safety (agent/internal/agent/safeupdate.go)
+	UpdatePending        *UpdatePending `json:"update_pending,omitempty"`
+	UpdateBlockedVersion string         `json:"update_blocked_version,omitempty"`
+}
+
+// UpdatePending is a self-update installed but not yet confirmed by a successful check-in.
+type UpdatePending struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	At     int64  `json:"at"`
+	Starts int    `json:"starts"`
 }
 
 // Keys are the endpoint's private keys, loaded from the state.

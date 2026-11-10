@@ -57,6 +57,8 @@ func main() {
 				err = agent.SaveBootstrapToken(os.Args[2])
 			}
 		}
+	case "selftest": // run on a downloaded release before it replaces the running agent
+		err = selftest(os.Args[2:])
 	case "forget": // run by the Windows MSI on uninstall: the next install enrols afresh
 		if err = agent.RequireAdmin(); err == nil {
 			err = state.Remove()
@@ -141,11 +143,40 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	if exe, err := os.Executable(); err == nil && agent.StartupCheck(a.St, exe, time.Now().Unix(), agent.Logf) {
+		return errors.New("rolled back to the previous version after a failed update: run again")
+	}
+	agent.CrashHookForTests()
 	a.St.RetryAt = 0 // run --once retries a failed configuration now
 	if err := a.CheckinAndReport(); err != nil {
 		return err
 	}
 	report(a.St)
+	return nil
+}
+
+// selftest checks that this binary can run here: the expected version, and (when the machine
+// is enrolled) that the agent state and its private keys can be opened. Read-only, no network.
+func selftest(args []string) error {
+	fs := flag.NewFlagSet("selftest", flag.ContinueOnError)
+	expect := fs.String("expect-version", "", "fail unless this binary is that version")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *expect != "" && *expect != inventory.Version {
+		return fmt.Errorf("this binary is version %s, not %s", inventory.Version, *expect)
+	}
+	if state.Exists() {
+		st, err := state.Load()
+		if err != nil {
+			return err
+		}
+		if _, err := st.Keys(); err != nil {
+			return fmt.Errorf("cannot open the agent keys: %w", err)
+		}
+	}
+	_ = agent.NewApplier()
+	fmt.Println("selftest ok " + inventory.Version)
 	return nil
 }
 
@@ -171,6 +202,12 @@ func report(st *state.State) {
 		st.PortalURL, st.EndpointID, portalState, last, st.Applied.Version, st.Applied.Status)
 	if st.Applied.Error != "" {
 		fmt.Printf("Apply error:     %s\n", st.Applied.Error)
+	}
+	if st.UpdateBlockedVersion != "" {
+		fmt.Printf("Update blocked:  %s (rolled back: it stopped at start; publish a fixed version)\n", st.UpdateBlockedVersion)
+	}
+	if st.UpdatePending != nil {
+		fmt.Printf("Update pending:  %s -> %s (confirmed at the first check-in; %d start(s) so far)\n", st.UpdatePending.From, st.UpdatePending.To, st.UpdatePending.Starts)
 	}
 	if st.RetryConfig != nil {
 		fmt.Printf("Next retry:      %s (attempt %d; run --once retries now)\n",
