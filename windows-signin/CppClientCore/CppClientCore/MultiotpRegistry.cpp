@@ -177,6 +177,21 @@ DWORD readKeyValueInMultiOTPRegistry(_In_ HKEY rootKeyValue, _In_ PWSTR keyName,
 }
 
 DWORD readRegistryValueString(_In_ CONF_VALUE conf_value, _Outptr_result_nullonfailure_ PWSTR* data, _In_ PWSTR defaultValue) {
+	// SohobOTP: the shared secret is kept by the SohobOTP agent in a key that only SYSTEM and
+	// Administrators can read (the CLSID key is readable by every user). Read it there first.
+	if (conf_value == CONF_SHARED_SECRET) {
+		DWORD protectedSize = 0;
+		if (::RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\SohobOTP\\SignIn", L"multiOTPSharedSecret",
+				RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, nullptr, &protectedSize) == ERROR_SUCCESS && protectedSize > sizeof(WCHAR)) {
+			*data = (PWSTR)CoTaskMemAlloc(protectedSize);
+			if (*data != nullptr && ::RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\SohobOTP\\SignIn", L"multiOTPSharedSecret",
+					RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, *data, &protectedSize) == ERROR_SUCCESS) {
+				return protectedSize / sizeof(WCHAR);
+			}
+			CoTaskMemFree(*data);
+			*data = nullptr;
+		}
+	}
 	HKEY rootKeyValue = s_CONF_VALUES[conf_value].ROOT_KEY;
 	PWSTR confKeyName = s_CONF_VALUES[conf_value].KEY_NAME;
 	PWSTR confValueName = s_CONF_VALUES[conf_value].VALUE_NAME;

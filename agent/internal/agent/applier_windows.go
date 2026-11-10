@@ -24,7 +24,7 @@ func (windowsApplier) Apply(cfg *protocol.Config) (string, error) {
 	if err := json.Unmarshal(cfg.Policy, &p); err != nil {
 		return "", fmt.Errorf("Windows policy not readable: %w", err)
 	}
-	changed, err := winapply.Apply(winapply.RealRegistry{}, &p, cfg.Secrets["cp_shared_secret"], false)
+	changed, err := winapply.Apply(winapply.RealRegistry{}, winapply.RealSecretStore{}, &p, cfg.Secrets["cp_shared_secret"], false)
 	if err != nil {
 		return "", err
 	}

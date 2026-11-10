@@ -54,6 +54,20 @@ func policy() *protocol.WindowsPolicy {
 
 const secret = "0123456789abcdef0123456789abcdef0123456789abcdef"
 
+type fakeSecrets struct {
+	value string
+	fail  bool
+}
+
+func (f *fakeSecrets) Secret() (string, error) { return f.value, nil }
+func (f *fakeSecrets) SetSecret(v string) error {
+	if f.fail {
+		return errors.New("access denied")
+	}
+	f.value = v
+	return nil
+}
+
 // installedByMSI mimics the values the CP installer creates (types as found on a machine).
 func installedByMSI() *fakeRegistry {
 	return &fakeRegistry{installed: true, values: map[string]value{
@@ -65,7 +79,8 @@ func installedByMSI() *fakeRegistry {
 
 func TestApplyKeepsExistingTypes(t *testing.T) {
 	reg := installedByMSI()
-	changed, err := Apply(reg, policy(), secret, false)
+	secrets := &fakeSecrets{}
+	changed, err := Apply(reg, secrets, policy(), secret, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +90,11 @@ func TestApplyKeepsExistingTypes(t *testing.T) {
 	if reg.values["multiOTPServerTimeout"] != (value{kind: DWord, n: 5}) {
 		t.Fatal("server timeout must stay a DWORD")
 	}
-	if reg.values["multiOTPSharedSecret"].s != secret || !strings.Contains(reg.values["multiOTPServers"].s, "cp.php?e=") {
+	if secrets.value != secret || !strings.Contains(reg.values["multiOTPServers"].s, "cp.php?e=") {
 		t.Fatal("gateway URL and own secret not written")
+	}
+	if _, ok := reg.values["multiOTPSharedSecret"]; ok {
+		t.Fatal("the secret must be removed from the Sign-in key (readable by every user)")
 	}
 	if reg.values["multiOTPTimeoutUnlock"] != (value{kind: DWord, n: 10}) || reg.values["cpus_credui"] != (value{kind: String, s: "1d"}) {
 		t.Fatalf("missing values must be created with the default type: %+v %+v", reg.values["multiOTPTimeoutUnlock"], reg.values["cpus_credui"])
@@ -86,8 +104,24 @@ func TestApplyKeepsExistingTypes(t *testing.T) {
 			t.Errorf("%s was already right and must not be rewritten", name)
 		}
 	}
-	if again, err := Apply(reg, policy(), secret, false); err != nil || len(again) != 0 {
+	if again, err := Apply(reg, secrets, policy(), secret, false); err != nil || len(again) != 0 {
 		t.Fatalf("second apply must change nothing: %v %v", again, err)
+	}
+}
+
+func TestFailedSecretWriteRestoresEveryValue(t *testing.T) {
+	reg := installedByMSI()
+	before := map[string]value{}
+	for k, v := range reg.values {
+		before[k] = v
+	}
+	if _, err := Apply(reg, &fakeSecrets{fail: true}, policy(), secret, false); err == nil || !strings.Contains(err.Error(), "previous values restored") {
+		t.Fatalf("expected a restored failure, got %v", err)
+	}
+	for k, v := range before {
+		if reg.values[k] != v {
+			t.Errorf("%s not restored: %+v", k, reg.values[k])
+		}
 	}
 }
 
@@ -98,7 +132,7 @@ func TestFailedWriteRestoresEveryValue(t *testing.T) {
 		before[k] = v
 	}
 	reg.failOn = "login_text"
-	if _, err := Apply(reg, policy(), secret, false); err == nil || !strings.Contains(err.Error(), "previous values restored") {
+	if _, err := Apply(reg, &fakeSecrets{}, policy(), secret, false); err == nil || !strings.Contains(err.Error(), "previous values restored") {
 		t.Fatalf("expected a restored failure, got %v", err)
 	}
 	if len(reg.values) != len(before) {
@@ -112,7 +146,7 @@ func TestFailedWriteRestoresEveryValue(t *testing.T) {
 }
 
 func TestRefusals(t *testing.T) {
-	if _, err := Apply(&fakeRegistry{values: map[string]value{}}, policy(), secret, false); err == nil || !strings.Contains(err.Error(), "not installed") {
+	if _, err := Apply(&fakeRegistry{values: map[string]value{}}, &fakeSecrets{}, policy(), secret, false); err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Fatalf("missing Credential Provider must be refused: %v", err)
 	}
 	bad := map[string]func(p *protocol.WindowsPolicy){
@@ -124,18 +158,18 @@ func TestRefusals(t *testing.T) {
 	for name, mutate := range bad {
 		p := policy()
 		mutate(p)
-		if _, err := Apply(installedByMSI(), p, secret, false); err == nil {
+		if _, err := Apply(installedByMSI(), &fakeSecrets{}, p, secret, false); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}
-	if _, err := Apply(installedByMSI(), policy(), "short", false); err == nil {
+	if _, err := Apply(installedByMSI(), &fakeSecrets{}, policy(), "short", false); err == nil {
 		t.Error("short secret accepted")
 	}
 }
 
 func TestDryRunChangesNothing(t *testing.T) {
 	reg := installedByMSI()
-	changed, err := Apply(reg, policy(), secret, true)
+	changed, err := Apply(reg, &fakeSecrets{}, policy(), secret, true)
 	if err != nil || len(changed) == 0 {
 		t.Fatalf("dry run: %v %v", changed, err)
 	}

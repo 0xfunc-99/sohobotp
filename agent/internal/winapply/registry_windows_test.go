@@ -3,8 +3,10 @@
 package winapply
 
 import (
+	"strings"
 	"testing"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -19,14 +21,18 @@ func TestRealRegistry(t *testing.T) {
 	// types as the SohobOTP Sign-in installer leaves them
 	_ = k.SetDWordValue("multiOTPServerTimeout", 9)
 	_ = k.SetStringValue("multiOTPCacheEnabled", "0")
+	_ = k.SetStringValue("multiOTPSharedSecret", "ClientServerSecret") // as the installer leaves it
 	k.Close()
 	defer registry.DeleteKey(registry.CLASSES_ROOT, path)
+	secretPath := `SOFTWARE\SohobOTP\SignInTest`
+	defer registry.DeleteKey(registry.LOCAL_MACHINE, secretPath)
+	secrets := RealSecretStore{Path: secretPath}
 
 	reg := RealRegistry{Path: path}
 	if !reg.Installed() {
 		t.Fatal("test key not seen as installed")
 	}
-	if _, err := Apply(reg, policy(), secret, false); err != nil {
+	if _, err := Apply(reg, secrets, policy(), secret, false); err != nil {
 		t.Fatal(err)
 	}
 	k, _ = registry.OpenKey(registry.CLASSES_ROOT, path, registry.QUERY_VALUE|registry.WOW64_64KEY)
@@ -40,10 +46,25 @@ func TestRealRegistry(t *testing.T) {
 	if n, typ, err := k.GetIntegerValue("multiOTPTimeoutUnlock"); err != nil || typ != registry.DWORD || n != 10 {
 		t.Fatalf("new numeric value must be a DWORD: %d %d %v", n, typ, err)
 	}
-	if s, _, err := k.GetStringValue("multiOTPSharedSecret"); err != nil || s != secret {
-		t.Fatalf("secret: %v", err)
+	if _, _, err := k.GetStringValue("multiOTPSharedSecret"); err == nil {
+		t.Fatal("secret still in the key every user can read")
 	}
-	if again, err := Apply(reg, policy(), secret, false); err != nil || len(again) != 0 {
+	if s, err := secrets.Secret(); err != nil || s != secret {
+		t.Fatalf("protected secret: %q %v", s, err)
+	}
+	sk, err := registry.OpenKey(registry.LOCAL_MACHINE, secretPath, windows.READ_CONTROL|registry.WOW64_64KEY)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sd, err := windows.GetSecurityInfo(windows.Handle(sk), windows.SE_REGISTRY_KEY, windows.DACL_SECURITY_INFORMATION)
+	sk.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acl := sd.String(); !strings.Contains(acl, "D:P") || strings.Contains(acl, ";;;BU)") || strings.Contains(acl, ";;;WD)") || strings.Contains(acl, ";;;AU)") {
+		t.Fatalf("protected key readable by users: %s", acl)
+	}
+	if again, err := Apply(reg, secrets, policy(), secret, false); err != nil || len(again) != 0 {
 		t.Fatalf("second apply must change nothing: %v %v", again, err)
 	}
 }

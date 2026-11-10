@@ -60,7 +60,7 @@ writes its registry values under
 | Policy field | Registry value |
 |---|---|
 | server URL (per endpoint, the CP gateway) | `multiOTPServers` |
-| shared secret (per endpoint, random) | `multiOTPSharedSecret` |
+| shared secret (per endpoint, random) | `multiOTPSharedSecret` in `HKLM\SOFTWARE\SohobOTP\SignIn` (SYSTEM and Administrators only; removed from the CLSID key) |
 | failover timeout | `multiOTPServerTimeout` (DWORD) |
 | logon / unlock / admin prompt (`[0-3][e/d]`) | `cpus_logon`, `cpus_unlock`, `cpus_credui` |
 | excluded account (break-glass) | `excluded_account` |
@@ -79,9 +79,19 @@ writes its registry values under
    mode while the default secret is in use. Note: a disabled laptop that cannot reach the
    portal still accepts its offline-cached logins until the cache lifetime ends.
 2. The bundled client does **not verify TLS** (`verify_peer => false` in the engine).
-   → The agent deploys a hardened client configuration that verifies the portal
-   certificate (CA file written by the agent); this is an engine change shipped to
-   the CP folder, tested before rollout.
+   → **Done:** SohobOTP Sign-in's bundled engine is patched at build time
+   (`windows-signin/patch-engine.ps1`, byte for byte): it verifies the portal certificate
+   with `portal-ca.pem` in the Sign-in folder, which the agent writes after every check-in
+   (the root CA that verified the portal on the agent's own TLS connection). Sign-in then
+   only talks to the portal this agent trusts; a man in the middle is refused. Tested on
+   Windows: Sign-in's PHP connects with the pinned CA (IP address certificate) and refuses
+   another CA.
+4. The shared secret was in the CLSID key, which every local user can read.
+   → **Done:** the agent writes it to `HKLM\SOFTWARE\SohobOTP\SignIn` (SYSTEM and
+   Administrators only, protected DACL) and removes it from the CLSID key; Sign-in reads it
+   there first (`MultiotpRegistry.cpp`). The sign-in screen (LogonUI, SYSTEM) and the
+   administrator prompt (consent.exe, SYSTEM) read it; prompts running as the signed-in
+   user (some "Windows Security" dialogs) cannot, and their code check fails closed.
 3. Cached user data is "encrypted" with a repeating XOR of the shared secret.
    → Offline cache is opt-in per endpoint group, with a short cache lifetime (default
    7 days, max 30), only users who logged in on that machine are cached, and the

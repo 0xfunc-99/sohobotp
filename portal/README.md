@@ -241,7 +241,9 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
 - **Signed self-update** (4d): `portal-admin.php agent-release-add` stores releases signed
   offline (`sohobotp-agent release sign`); the endpoint group's *Agent version* rolls them
   out; agents verify the signature with the release key built into them.
-- Not yet: TLS verification in the CP's bundled client (see docs/endpoints.md).
+- **SohobOTP Sign-in hardening**: its bundled engine verifies the portal certificate with
+  the CA the agent writes (`portal-ca.pem`), and the shared secret is kept in a key only
+  SYSTEM and Administrators can read (docs/endpoints.md, risks 2 and 4).
 
 ## Background worker
 

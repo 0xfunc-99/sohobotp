@@ -74,13 +74,47 @@ Check "agent enrolled and applied configuration 1" (Wait-Until {
 } 120)
 $expected = Get-Content "$work\portal\expected.json" -Raw | ConvertFrom-Json
 $cp = Get-ItemProperty $cpKey
-foreach ($name in "multiOTPServers", "multiOTPSharedSecret", "cpus_logon", "cpus_unlock", "cpus_credui", "excluded_account", "login_text", "otp_text") {
+$protected = Get-ItemProperty "HKLM:\SOFTWARE\SohobOTP\SignIn" -ErrorAction SilentlyContinue
+Check "shared secret in the protected key" ($null -ne $protected -and $protected.multiOTPSharedSecret -eq $expected.multiOTPSharedSecret)
+Check "shared secret no longer in the Sign-in key every user can read" ($null -eq (Get-ItemProperty $cpKey).multiOTPSharedSecret)
+$secretAcl = (Get-Acl "HKLM:\SOFTWARE\SohobOTP\SignIn").Access | ForEach-Object { $_.IdentityReference.Value }
+Check "protected key: SYSTEM and Administrators only" (-not ($secretAcl -match "Users|Everyone|Authenticated") -and ($secretAcl -match "SYSTEM")) ($secretAcl -join ", ")
+foreach ($name in "multiOTPServers", "cpus_logon", "cpus_unlock", "cpus_credui", "excluded_account", "login_text", "otp_text") {
   Check "registry $name" ($cp.$name -eq $expected.$name) "got '$($cp.$name)'"
 }
 $k = Get-Item $cpKey
 Check "multiOTPServerTimeout kept as DWORD" ($k.GetValueKind("multiOTPServerTimeout") -eq "DWord")
 Check "multiOTPCacheEnabled kept as its existing type, value 1" ($cp.multiOTPCacheEnabled -eq 1 -or $cp.multiOTPCacheEnabled -eq "1")
 Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
+
+if ($SignInMsi -ne "") {
+  Write-Host "== SohobOTP Sign-in pinned to the portal certificate"
+  $mp = (Get-ItemProperty $cpKey).multiOTPPath
+  $caFile = Join-Path $mp "portal-ca.pem"
+  $norm = { param($f) ((Get-Content $f -Raw) -replace "`r", "").Trim() }
+  Check "agent wrote the portal CA into the Sign-in folder" (Wait-Until { (Test-Path $caFile) -and ((& $norm $caFile) -eq (& $norm "$work\portal\ca.pem")) } 60) $caFile
+  Check "Sign-in's bundled engine checks the portal certificate" ($null -ne (Select-String -Path (Join-Path $mp "php\multiotp.windows.php") -SimpleMatch "written by the SohobOTP agent"))
+  # the same TLS settings as the patched engine, run with Sign-in's own PHP
+  @'
+<?php
+$ca = $argv[1] . DIRECTORY_SEPARATOR . 'portal-ca.pem';
+$ctx = stream_context_create(['ssl' => ['verify_peer' => is_file($ca), 'verify_peer_name' => is_file($ca), 'cafile' => $ca,
+    'disable_compression' => true, 'ciphers' => 'ALL!EXPORT!EXPORT40!EXPORT56!aNULL!LOW!RC4']]);
+$fp = @stream_socket_client('ssl://127.0.0.1:8443', $errno, $err, 10, STREAM_CLIENT_CONNECT, $ctx);
+echo $fp ? "TLS-OK" : "TLS-FAIL $err";
+'@ | Set-Content -Encoding ascii "$work\tls.php"
+  $php = Join-Path $mp "php\php.exe"
+  $out = (& $php "$work\tls.php" $mp 2>&1 | Out-String)
+  Check "Sign-in's PHP connects to the portal with the pinned CA (IP address certificate)" ($out -match "TLS-OK") $out
+  $other = Start-Process -FilePath $FakePortal -ArgumentList "--dir `"$work\other`" --addr 127.0.0.1:8444" -PassThru -WindowStyle Hidden
+  Wait-Until { Test-Path "$work\other\ca.pem" } 30 | Out-Null
+  Stop-Process -Id $other.Id -Force -ErrorAction SilentlyContinue
+  Copy-Item $caFile "$work\pinned.pem"
+  Copy-Item "$work\other\ca.pem" $caFile -Force
+  $out = (& $php "$work\tls.php" $mp 2>&1 | Out-String)
+  Check "with another CA the portal is refused (a man in the middle would be)" ($out -match "TLS-FAIL") $out
+  Copy-Item "$work\pinned.pem" $caFile -Force
+}
 
 $boot = Get-ItemProperty "HKLM:\SOFTWARE\SohobOTP\Agent" -ErrorAction SilentlyContinue
 Check "installer values in the registry, without the token" ($null -ne $boot -and $null -eq $boot.Token -and $boot.Portal -eq "https://127.0.0.1:8443")

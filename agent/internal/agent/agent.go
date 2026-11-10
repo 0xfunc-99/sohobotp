@@ -72,6 +72,7 @@ func (a *Agent) Once() (time.Duration, error) {
 	}
 	a.backoff = 0
 	a.confirmUpdate()
+	syncPortalCA(a.Client.PortalRoot(), a.Log)
 	a.St.LastCheckin = a.now().Unix()
 	a.St.LastError = ""
 	a.St.PortalState = "active"

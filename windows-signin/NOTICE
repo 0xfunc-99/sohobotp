@@ -15,6 +15,9 @@ Original copyright notices:
 
 Changes by Sohobcom (2026): product name, file names, CLSIDs, version
 information, installer names and texts, logos and default sign-in text;
+the shared secret is read first from HKLM\SOFTWARE\SohobOTP\SignIn
+(CppClientCore/MultiotpRegistry.cpp); the bundled engine verifies the
+portal certificate (patch-engine.ps1, applied at build time);
 see the git history of this folder for the exact changes.
 
 Third-party programs included in the installer, unchanged, fetched from the

@@ -18,3 +18,4 @@ New-Item -ItemType Directory -Force (Join-Path $here "tools") | Out-Null
 Copy-Item -Recurse -Force (Join-Path $tmp "tools\x64") (Join-Path $here "tools\x64")
 Copy-Item -Recurse -Force (Join-Path $tmp "tools\i386") (Join-Path $here "tools\i386")
 Write-Host "Embedded PHP copied into stable\php and stable\php_x86, SetACL into tools"
+& (Join-Path $here "patch-engine.ps1")

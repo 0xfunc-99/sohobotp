@@ -40,7 +40,12 @@ type Client struct {
 	base *url.URL
 	http *http.Client
 	now  func() time.Time
+	root []byte // DER of the root CA that verified the portal at the last request
 }
+
+// PortalRoot is the certificate authority (DER) that verified the portal's certificate at the
+// last successful request: SohobOTP Sign-in is pinned to it (portal-ca.pem).
+func (c *Client) PortalRoot() []byte { return c.root }
 
 // New validates the portal URL (https only) and prepares TLS.
 func New(portal, caFile string) (*Client, error) {
@@ -152,6 +157,10 @@ func (c *Client) do(action string, payload any, sign ed25519.PrivateKey, endpoin
 		return fmt.Errorf("cannot reach the portal: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.TLS != nil && len(resp.TLS.VerifiedChains) > 0 && len(resp.TLS.VerifiedChains[0]) > 0 {
+		chain := resp.TLS.VerifiedChains[0]
+		c.root = chain[len(chain)-1].Raw
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
 	if err != nil {
 		return err

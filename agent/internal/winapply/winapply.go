@@ -29,6 +29,17 @@ const (
 	DWord
 )
 
+// SecretStore keeps the shared secret where only SYSTEM and Administrators can read it
+// (HKLM\SOFTWARE\SohobOTP\SignIn on Windows; SohobOTP Sign-in reads it there first). The
+// Sign-in key in HKCR is readable by every user, so the secret is removed from it.
+type SecretStore interface {
+	Secret() (string, error) // "" when not set
+	SetSecret(value string) error
+}
+
+// LegacySecretValue is where the multiOTP Credential Provider kept the secret (HKCR key).
+const LegacySecretValue = "multiOTPSharedSecret"
+
 // Registry is the Credential Provider key (real one on Windows, fake in tests).
 type Registry interface {
 	Installed() bool
@@ -75,7 +86,6 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 	txt := func(name, v string) Setting { return Setting{Name: name, Text: v} }
 	return []Setting{
 		txt("multiOTPServers", p.ServerURL),
-		txt("multiOTPSharedSecret", secret),
 		num("multiOTPServerTimeout", uint32(p.ServerTimeout)),
 		txt("cpus_logon", p.CpusLogon),
 		txt("cpus_unlock", p.CpusUnlock),
@@ -100,9 +110,10 @@ type saved struct {
 	n    uint32
 }
 
-// Apply writes the settings, keeping existing value types; restores everything on failure.
+// Apply writes the settings, keeping existing value types, and the secret into the protected
+// store (removing a readable copy from the Sign-in key); restores everything on failure.
 // It returns the names of the values that changed.
-func Apply(reg Registry, p *protocol.WindowsPolicy, secret string, dryRun bool) ([]string, error) {
+func Apply(reg Registry, secrets SecretStore, p *protocol.WindowsPolicy, secret string, dryRun bool) ([]string, error) {
 	settings, err := Settings(p, secret)
 	if err != nil {
 		return nil, err
@@ -152,8 +163,35 @@ func Apply(reg Registry, p *protocol.WindowsPolicy, secret string, dryRun bool) 
 		writes = append(writes, write{s, target})
 		changed = append(changed, s.Name)
 	}
-	if dryRun || len(writes) == 0 {
+	currentSecret, err := secrets.Secret()
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the protected shared secret: %w", err)
+	}
+	secretChanged := currentSecret != secret
+	if secretChanged {
+		changed = append(changed, "shared secret (protected key)")
+	}
+	legacyKind, _, _, err := reg.Get(LegacySecretValue)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %s: %w", LegacySecretValue, err)
+	}
+	if legacyKind != Missing {
+		changed = append(changed, LegacySecretValue+" removed from the readable key")
+	}
+	if dryRun || (len(writes) == 0 && !secretChanged && legacyKind == Missing) {
 		return changed, nil
+	}
+	restore := func() {
+		for _, s := range snaps {
+			switch s.kind {
+			case Missing:
+				_ = reg.Delete(s.name)
+			case String:
+				_ = reg.SetString(s.name, s.s)
+			case DWord:
+				_ = reg.SetDWORD(s.name, s.n)
+			}
+		}
 	}
 	for _, w := range writes {
 		var err error
@@ -165,17 +203,19 @@ func Apply(reg Registry, p *protocol.WindowsPolicy, secret string, dryRun bool) 
 			err = reg.SetString(w.set.Name, w.set.Text)
 		}
 		if err != nil {
-			for _, s := range snaps {
-				switch s.kind {
-				case Missing:
-					_ = reg.Delete(s.name)
-				case String:
-					_ = reg.SetString(s.name, s.s)
-				case DWord:
-					_ = reg.SetDWORD(s.name, s.n)
-				}
-			}
+			restore()
 			return nil, fmt.Errorf("writing %s failed: %w (previous values restored)", w.set.Name, err)
+		}
+	}
+	if secretChanged {
+		if err := secrets.SetSecret(secret); err != nil {
+			restore()
+			return nil, fmt.Errorf("writing the protected shared secret failed: %w (previous values restored)", err)
+		}
+	}
+	if legacyKind != Missing {
+		if err := reg.Delete(LegacySecretValue); err != nil {
+			return nil, fmt.Errorf("the shared secret is protected, but its old readable copy could not be removed: %w", err)
 		}
 	}
 	return changed, nil

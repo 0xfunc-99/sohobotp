@@ -5,8 +5,64 @@ package winapply
 import (
 	"errors"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
+
+// SecretKeyPath is the protected key read first by SohobOTP Sign-in for the shared secret.
+const SecretKeyPath = `SOFTWARE\SohobOTP\SignIn`
+
+// protectedDACL: SYSTEM and Administrators only, nothing inherited (users cannot read).
+const protectedDACL = "D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)"
+
+// RealSecretStore is HKLM\SOFTWARE\SohobOTP\SignIn (64-bit view). Path is SecretKeyPath when
+// empty (tests use another key).
+type RealSecretStore struct{ Path string }
+
+func (s RealSecretStore) path() string {
+	if s.Path == "" {
+		return SecretKeyPath
+	}
+	return s.Path
+}
+
+func (s RealSecretStore) Secret() (string, error) {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, s.path(), registry.QUERY_VALUE|registry.WOW64_64KEY)
+	if errors.Is(err, registry.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue(LegacySecretValue)
+	if errors.Is(err, registry.ErrNotExist) {
+		return "", nil
+	}
+	return v, err
+}
+
+// SetSecret creates the key with its protected DACL (set again every time) and writes the value.
+func (s RealSecretStore) SetSecret(value string) error {
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, s.path(), registry.ALL_ACCESS|registry.WOW64_64KEY)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	sd, err := windows.SecurityDescriptorFromString(protectedDACL)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	if err := windows.SetSecurityInfo(windows.Handle(k), windows.SE_REGISTRY_KEY,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		return err
+	}
+	return k.SetStringValue(LegacySecretValue, value)
+}
 
 // RealRegistry is the SohobOTP Sign-in key in HKEY_CLASSES_ROOT (64-bit view). Path is
 // KeyPath when empty (tests use another key).
