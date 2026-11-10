@@ -56,12 +56,12 @@ function next_code(string $secret, ?int &$lastStep): string
     return Totp::code($secret, $lastStep);
 }
 
-function user_with_seed(Users $users, string $name): string
+function user_with_seed(Users $users, string $name, string $group = ''): string
 {
     if ($users->exists($name)) {
         $users->delete($name);
     }
-    $created = $users->create(['user' => $name, 'display_name' => $name, 'token_serial' => '']);
+    $created = $users->create(['user' => $name, 'display_name' => $name, 'token_serial' => '', 'group' => $group]);
     parse_str((string) parse_url((string) $created['otpauth'], PHP_URL_QUERY), $query);
     $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     $bits = '';
@@ -88,13 +88,15 @@ $migrated = 'vip.migrated';
 $seed = user_with_seed($users, $migrated);
 $migration->set([$migrated], 'sohobotp', 'appliance-test', 'authenticator enrolled');
 $already = 'vip.already';
-$alreadySeed = user_with_seed($users, $already);
+$alreadySeed = user_with_seed($users, $already, 'VPN-Users');
+$outsider = 'vip.outsider';
+$outsiderSeed = user_with_seed($users, $outsider, 'Staff');
 $step = null;
 
 // ---------------------------------------------------------------- servers, groups, apply
 $radius = new Radius();
 $group = $radius->saveGroup(null, ['name' => 'Migrating VPN', 'vip_forward' => '1', 'cache_timeout' => '3600']);
-$plain = $radius->saveGroup(null, ['name' => 'Not migrating', 'cache_timeout' => '3600']);
+$plain = $radius->saveGroup(null, ['name' => 'Not migrating', 'allowed_groups' => 'vpn-users, IT-Admins', 'cache_timeout' => '3600']);
 [$client, $secret] = $radius->createClient(['name' => 'vpn-migrating', 'address' => '127.0.0.6', 'group_id' => $group['id'], 'nas_type' => 'other', 'require_message_authenticator' => '1']);
 [$plainClient, $plainSecret] = $radius->createClient(['name' => 'vpn-plain', 'address' => '127.0.0.7', 'group_id' => $plain['id'], 'nas_type' => 'other', 'require_message_authenticator' => '1']);
 $radius->saveVip(['address_1' => '127.0.0.1', 'port_1' => '18121', 'secret_1' => 'Vip-Gateway-Secret-0123', 'response_window' => '5', 'message_authenticator' => 'yes']);
@@ -139,9 +141,17 @@ check('DOMAIN\\user of a user on SohobOTP is not forwarded', $forwarded() === $b
 $reply = $login('vip.only', 'VipPass-123456', '127.0.0.7', $plainSecret);
 check('server group without forwarding: Symantec users refused, Symantec not asked', 'rejected' === $reply['result'] && $forwarded() === $before, json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE));
 $reply = $login($already, next_code($alreadySeed, $step), '127.0.0.7', $plainSecret);
-check('a user signs in with SohobOTP on a server group without forwarding', 'accepted' === $reply['result'], json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE));
+check('a user signs in with SohobOTP on a server group without forwarding (member of an allowed group)', 'accepted' === $reply['result'], json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE));
+$reply = $login($outsider, Totp::code($outsiderSeed, intdiv(time(), 30)), '127.0.0.7', $plainSecret);
+check('user group restriction: right code, but not in an allowed group: refused', 'rejected' === $reply['result'], json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE));
+check('user group restriction: refused before multiOTP (no failed attempt counted)', 0 === (int) ($users->get($outsider)['error_counter'] ?? -1), json_encode($users->get($outsider)));
+check('user group restriction: refusal listed in diagnostics', in_array($outsider . ':denied', array_map(static fn (array $l): string => $l['user'] . ':' . $l['result'], VipMigration::recentForwarded($outsider)), true));
+$sent = $forwarded();
+$login($outsider, Totp::code($outsiderSeed, intdiv(time(), 30)), '127.0.0.6', $secret);
+check('user group restriction applies only to its server group (elsewhere the user is forwarded as usual)', $forwarded() === $sent + 1 && !in_array($outsider . ':denied:vpn-migrating', array_map(static fn (array $l): string => $l['user'] . ':' . $l['result'] . ':' . explode('-', $l['server'])[0] . '-' . (explode('-', $l['server'])[1] ?? ''), VipMigration::recentForwarded($outsider)), true));
 
 // ---------------------------------------------------------------- moved back, seed, diagnostics
+$before = $forwarded();
 $migration->set([$migrated], 'vip', 'appliance-test', 'by an administrator');
 $reply = $login($migrated, next_code($seed, $step), '127.0.0.6', $secret);
 check('user sent back to Symantec VIP: forwarded at once (no restart)', 'rejected' === $reply['result'] && $forwarded() === $before + 1, json_encode($reply, JSON_INVALID_UTF8_SUBSTITUTE));
@@ -178,7 +188,7 @@ $radius->deleteGroup($plain['id']);
 $radius->saveVip(['address_1' => '', 'secret_1' => '']);
 $done = wait_job(Jobs::enqueue('radius.apply', [], 'appliance-test')['id']);
 check('Symantec VIP servers removed again', 'succeeded' === $done['status'] && false === json_decode((string) file_get_contents(VipMigration::routeFile()), true)['enabled']);
-foreach ([$migrated, $already] as $name) {
+foreach ([$migrated, $already, $outsider] as $name) {
     $users->delete($name);
     $migration->forget($name);
 }

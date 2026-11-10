@@ -270,6 +270,8 @@ not know at all are forwarded.
 - [ ] Portal → **Endpoints**: machine online, inventory shown, configuration "up to date"
 - [ ] Change the endpoint group (e.g. untick sudo): applied within 60 s (`run --once` to force)
 - [ ] **RADIUS servers** → *Diagnostics*: test login and recent logins
+- [ ] Server group → *Who may sign in*: only a user group (e.g. `VPN-Users`): a user outside it
+      is refused with the right code, *Diagnostics* shows "refused: user group not allowed"
 - [ ] Agent installed **before** SohobOTP Sign-in (Windows): `status` shows "failed", and the
       configuration is applied by itself within a few minutes after installing Sign-in
 - [ ] Disable the machine in the portal: its check-ins are refused (on Windows only the

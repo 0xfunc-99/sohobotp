@@ -149,17 +149,25 @@ linelog sohobotp_vip_log_reject {
 	permissions = 0640
 	format = "%S	reject	%{User-Name}	%{client:shortname}"
 }
+linelog sohobotp_group_log_denied {
+	filename = /var/log/multiotp/sohobotp-vip.log
+	permissions = 0640
+	format = "%S	denied	%{User-Name}	%{client:shortname}"
+}
 MODULE
   chown root:"$(radius_group)" "$VIP_MODULE.new" && chmod 0640 "$VIP_MODULE.new" && mv -f "$VIP_MODULE.new" "$VIP_MODULE"
 }
 
-# Site hooks: forward before any local module runs, log the forwarded results
+# Site hooks: forward or refuse (user group) before any local module runs, log the results.
+# Every added line carries the tag: an older set of hooks is removed and replaced.
+VIP_HOOK_LINES=14
 ensure_vip_site_hooks() {
-  grep -qF "$VIP_TAG" "$SITE" && return 0
-  sed -i '0,/^authorize {/s//authorize {\n\tsohobotp_vip_route #sohobotp-vip\n\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\treturn #sohobotp-vip\n\t} #sohobotp-vip/' "$SITE"
+  [ "$(grep -cF "$VIP_TAG" "$SITE")" -eq "$VIP_HOOK_LINES" ] && return 0
+  sed -i "/$VIP_TAG/d" "$SITE"
+  sed -i '0,/^authorize {/s//authorize {\n\tsohobotp_vip_route #sohobotp-vip\n\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\treturn #sohobotp-vip\n\t} #sohobotp-vip\n\tif (\&control:Auth-Type == Reject) { #sohobotp-vip\n\t\tsohobotp_group_log_denied #sohobotp-vip\n\t\treject #sohobotp-vip\n\t} #sohobotp-vip/' "$SITE"
   sed -i '0,/^post-auth {/s//post-auth {\n\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\tsohobotp_vip_log_accept #sohobotp-vip\n\t} #sohobotp-vip/' "$SITE"
   sed -i '0,/Post-Auth-Type REJECT {/s//Post-Auth-Type REJECT {\n\t\tif (\&control:Proxy-To-Realm == "sohobotp_vip") { #sohobotp-vip\n\t\t\tsohobotp_vip_log_reject #sohobotp-vip\n\t\t} #sohobotp-vip/' "$SITE"
-  [ "$(grep -cF "$VIP_TAG" "$SITE")" -eq 10 ] || fail "could not add the forwarding hooks to $SITE"
+  [ "$(grep -cF "$VIP_TAG" "$SITE")" -eq "$VIP_HOOK_LINES" ] || fail "could not add the forwarding hooks to $SITE"
   say "added the Symantec VIP forwarding hooks to $SITE"
 }
 
@@ -233,7 +241,8 @@ case "${1:-}" in
     forget_vip_backups
     say "== restart"
     restart_radius || exit 3
-    say "applied $(grep -c '^client ' "$TARGET") client(s), $(grep -c '^home_server sohobotp_vip' "$VIP_TARGET" 2>/dev/null || echo 0) Symantec VIP server(s)"
+    vip_servers=$(grep -c '^home_server sohobotp_vip' "$VIP_TARGET" 2>/dev/null || true)
+    say "applied $(grep -c '^client ' "$TARGET") client(s), ${vip_servers:-0} Symantec VIP server(s)"
     ;;
   check)
     [ $# -eq 1 ] || fail "no extra arguments allowed"

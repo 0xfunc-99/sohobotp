@@ -112,7 +112,16 @@ final class RadiusController extends Controller
                 $input = ['name' => $this->post('name', 64), 'description' => $this->post('description'), 'policy' => array_merge(Radius::DEFAULT_POLICY, array_intersect_key($_POST, Radius::DEFAULT_POLICY))];
             }
         }
-        $this->view->render('radius-group', ['title' => null === $group ? 'New server group' : 'Edit ' . $group['name'], 'group' => $group, 'input' => $input, 'error' => $error]);
+        $known = [];
+        foreach (MultiotpService::get()->ApiGetUsersArray(['page' => 1, 'itemsPerPage' => 1000000])['users'] ?? [] as $row) {
+            foreach (explode(',', (string) ($row['group'] ?? '')) as $g) {
+                if ('' !== trim($g)) {
+                    $known[mb_strtolower(trim($g))] = trim($g);
+                }
+            }
+        }
+        ksort($known);
+        $this->view->render('radius-group', ['title' => null === $group ? 'New server group' : 'Edit ' . $group['name'], 'group' => $group, 'input' => $input, 'error' => $error, 'knownGroups' => array_slice(array_values($known), 0, 40)]);
     }
 
     public function groupDelete(): void

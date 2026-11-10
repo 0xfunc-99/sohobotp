@@ -144,8 +144,15 @@ the multiOTP log.
 **Per-user login format** (user page): code only, PIN + code (a random 6-digit PIN shown once),
 or directory password + code (users synced from AD/LDAP only).
 
-Not yet possible: restricting which user groups may sign in through a server group (needs an
-engine change; planned).
+**Who may sign in** (server group): *Only users in these user groups* (comma list; empty:
+everyone). Checked by FreeRADIUS before multiOTP (`bin/sohobotp-vip-route` prints
+`Auth-Type := Reject`, the site hook refuses and logs it): a user in none of the groups is
+refused even with the right code, and no failed attempt is counted. It uses the user's group
+in SohobOTP (several, comma separated, when the directory sync has "multiple groups" on);
+unknown and disabled users are refused. The portal writes the groups into the routing file
+at every user, group or sync change and every 5 minutes (worker). With Symantec VIP
+forwarding on the same group, users not on SohobOTP are forwarded first (Symantec decides).
+Diagnostics: *refused: user group not allowed*.
 
 ### Symantec VIP migration (forwarding)
 

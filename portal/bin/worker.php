@@ -69,6 +69,10 @@ function tick(): void
         $job = Jobs::enqueue('endpoints.directory', [], 'scheduler');
         log_line('scheduled endpoint AD check ' . (empty($job['already_active']) ? 'queued' : 'skipped (one is already active)'));
     }
+    // user groups change with directory syncs and edits: keep the RADIUS restriction data fresh
+    if ((new Portal\VipMigration())->refreshIfStale(300)) {
+        log_line('RADIUS routing file refreshed (user group restrictions)');
+    }
     while (null !== ($job = Jobs::claimNext())) {
         log_line("running {$job['type']} {$job['id']} for {$job['requested_by']}");
         run_job($job, $directory);
@@ -102,6 +106,7 @@ function run_job(array $job, Directory $directory): void
                     $state['last_sync'] = ['job' => $job['id'], 'status' => $status, 'at' => time(), 'summary' => $summary];
                 });
                 $audit->record('directory.sync', 'succeeded' === $status ? 'success' : ('cancelled' === $status ? 'denied' : 'failure'), '', $summary);
+                (new Portal\VipMigration())->export(); // new or changed users and groups
                 log_line("sync {$job['id']} $status " . json_encode($summary));
                 break;
 

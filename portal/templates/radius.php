@@ -38,6 +38,7 @@
               <?= $p['force_no_prefix_pin'] ? ' · no PIN prefix' : '' ?>
               <?= $p['dont_send_groups'] ? ' · no group attribute' : '' ?>
               <?= !empty($p['vip_forward']) ? ' · <strong>forwards users not on SohobOTP to Symantec VIP</strong>' : '' ?>
+              <?= '' !== (string) ($p['allowed_groups'] ?? '') ? ' · only user groups: <strong>' . e($p['allowed_groups']) . '</strong>' : '' ?>
             </td>
             <?php if ($canManage): ?>
               <td class="row-actions">

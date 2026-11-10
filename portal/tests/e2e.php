@@ -573,7 +573,7 @@ check('Symantec VIP servers saved', 303 === $admin->status);
 $admin->get('/portal/index.php?r=radius');
 check('RADIUS page shows Symantec VIP not applied yet', str_contains($admin->body, '192.0.2.70:1812') && str_contains($admin->body, 'not applied yet'));
 $admin->get('/portal/index.php?r=radius-group&id=' . $groupId);
-check('server group page offers forwarding', str_contains($admin->body, 'name="vip_forward"'));
+check('server group page offers forwarding and the user group restriction', str_contains($admin->body, 'name="vip_forward"') && str_contains($admin->body, 'name="allowed_groups"'));
 $admin->post('/portal/index.php?r=radius-group&id=' . $groupId, ['name' => 'VPN gateways', 'description' => '<b>Remote</b> access', 'challenge_response' => '1', 'text_token_challenge' => 'Code?', 'cache_timeout' => '3600', 'vip_forward' => '1']);
 check('forwarding switched on for a server group', 303 === $admin->status);
 $seedJob = Portal\Jobs::latest('radius.vip_seed');

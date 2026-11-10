@@ -37,6 +37,8 @@ final class Radius
         'force_no_prefix_pin'  => false,
         // Symantec VIP migration: users not on SohobOTP yet are forwarded (VipMigration)
         'vip_forward'          => false,
+        // Only users in one of these user groups may sign in (comma list, empty: everyone)
+        'allowed_groups'       => '',
     ];
     public const VIP_DEFAULTS = ['servers' => [], 'response_window' => 15, 'message_authenticator' => 'auto'];
     public const VIP_MESSAGE_AUTHENTICATOR = [
@@ -190,6 +192,7 @@ final class Radius
             return $client;
         });
         $this->writeDevice($client, $group);
+        (new VipMigration())->export();
         return [self::public($client), $secret];
     }
 
@@ -207,6 +210,7 @@ final class Radius
             return $client;
         });
         $this->writeDevice($client, $group);
+        (new VipMigration())->export();
         return self::public($client);
     }
 
@@ -234,6 +238,7 @@ final class Radius
             return $client;
         });
         MultiotpService::get()->DeleteDevice($id, true);
+        (new VipMigration())->export();
         return self::public($client);
     }
 
@@ -677,7 +682,43 @@ final class Radius
             'dont_send_groups'     => !empty($input['dont_send_groups']),
             'force_no_prefix_pin'  => !empty($input['force_no_prefix_pin']),
             'vip_forward'          => !empty($input['vip_forward']),
+            'allowed_groups'       => self::groupList((string) ($input['allowed_groups'] ?? '')),
         ];
+    }
+
+    /** "VPN-Users; admins" -> "VPN-Users, admins" (validated, duplicates removed). */
+    public static function groupList(string $input): string
+    {
+        $groups = [];
+        foreach (preg_split('/[,;\n]+/', $input) ?: [] as $group) {
+            $group = trim($group);
+            if ('' === $group) {
+                continue;
+            }
+            if (mb_strlen($group) > 64 || preg_match('/[\x00-\x1f"\\\\]/u', $group)) {
+                throw new ValidationException('User group names are at most 64 characters, without quotes, backslash or control characters.');
+            }
+            $groups[mb_strtolower($group, 'UTF-8')] ??= $group; // first spelling kept
+        }
+        if (count($groups) > 50) {
+            throw new ValidationException('At most 50 user groups per server group.');
+        }
+        return implode(', ', $groups);
+    }
+
+    /** @return array<string, list<string>> FreeRADIUS shortname => allowed user groups (lower case), only restricted clients */
+    public function restrictedClients(): array
+    {
+        $data = $this->store->read();
+        $out = [];
+        foreach ($data['clients'] ?? [] as $client) {
+            $list = (string) ($data['groups'][$client['group_id']]['policy']['allowed_groups'] ?? '');
+            if ('' !== $list) {
+                $out[self::shortname($client)] = array_map(static fn (string $g): string => mb_strtolower(trim($g), 'UTF-8'), explode(',', $list));
+            }
+        }
+        ksort($out);
+        return $out;
     }
 
     /** Mirror the client and its group policy into the multiOTP device the engine reads at login. */

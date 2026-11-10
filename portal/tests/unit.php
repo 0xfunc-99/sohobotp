@@ -523,6 +523,25 @@ check('route: a server without forwarding never forwards', '' === $run('bob', 'f
 check('route: odd user names are just data', "Proxy-To-Realm := \"sohobotp_vip\"\n" === $run("x\"; \$(id) `id`", $sn));
 $migration->set(['alice.smith'], 'vip', 'unit', 'test');
 check('route: a user sent back is forwarded again', str_contains($run('alice.smith', $sn), 'Proxy-To-Realm'));
+$restricted = ['enabled' => false, 'clients' => new stdClass(), 'sohobotp' => ['carol' => 1],
+    'restrict' => ['vpn-a' => ['vpn-users', 'it-admins']], 'groups' => ['carol' => ['staff', 'vpn-users'], 'dave' => ['staff']]];
+file_put_contents($routeFile, json_encode($restricted));
+check('user groups: a member of an allowed group passes (also DOMAIN\\user)', '' === $run('carol', 'vpn-a') && '' === $run('CORP\\Carol', 'vpn-a'));
+check('user groups: a user in no allowed group is refused before the code', "Auth-Type := Reject\n" === $run('dave', 'vpn-a'));
+check('user groups: an unknown user is refused', "Auth-Type := Reject\n" === $run('mallory', 'vpn-a'));
+check('user groups: servers without a restriction are not affected', '' === $run('dave', 'vpn-b'));
+$restricted['enabled'] = true;
+$restricted['clients'] = ['vpn-a' => 1];
+file_put_contents($routeFile, json_encode($restricted));
+check('user groups + Symantec VIP: users not on SohobOTP go to Symantec (it decides), users on SohobOTP are checked for the group', str_contains($run('dave', 'vpn-a'), 'Proxy-To-Realm') && '' === $run('carol', 'vpn-a'));
+$migration->export();
+check('group list normalised and validated', 'VPN-Users, admins' === Radius::groupList("VPN-Users; admins,\nvpn-users") && throws(static fn () => Radius::groupList('bad"group'), ValidationException::class));
+$restrictedGroup = $radius->saveGroup(null, ['name' => 'Admins only', 'allowed_groups' => 'IT-Admins', 'cache_timeout' => '3600']);
+[$restrictedClient] = $radius->createClient(['name' => 'ssh-bastion', 'address' => '192.0.2.61', 'group_id' => $restrictedGroup['id'], 'nas_type' => 'other', 'require_message_authenticator' => '1']);
+$route = json_decode((string) file_get_contents($routeFile), true);
+check('export: restricted server and its allowed groups written', ['it-admins'] === ($route['restrict'][Radius::shortname($restrictedClient)] ?? null) && is_array($route['groups']));
+$radius->deleteClient($restrictedClient['id']);
+$radius->deleteGroup($restrictedGroup['id']);
 check('VIP: counts', 0 === $migration->counts()['sohobotp'] && 1 === $migration->counts()['vip']);
 file_put_contents($routeFile, '{damaged');
 check('route: a damaged routing file forwards nobody', '' === $run('bob', $sn));

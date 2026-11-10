@@ -136,10 +136,14 @@ final class VipMigration
     }
 
     /**
-     * Write the routing file read by FreeRADIUS. Forwarding is on only when the Symantec VIP
-     * servers are configured AND applied (otherwise FreeRADIUS has no realm to forward to),
-     * and only for the RADIUS clients of server groups with forwarding switched on.
-     * @return array{enabled: bool, clients: int, sohobotp: int, file: string, written: bool}
+     * Write the routing file read by FreeRADIUS for every request:
+     * - forwarding to Symantec VIP: on only when the servers are configured AND applied
+     *   (otherwise FreeRADIUS has no realm to forward to), for the RADIUS clients of server
+     *   groups with forwarding switched on;
+     * - user group restriction: for the RADIUS clients of server groups with "only these user
+     *   groups", the allowed groups and every user's groups (multiOTP group attribute, a
+     *   comma list with multiple AD groups).
+     * @return array{enabled: bool, clients: int, sohobotp: int, restricted: int, file: string, written: bool}
      */
     public function export(): array
     {
@@ -151,7 +155,21 @@ final class VipMigration
                 $sohobotp[(string) $key] = 1;
             }
         }
-        $route = ['enabled' => [] !== $clients, 'clients' => (object) array_fill_keys($clients, 1), 'sohobotp' => (object) $sohobotp, 'at' => time()];
+        $restrict = $radius->restrictedClients();
+        $groups = [];
+        if ([] !== $restrict) {
+            foreach (MultiotpService::get()->ApiGetUsersArray(['page' => 1, 'itemsPerPage' => 1000000])['users'] ?? [] as $row) {
+                if (empty($row['enabled'])) {
+                    continue; // disabled users are refused by multiOTP anyway
+                }
+                $list = array_values(array_filter(array_map(static fn (string $g): string => mb_strtolower(trim($g), 'UTF-8'), explode(',', (string) ($row['group'] ?? ''))), 'strlen'));
+                if ([] !== $list) {
+                    $groups[self::key((string) $row['user'])] = $list;
+                }
+            }
+        }
+        $route = ['enabled' => [] !== $clients, 'clients' => (object) array_fill_keys($clients, 1), 'sohobotp' => (object) $sohobotp,
+            'restrict' => (object) $restrict, 'groups' => (object) $groups, 'at' => time()];
         $file = self::routeFile();
         $written = false;
         $dir = dirname($file);
@@ -165,11 +183,23 @@ final class VipMigration
                 @unlink($tmp);
             }
         }
-        return ['enabled' => $route['enabled'], 'clients' => count($clients), 'sohobotp' => count($sohobotp), 'file' => $file, 'written' => $written];
+        return ['enabled' => $route['enabled'], 'clients' => count($clients), 'sohobotp' => count($sohobotp), 'restricted' => count($restrict), 'file' => $file, 'written' => $written];
+    }
+
+    /** Re-export when user groups may have changed (worker): restrictions only, at most every $seconds. */
+    public function refreshIfStale(int $seconds): bool
+    {
+        $file = self::routeFile();
+        if ([] === (new Radius())->restrictedClients() || (is_file($file) && filemtime($file) > time() - $seconds)) {
+            return false;
+        }
+        $this->export();
+        return true;
     }
 
     /**
-     * Forwarded logins (FreeRADIUS linelog, newest first).
+     * Forwarded logins and logins refused by a user group restriction (FreeRADIUS
+     * linelog, newest first). result: accept | reject (Symantec VIP) | denied (user group).
      * @return list<array{time: string, result: string, user: string, server: string}>
      */
     public static function recentForwarded(string $userFilter = '', int $limit = 100): array
@@ -188,7 +218,7 @@ final class VipMigration
         $out = [];
         foreach (array_reverse($lines) as $line) {
             $parts = explode("\t", $line);
-            if (4 !== count($parts) || !in_array($parts[1], ['accept', 'reject'], true)) {
+            if (4 !== count($parts) || !in_array($parts[1], ['accept', 'reject', 'denied'], true)) {
                 continue;
             }
             if ('' !== $userFilter && !str_contains(mb_strtolower($parts[2]), mb_strtolower($userFilter))) {

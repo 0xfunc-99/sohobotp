@@ -50,6 +50,7 @@ final class UsersController extends Controller
             }
             try {
                 $created = $users->create($input);
+                (new VipMigration())->export(); // user groups for the server group restrictions
                 $this->audit->record('user.create', 'success', $created['user'], ['token' => '' === $input['token_serial'] ? 'software' : 'hardware ' . $input['token_serial']]);
                 if (null !== $created['otpauth']) {
                     $this->showEnrolment($created['user'], $created['otpauth'], 'User created');
@@ -113,6 +114,7 @@ final class UsersController extends Controller
                 case 'enable':
                 case 'disable':
                     $users->setEnabled($name, 'enable' === $op);
+                    (new VipMigration())->export();
                     $this->done('user.' . $op, $name, 'enable' === $op ? 'User enabled.' : 'User disabled. RADIUS logins are refused until it is enabled again.');
                 case 'delete':
                     $users->delete($name);
@@ -126,6 +128,9 @@ final class UsersController extends Controller
                         $fields[$field] = $this->post($field);
                     }
                     $changes = $users->update($name, $fields);
+                    if (isset($changes['group'])) {
+                        (new VipMigration())->export();
+                    }
                     $this->done('user.update', $name, [] === $changes ? 'Nothing changed.' : 'User updated.', ['changes' => $changes]);
                 case 'login-format':
                     $format = $this->post('format', 16);

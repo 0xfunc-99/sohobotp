@@ -24,11 +24,18 @@
     <label class="choice"><input type="checkbox" name="dont_send_groups" value="1"<?= $on('dont_send_groups') ?>><span>Do not send the user's multiOTP group in the RADIUS reply</span></label>
   </fieldset>
   <fieldset>
+    <legend>Who may sign in</legend>
+    <label>Only users in these user groups (comma separated; empty: every user)
+      <input name="allowed_groups" value="<?= e((string) ($p['allowed_groups'] ?? '')) ?>" maxlength="2000" placeholder="VPN-Users, IT-Admins"></label>
+    <p class="hint">Checked before the code: users in none of these groups are refused, also with the right code.
+      It uses the user's group in SohobOTP (from the directory sync: <em>Directory → groups</em>, with several groups per user when “multiple groups” is on).
+      <?php if ([] !== ($knownGroups ?? [])): ?>Groups in use: <?= e(implode(', ', $knownGroups)) ?>.<?php endif; ?></p>
+  </fieldset>
+  <fieldset>
     <legend>Symantec VIP migration</legend>
     <label class="choice"><input type="checkbox" name="vip_forward" value="1"<?= $on('vip_forward') ?>>
       <span><strong>Forward users who are not on SohobOTP yet</strong> to the Symantec VIP Enterprise Gateway. Users on SohobOTP are checked here; all others (also users SohobOTP does not know) are sent, unchanged, to Symantec VIP. <a href="<?= e(route('radius-vip')) ?>">Symantec VIP servers</a></span></label>
   </fieldset>
-  <p class="hint">Not yet available: limiting which user groups may sign in through a server group (needs an engine change; planned).</p>
   <div class="actions">
     <button type="submit" class="button-primary">Save group</button>
     <a class="button-link" href="<?= e(route('radius')) ?>">Cancel</a>

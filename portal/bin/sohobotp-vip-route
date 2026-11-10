@@ -9,11 +9,17 @@
  *
  * Prints  Proxy-To-Realm := "sohobotp_vip"  when the request must go to the Symantec VIP
  * Enterprise Gateway: the RADIUS client is in a server group with forwarding on, and the
- * user is not on SohobOTP yet. Prints nothing otherwise (SohobOTP checks the login).
- * Always exits 0; any problem (no file, bad file) means "SohobOTP", never "Symantec".
+ * user is not on SohobOTP yet.
+ * Prints  Auth-Type := Reject  when the RADIUS client's server group allows only some user
+ * groups and the user is in none of them (or unknown).
+ * Prints nothing otherwise (SohobOTP checks the login). Always exits 0. A missing or
+ * unreadable routing file forwards nobody and restricts nobody (SohobOTP still checks the
+ * code): the portal rewrites it at every change and every 5 minutes.
  *
  * The routing file is written by the portal (Portal\VipMigration::export):
- *   {"enabled": true, "clients": {"<shortname>": 1}, "sohobotp": {"<lower-case user>": 1}}
+ *   {"enabled": true, "clients": {"<shortname>": 1}, "sohobotp": {"<lower-case user>": 1},
+ *    "restrict": {"<shortname>": ["<lower-case group>", ...]},
+ *    "groups": {"<lower-case user>": ["<lower-case group>", ...]}}
  *
  * @license GNU Lesser General Public License (same as multiOTP)
  */
@@ -24,7 +30,7 @@ $user = (string) ($argv[1] ?? '');
 $client = (string) ($argv[2] ?? '');
 $raw = @file_get_contents($file);
 $route = false === $raw ? null : json_decode($raw, true);
-if (!is_array($route) || true !== ($route['enabled'] ?? false) || '' === $user || !isset($route['clients'][$client])) {
+if (!is_array($route) || '' === $user) {
     exit(0);
 }
 // The same user may arrive as "user", "DOMAIN\user" or "user@domain"
@@ -38,10 +44,23 @@ foreach ($names as $name) {
         $names[] = substr($name, 0, $at);
     }
 }
+$onSohobotp = false;
 foreach ($names as $name) {
     if ('' !== $name && isset($route['sohobotp'][$name])) {
-        exit(0);
+        $onSohobotp = true;
+        break;
     }
 }
-echo "Proxy-To-Realm := \"sohobotp_vip\"\n";
+if (true === ($route['enabled'] ?? false) && isset($route['clients'][$client]) && !$onSohobotp) {
+    echo "Proxy-To-Realm := \"sohobotp_vip\"\n"; // Symantec VIP decides for its users
+    exit(0);
+}
+if (isset($route['restrict'][$client]) && is_array($route['restrict'][$client])) {
+    foreach ($names as $name) {
+        if ('' !== $name && is_array($route['groups'][$name] ?? null) && [] !== array_intersect($route['groups'][$name], $route['restrict'][$client])) {
+            exit(0);
+        }
+    }
+    echo "Auth-Type := Reject\n"; // not in an allowed user group
+}
 exit(0);
