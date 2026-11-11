@@ -132,7 +132,7 @@
     <label>Email <input type="email" name="email" value="<?= e($user['email']) ?>"></label>
     <label>Mobile (SMS) <input name="sms" value="<?= e($user['sms']) ?>"></label>
     <label>Description <input name="description" value="<?= e($user['description']) ?>"></label>
-    <label>multiOTP group <input name="group" value="<?= e($user['group']) ?>"></label>
+    <label>SohobOTP group <input name="group" value="<?= e($user['group']) ?>"></label>
     <div class="actions"><button type="submit" class="button-primary">Save</button></div>
   </form>
   <div class="actions danger-zone">

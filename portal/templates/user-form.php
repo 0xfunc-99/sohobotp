@@ -8,7 +8,7 @@
   <label>Email <input type="email" name="email" value="<?= e($input['email']) ?>"></label>
   <label>Mobile (SMS) <input name="sms" value="<?= e($input['sms']) ?>" inputmode="tel"></label>
   <label>Description <input name="description" value="<?= e($input['description']) ?>"></label>
-  <label>multiOTP group <input name="group" value="<?= e($input['group']) ?>"></label>
+  <label>SohobOTP group <input name="group" value="<?= e($input['group']) ?>"></label>
   <fieldset>
     <legend>Token</legend>
     <label class="choice"><input type="radio" name="token_serial" value=""<?= '' === $input['token_serial'] ? ' checked' : '' ?>>

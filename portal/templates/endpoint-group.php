@@ -4,7 +4,7 @@
     $value = (string) $input[$name];
     $html = '<select name="' . e($name) . '">';
     foreach (Portal\Endpoints::CP_MODES as $digit => $label) {
-        foreach (['e' => 'multiOTP only', 'd' => 'other sign-in options too'] as $letter => $suffix) {
+        foreach (['e' => 'SohobOTP only', 'd' => 'other sign-in options too'] as $letter => $suffix) {
             $code = $digit . $letter;
             if ('3' === (string) $digit && 'd' === $letter) {
                 continue;

@@ -54,18 +54,18 @@ final class Mfa
     public static function checkLinkableUser(string $user): ?string
     {
         if ('' === $user) {
-            return 'Choose a multiOTP user.';
+            return 'Choose a SohobOTP user.';
         }
         $multiotp = MultiotpService::get();
         if (!$multiotp->CheckUserExists($user)) {
-            return 'This multiOTP user does not exist.';
+            return 'This SohobOTP user does not exist.';
         }
         $multiotp->SetUser($user);
         if (!in_array($multiotp->GetUserAlgorithm(), self::LINKABLE_ALGORITHMS, true)) {
-            return 'This multiOTP user has no usable token (without2FA and empty tokens are refused).';
+            return 'This SohobOTP user has no usable token (without2FA and empty tokens are refused).';
         }
         if (1 !== (int) $multiotp->GetUserActivated()) {
-            return 'This multiOTP user is deactivated.';
+            return 'This SohobOTP user is deactivated.';
         }
         return null;
     }

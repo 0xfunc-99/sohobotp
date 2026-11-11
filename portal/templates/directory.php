@@ -73,10 +73,10 @@
       </select>
     </label>
     <label>Base DN <input name="base_dn" value="<?= e($s['base_dn']) ?>" placeholder="DC=corp,DC=example"<?= $ro ?>></label>
-    <label>Bind DN (service account) <input name="bind_dn" value="<?= e($s['bind_dn']) ?>" placeholder="CN=svc-multiotp,OU=Service,DC=corp,DC=example"<?= $ro ?>>
+    <label>Bind DN (service account) <input name="bind_dn" value="<?= e($s['bind_dn']) ?>" placeholder="CN=svc-sohobotp,OU=Service,DC=corp,DC=example"<?= $ro ?>>
       <small>Use a dedicated read-only account.</small></label>
     <label>Bind password <input type="password" name="bind_password" autocomplete="new-password" placeholder="<?= $hasPassword ? 'Stored encrypted — leave empty to keep' : 'Not set' ?>"<?= $ro ?>>
-      <small>Never shown again. Stored encrypted by the portal and given to multiOTP only while a test or sync runs.</small></label>
+      <small>Never shown again. Stored encrypted by the portal and given to the SohobOTP engine only while a test or sync runs.</small></label>
     <label>Account suffix (AD) <input name="account_suffix" value="<?= e($s['account_suffix']) ?>" placeholder="@corp.example"<?= $ro ?>></label>
   </fieldset>
 
@@ -118,7 +118,7 @@
       </select>
     </label>
     <label class="choice"><input type="checkbox" name="request_ldap_password" value="1"<?= $checked('request_ldap_password') . $ro ?>><span>Users type their directory password followed by the code (password + OTP)</span></label>
-    <label class="choice"><input type="checkbox" name="dont_auto_disable" value="1"<?= $checked('dont_auto_disable') . $ro ?>><span>Keep multiOTP accounts enabled when the user is disabled or removed in the directory (not recommended)</span></label>
+    <label class="choice"><input type="checkbox" name="dont_auto_disable" value="1"<?= $checked('dont_auto_disable') . $ro ?>><span>Keep SohobOTP accounts enabled when the user is disabled or removed in the directory (not recommended)</span></label>
     <label class="choice"><input type="checkbox" name="dont_auto_enable" value="1"<?= $checked('dont_auto_enable') . $ro ?>><span>Do not re-enable accounts automatically when the user is enabled again in the directory</span></label>
     <label>Delete accounts missing from the directory after (days) <input name="delete_retention_days" value="<?= e($s['delete_retention_days']) ?>" inputmode="numeric"<?= $ro ?>>
       <small>Users that leave the directory scope are disabled at the next sync, then deleted after this many days. 0 = never delete.</small></label>

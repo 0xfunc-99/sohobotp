@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p class="hint">Administrator accounts require a second factor. Scan this code with an authenticator app (multiOTP token app, FreeOTP, Microsoft or Google Authenticator), then enter the code it shows.</p>
+<p class="hint">Administrator accounts require a second factor. Scan this code with an authenticator app (Microsoft or Google Authenticator, FreeOTP or any TOTP app), then enter the code it shows.</p>
 <?php if (null !== $qr): ?>
   <img class="qr" src="<?= e($qr) ?>" alt="QR code for your authenticator app" width="220" height="220">
 <?php endif; ?>

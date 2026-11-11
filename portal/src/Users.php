@@ -211,7 +211,7 @@ final class Users
             throw new ValidationException($error);
         }
         if ($this->exists($user)) {
-            throw new ValidationException('A multiOTP user with this name already exists.');
+            throw new ValidationException('A SohobOTP user with this name already exists.');
         }
         $email = trim((string) ($input['email'] ?? ''));
         if ('' !== $email && false === filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -227,7 +227,7 @@ final class Users
             trim((string) ($input['group'] ?? '')), '', 1, 0, 0
         );
         if (!$created) {
-            throw new \RuntimeException('multiOTP could not create the user.');
+            throw new \RuntimeException('SohobOTP could not create the user.');
         }
         $this->engine->SetUser($user);
         $this->engine->SetUserDisplayName(trim((string) ($input['display_name'] ?? '')));
@@ -276,7 +276,7 @@ final class Users
     public function unlock(string $user): void
     {
         if (!$this->engine->UnlockUser($user)) {
-            throw new \RuntimeException('multiOTP could not unlock the user.');
+            throw new \RuntimeException('SohobOTP could not unlock the user.');
         }
     }
 
@@ -288,7 +288,7 @@ final class Users
             $this->engine->RemoveTokenFromUser($user);
         }
         if (!$this->engine->DeleteUser($user, true)) {
-            throw new \RuntimeException('multiOTP could not delete the user.');
+            throw new \RuntimeException('SohobOTP could not delete the user.');
         }
     }
 
@@ -310,7 +310,7 @@ final class Users
         $this->write();
         $uri = (string) $e->GetUserTokenUrlLink($user);
         if ('' === $uri) {
-            throw new \RuntimeException('multiOTP could not build the provisioning link.');
+            throw new \RuntimeException('SohobOTP could not build the provisioning link.');
         }
         return $uri;
     }
@@ -347,7 +347,7 @@ final class Users
             throw new ValidationException('This hardware token does not exist or is already assigned.');
         }
         if (!$this->engine->AssignTokenToUser($user, $serial)) {
-            throw new \RuntimeException('multiOTP could not assign the token.');
+            throw new \RuntimeException('SohobOTP could not assign the token.');
         }
     }
 
@@ -360,7 +360,7 @@ final class Users
             throw new ValidationException('This user has no hardware token.');
         }
         if (!$this->engine->RemoveTokenFromUser($user)) {
-            throw new \RuntimeException('multiOTP could not remove the token.');
+            throw new \RuntimeException('SohobOTP could not remove the token.');
         }
         $this->enrollSoftwareToken($user); // replaces the engine's md5-based seed
         return $serial;
@@ -376,7 +376,7 @@ final class Users
     private function write(): void
     {
         if (!$this->engine->WriteUserData()) {
-            throw new \RuntimeException('multiOTP could not save the user.');
+            throw new \RuntimeException('SohobOTP could not save the user.');
         }
     }
 }

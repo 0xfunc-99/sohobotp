@@ -76,7 +76,7 @@
             <td><?= e($l['message']) ?></td>
           </tr>
         <?php endforeach; ?>
-        <?php if ([] === $logins): ?><tr><td colspan="4" class="muted">No login events in the multiOTP log (logging may be disabled).</td></tr><?php endif; ?>
+        <?php if ([] === $logins): ?><tr><td colspan="4" class="muted">No login events in the SohobOTP log (logging may be disabled).</td></tr><?php endif; ?>
       </tbody>
     </table>
   </div>

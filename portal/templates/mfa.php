@@ -1,7 +1,7 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <p class="hint">
   <?php if ('multiotp' === $mode): ?>
-    Enter the code from your multiOTP token. If your token uses a PIN, type the PIN first, then the code.
+    Enter the code from your SohobOTP token. If your token uses a PIN, type the PIN first, then the code.
   <?php else: ?>
     Enter the 6-digit code from your authenticator app.
   <?php endif; ?>

@@ -20,7 +20,7 @@
             <?php if ($locked): ?><span class="status status-failure">locked</span><?php endif; ?>
             <?php if ($a['must_change_password']): ?><span class="status status-info">temporary password</span><?php endif; ?>
           </td>
-          <td><?= null === $a['mfa_mode'] ? '<span class="muted">not set up yet</span>' : ('portal' === $a['mfa_mode'] ? 'Authenticator app' : 'multiOTP: ' . e($a['mfa_user'])) ?></td>
+          <td><?= null === $a['mfa_mode'] ? '<span class="muted">not set up yet</span>' : ('portal' === $a['mfa_mode'] ? 'Authenticator app' : 'SohobOTP user: ' . e($a['mfa_user'])) ?></td>
           <td class="nowrap"><?= e(format_time($a['last_login_at'])) ?></td>
           <td class="row-actions">
             <?php

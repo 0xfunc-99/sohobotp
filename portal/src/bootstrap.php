@@ -14,7 +14,7 @@ defined('PORTAL_ROOT') || exit;
 
 if (PHP_VERSION_ID < 80100) {
     http_response_code(500);
-    exit("The multiOTP portal requires PHP 8.1 or later.\n");
+    exit("The SohobOTP portal requires PHP 8.1 or later.\n");
 }
 
 spl_autoload_register(static function (string $class): void {

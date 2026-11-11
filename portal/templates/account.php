@@ -6,7 +6,7 @@
   <dt>Name</dt><dd><?= e($me['display_name'] ?: '—') ?></dd>
   <dt>Email</dt><dd><?= e($me['email'] ?: '—') ?></dd>
   <dt>Role</dt><dd><?= e(Portal\Roles::label($me['role'])) ?></dd>
-  <dt>Second factor</dt><dd><?= 'multiotp' === $me['mfa_mode'] ? 'multiOTP user ' . e($me['mfa_user']) : 'Authenticator app' ?></dd>
+  <dt>Second factor</dt><dd><?= 'multiotp' === $me['mfa_mode'] ? 'SohobOTP user ' . e($me['mfa_user']) : 'Authenticator app' ?></dd>
   <dt>Password changed</dt><dd><?= e(format_time($me['password_changed_at'])) ?></dd>
   <dt>Last sign-in</dt><dd><?= e(format_time($me['last_login_at'])) ?><?= $me['last_login_ip'] ? ' from ' . e($me['last_login_ip']) : '' ?></dd>
 </dl>

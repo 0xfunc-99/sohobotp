@@ -29,13 +29,13 @@
       </label>
       <label class="choice">
         <input type="radio" name="mfa" value="multiotp"<?= 'multiotp' === $input['mfa'] ? ' checked' : '' ?>>
-        <span><strong>Existing multiOTP user</strong> — use that user's token, e.g. the administrator's own directory account.</span>
+        <span><strong>Existing SohobOTP user</strong> — use that user's token, e.g. the administrator's own directory account.</span>
       </label>
-      <label>multiOTP user (only for the second option) <input name="mfa_user" value="<?= e($input['mfa_user']) ?>"></label>
+      <label>SohobOTP user (only for the second option) <input name="mfa_user" value="<?= e($input['mfa_user']) ?>"></label>
     <?php else: ?>
-      <p class="muted">Currently: <?= null === $subject['mfa_mode'] ? 'not set up yet' : ('portal' === $subject['mfa_mode'] ? 'authenticator app' : 'multiOTP user ' . e($subject['mfa_user'])) ?>.
+      <p class="muted">Currently: <?= null === $subject['mfa_mode'] ? 'not set up yet' : ('portal' === $subject['mfa_mode'] ? 'authenticator app' : 'SohobOTP user ' . e($subject['mfa_user'])) ?>.
         To switch to an authenticator app, use “Reset 2FA” in the list.</p>
-      <label>Link to multiOTP user <input name="mfa_user" value="<?= e($input['mfa_user']) ?>"><small>Leave unchanged to keep the current second factor.</small></label>
+      <label>Link to SohobOTP user <input name="mfa_user" value="<?= e($input['mfa_user']) ?>"><small>Leave unchanged to keep the current second factor.</small></label>
     <?php endif; ?>
   </fieldset>
   <?php if (null === $subject): ?>

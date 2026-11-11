@@ -412,7 +412,7 @@ final class App
             $stats['tokens'] = (int) $multiotp->GetTokensCount();
         } catch (\Throwable $error) {
             error_log('multiOTP portal dashboard: ' . $error);
-            $stats['error'] = 'The multiOTP engine could not be read.';
+            $stats['error'] = 'The SohobOTP engine could not be read.';
         }
         $admins = $this->admins->all();
         $recent = Roles::can($this->admin['role'], 'audit.view') ? $this->audit->search([], 1, 8)['entries'] : [];

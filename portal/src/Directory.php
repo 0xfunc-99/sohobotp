@@ -138,7 +138,7 @@ final class Directory
         // Never keep the service password in the engine configuration
         $engine->SetLdapServerPassword('');
         if (!$engine->WriteConfigData()) {
-            throw new \RuntimeException('The multiOTP configuration could not be written.');
+            throw new \RuntimeException('The SohobOTP engine configuration could not be written.');
         }
 
         $this->store->update(static function (array &$state) use ($password, $legacyPassword, $input, $minutes): void {

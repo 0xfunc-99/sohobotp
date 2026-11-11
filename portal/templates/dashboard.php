@@ -12,7 +12,7 @@
 <?php if (null !== $stats['error']): ?>
   <div class="alert alert-error" role="alert"><?= e($stats['error']) ?></div>
 <?php endif; ?>
-<section class="cards" aria-label="multiOTP status">
+<section class="cards" aria-label="SohobOTP status">
   <?= $card('Users', $stats['users'] ?? '—', $usersLink()) ?>
   <?= $card('Active users', $stats['active'] ?? '—', $usersLink(['status' => 'enabled'])) ?>
   <?= $card('Locked users', $stats['locked'] ?? '—', $usersLink(['status' => 'locked']), ($stats['locked'] ?? 0) > 0) ?>

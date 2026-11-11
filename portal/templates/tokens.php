@@ -2,7 +2,7 @@
 <?php if ($canManage): ?>
 <section class="panel">
   <h2>Import tokens</h2>
-  <p class="hint">PSKC (RFC 6030, plain or encrypted), multiOTP CSV, Yubico CSV, Alpine XML/DAT and Authenex SQL files, as supported by multiOTP. Maximum 5 MB.</p>
+  <p class="hint">PSKC (RFC 6030, plain or encrypted), CSV token lists, Yubico CSV, Alpine XML/DAT and Authenex SQL files. Maximum 5 MB.</p>
   <form method="post" action="<?= e(route('token-import')) ?>" enctype="multipart/form-data" class="toolbar subform">
     <?= csrf_field() ?>
     <label>Token file <input type="file" name="token_file" required></label>

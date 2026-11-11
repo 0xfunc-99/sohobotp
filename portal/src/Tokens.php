@@ -58,7 +58,7 @@ final class Tokens
                     throw new ValidationException('This token is assigned to ' . implode(', ', $token['users']) . '. Remove it from the user first.');
                 }
                 if (!$this->engine->DeleteToken($serial)) {
-                    throw new \RuntimeException('multiOTP could not delete the token.');
+                    throw new \RuntimeException('SohobOTP could not delete the token.');
                 }
                 return;
             }

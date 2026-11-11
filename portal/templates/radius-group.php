@@ -21,7 +21,7 @@
   </fieldset>
   <fieldset>
     <legend>Reply</legend>
-    <label class="choice"><input type="checkbox" name="dont_send_groups" value="1"<?= $on('dont_send_groups') ?>><span>Do not send the user's multiOTP group in the RADIUS reply</span></label>
+    <label class="choice"><input type="checkbox" name="dont_send_groups" value="1"<?= $on('dont_send_groups') ?>><span>Do not send the user's SohobOTP group in the RADIUS reply</span></label>
   </fieldset>
   <fieldset>
     <legend>Who may sign in</legend>

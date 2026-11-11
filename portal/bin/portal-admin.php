@@ -112,7 +112,7 @@ try {
             out('Temporary password (shown once, valid ' . intdiv(Config::tempPasswordLifetime(), 3600) . ' h): ' . $temporary);
             out(null === $created['mfa_mode']
                 ? 'At first sign-in the administrator sets up an authenticator app, then chooses a new password.'
-                : 'Second factor: multiOTP user "' . $created['mfa_user'] . '". A new password is required at first sign-in.');
+                : 'Second factor: SohobOTP user "' . $created['mfa_user'] . '". A new password is required at first sign-in.');
             break;
 
         case 'list':
