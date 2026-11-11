@@ -49,7 +49,6 @@
   }
 
   $intros = [
-      'dashboard' => 'The state of your SohobOTP service at a glance.',
       'users' => 'People who sign in with a SohobOTP code: search, enrol authenticators, unlock and manage accounts.',
       'tokens' => 'Hardware tokens imported into SohobOTP and the users they are assigned to.',
       'directory' => 'Connect Active Directory or LDAP so users are created, updated and disabled automatically.',
