@@ -31,7 +31,7 @@ case "${1:-start}" in
       -p 127.0.0.1:8080:8080 \
       -v "$REPO":/app:ro -v "$VOLUME":/data \
       -e MULTIOTP_ETC_DIR=/data/etc -e MULTIOTP_LOG_DIR=/data/log -e MULTIOTP_PORTAL_DATA=/data/portal \
-      -e MULTIOTP_PORTAL_ALLOW_HTTP=1 -e MULTIOTP_PORTAL_ISSUER="multiOTP portal (dev)" \
+      -e MULTIOTP_PORTAL_ALLOW_HTTP=1 -e MULTIOTP_PORTAL_ISSUER="SohobOTP (dev)" \
       multiotp-portal-php sh -c '
         mkdir -p /data/etc/config /data/etc/users /data/etc/tokens /data/etc/devices /data/etc/groups /data/etc/ddns /data/log /data/portal
         php /app/portal/bin/worker.php --loop >/data/log/worker.log 2>&1 &

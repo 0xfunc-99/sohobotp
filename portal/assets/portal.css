@@ -239,8 +239,11 @@ hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-5) 0; }
   content: ""; position: absolute; right: -120px; bottom: -120px; width: 360px; height: 360px; border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, .15); box-shadow: 0 0 0 40px rgba(255, 255, 255, .04), 0 0 0 90px rgba(255, 255, 255, .03);
 }
-.auth-aside .brand-logo-chip { align-self: flex-start; display: inline-block; background: #fff; border-radius: 12px; padding: .6rem .9rem; box-shadow: 0 8px 24px rgba(0, 0, 0, .15); }
-.auth-aside .brand-logo-chip img { display: block; height: 40px; width: auto; }
+.auth-brand { position: relative; z-index: 1; display: flex; align-items: center; gap: .85rem; margin: 0; }
+.auth-brand img { width: 48px; height: 48px; flex: none; padding: 6px; background: #fff; border-radius: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.auth-brand > span { display: grid; line-height: 1.15; }
+.auth-brand-name { color: #fff; font-size: 1.35rem; font-weight: 750; letter-spacing: -.01em; }
+.auth-brand-by { color: rgba(255, 255, 255, .8); font-size: .8rem; font-weight: 500; }
 .auth-pitch { position: relative; z-index: 1; max-width: 30rem; }
 .auth-pitch .auth-headline { color: #fff; font-size: clamp(1.75rem, 2.8vw, 2.4rem); font-weight: 750; line-height: 1.15; margin: 0 0 var(--space-3); letter-spacing: -.02em; }
 .auth-pitch p { color: rgba(255, 255, 255, .85); font-size: 1rem; margin: 0 0 var(--space-5); }
@@ -256,8 +259,8 @@ hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-5) 0; }
   padding: 2rem 2rem 1.75rem; box-shadow: var(--shadow-lg); position: relative; overflow: hidden;
 }
 .auth-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--brand-gradient); }
-.auth-card .card-brand { display: none; margin: 0 0 var(--space-5); }
-.auth-card .card-brand img { height: 36px; width: auto; }
+.auth-card .card-brand { display: none; margin: 0 0 var(--space-5); align-items: center; gap: .6rem; font-weight: 750; font-size: 1.1rem; color: var(--text-strong); }
+.auth-card .card-brand img { width: 36px; height: 36px; }
 .auth-card h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
 .auth-card .auth-product { margin: 0 0 var(--space-5); color: var(--muted); font-size: .875rem; }
 .auth-card .form .button-primary { width: 100%; justify-content: center; min-height: 2.75rem; }
@@ -271,12 +274,9 @@ hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-5) 0; }
   .auth-aside { display: none; }
   .auth-main { justify-content: flex-start; padding: var(--space-6) var(--space-4); background: radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--brand-aqua) 20%, transparent), transparent 50%), var(--bg); }
   .auth-card { padding: 1.5rem 1.25rem 1.25rem; }
-  .auth-card .card-brand { display: block; }
+  .auth-card .card-brand { display: flex; }
   .auth-main > .powered { display: block; margin-top: var(--space-5); text-align: center; }
 }
-/* the logo's navy wordmark needs a light background in dark mode */
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .auth-card .card-brand img { background: #fff; border-radius: 8px; padding: 4px 8px; height: 44px; } }
-:root[data-theme="dark"] .auth-card .card-brand img { background: #fff; border-radius: 8px; padding: 4px 8px; height: 44px; }
 
 /* Wide pages (licences) in the auth layout */
 .auth-card:has(.table-wrap) { max-width: 960px; }

@@ -17,10 +17,13 @@
 </head>
 <body class="auth">
   <aside class="auth-aside">
-    <span class="brand-logo-chip"><img src="assets/brand-logo.png" alt="<?= e(Portal\Config::companyName()) ?>" width="144" height="40"></span>
+    <p class="auth-brand">
+      <img src="assets/brand-icon.png" alt="" width="48" height="48">
+      <span><span class="auth-brand-name"><?= e(Portal\Config::brandName()) ?></span><span class="auth-brand-by">by <?= e(Portal\Config::companyName()) ?></span></span>
+    </p>
     <div class="auth-pitch">
-      <p class="auth-headline"><?= e(Portal\Config::brandName()) ?></p>
-      <p>Two-factor authentication for VPNs, Wi-Fi, servers and Windows sign-in, managed from one place.</p>
+      <p class="auth-headline">Secure sign-in, managed in one place</p>
+      <p>Two-factor authentication for VPNs, Wi-Fi, servers and Windows sign-in.</p>
       <ul class="auth-points">
         <li><?= $icon('users') ?><span>Users and authenticators, synchronised from Active Directory or LDAP</span></li>
         <li><?= $icon('radius') ?><span>RADIUS for VPNs, firewalls and network devices</span></li>
@@ -32,7 +35,7 @@
   </aside>
   <main class="auth-main">
     <div class="auth-card">
-      <p class="card-brand"><img src="assets/brand-logo.png" alt="<?= e(Portal\Config::companyName()) ?>" width="130" height="36"></p>
+      <p class="card-brand"><img src="assets/brand-icon.png" alt="" width="36" height="36"><span><?= e(Portal\Config::brandName()) ?></span></p>
       <h1><?= e($title ?? '') ?></h1>
       <p class="auth-product"><?= e(Portal\Config::brandName()) ?> management portal</p>
       <?php require PORTAL_ROOT . '/templates/partials/flashes.php'; ?>
