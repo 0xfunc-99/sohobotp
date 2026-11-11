@@ -21,7 +21,7 @@
   }
 
   // Which sidebar entry the current page belongs to (detail and form pages highlight their list).
-  $navRoute = ['password' => 'account', 'jobs' => 'directory'][$current] ?? null;
+  $navRoute = ['password' => 'account', 'licences' => 'account', 'jobs' => 'directory'][$current] ?? null;
   if ('job' === $current) {
       $jobType = (string) ($job['type'] ?? '');
       $navRoute = match (true) {
@@ -113,7 +113,7 @@
       <?php endif; ?>
     </nav>
     <div class="sidebar-foot">
-      <p class="powered">© <?= e(Portal\Config::companyName()) ?> · <a href="<?= e(route('licences')) ?>">Licences</a></p>
+      <p class="powered">© <?= e(Portal\Config::companyName()) ?></p>
     </div>
   </aside>
   <label for="nav-toggle" class="scrim" aria-hidden="true"></label>

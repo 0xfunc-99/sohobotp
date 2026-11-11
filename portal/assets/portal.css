@@ -279,7 +279,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-5) 0; }
 }
 
 /* Wide pages (licences) in the auth layout */
-.auth-card:has(.table-wrap) { max-width: 960px; }
+.auth-card:has(.table-wrap), .auth-card:has(.notices) { max-width: 760px; }
 
 .qr { display: block; margin: var(--space-4) auto; background: #fff; padding: 10px; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .secret { margin: 0 0 var(--space-4); max-width: 680px; }
@@ -638,6 +638,12 @@ pre:has(> code) { position: relative; }
   .feed-item { grid-template-columns: auto 1fr; }
   .feed-item .status { grid-column: 2; justify-self: start; }
 }
+
+.notices { list-style: none; margin: 0 0 var(--space-4); padding: 0; max-width: 760px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.notices li { display: grid; gap: .1rem; padding: .6rem .9rem; border-bottom: 1px solid var(--border); font-size: .85rem; }
+.notices li:last-child { border-bottom: 0; }
+.notice-name { color: var(--text-strong); font-weight: 600; }
+.notice-meta { color: var(--muted); font-size: .8rem; }
 
 /* Phone overrides (after the components they adjust) */
 @media (max-width: 600px) {

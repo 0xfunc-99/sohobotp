@@ -2,7 +2,7 @@
 <?php
   $icon = require PORTAL_ROOT . '/templates/partials/icons.php';
   $asset = static fn (string $file): string => 'assets/' . $file . '?v=' . (int) @filemtime(PORTAL_ROOT . '/assets/' . $file);
-  $credit = '© ' . e(Portal\Config::companyName()) . ' · <a href="' . e(route('licences')) . '">Licences</a>';
+  $credit = '© ' . e(Portal\Config::companyName());
 ?>
 <!doctype html>
 <html lang="en">

@@ -1157,7 +1157,9 @@ $help->get('/portal/index.php?r=ha');
 check('helpdesk cannot open High availability', 403 === $help->status);
 
 $admin->get('/portal/index.php?r=dashboard');
-check('footer shows the company and a Licences link, not a third-party credit', str_contains($admin->body, '© Sohobcom') && str_contains($admin->body, 'r=licences') && !str_contains($admin->body, 'Powered by'));
+check('footer shows the company only, no licences link, no third-party credit', str_contains($admin->body, '© Sohobcom') && !str_contains($admin->body, 'r=licences') && !str_contains($admin->body, 'Powered by'));
+$admin->get('/portal/index.php?r=account');
+check('open-source notices linked from My account', str_contains($admin->body, 'r=licences'));
 
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

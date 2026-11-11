@@ -23,3 +23,8 @@
   </form>
 </div>
 </section>
+<section class="panel">
+<h2>Legal</h2>
+<p class="hint">Open-source components included in <?= e(Portal\Config::brandName()) ?> and their licences.</p>
+<a class="button-link" href="<?= e(route('licences')) ?>">Open-source notices</a>
+</section>

@@ -10,15 +10,10 @@
       }
   }
 ?>
-<p><?= e(Portal\Config::brandName()) ?> is a product of <?= e(Portal\Config::companyName()) ?>. It contains and uses open-source software; the notices below and the licence texts stay available as those licences require.</p>
-<div class="table-wrap">
-  <table class="table">
-    <thead><tr><th>Component</th><th>Where</th><th>Licence</th><th>Copyright</th></tr></thead>
-    <tbody>
-      <?php foreach ($rows as $r): ?>
-        <tr><?php foreach (array_pad(array_slice($r, 0, 4), 4, '') as $cell): ?><td><?= e($cell) ?></td><?php endforeach; ?></tr>
-      <?php endforeach; ?>
-    </tbody>
-  </table>
-</div>
-<p class="hint">Full texts: LICENSES.md, COPYING and COPYING.LESSER in the SohobOTP source, and each component's files.</p>
+<p class="hint">Open-source components included in <?= e(Portal\Config::brandName()) ?>, kept here as their licences require.</p>
+<ul class="notices">
+  <?php foreach ($rows as $r): [$component, , $licence, $holder] = array_pad(array_slice($r, 0, 4), 4, ''); ?>
+    <li><span class="notice-name"><?= e($component) ?></span><span class="notice-meta"><?= e($licence) ?><?= '' !== $holder ? ' · © ' . e($holder) : '' ?></span></li>
+  <?php endforeach; ?>
+</ul>
+<p class="hint">Full licence texts: LICENSES.md, COPYING and COPYING.LESSER in the source, and each component's files.</p>
