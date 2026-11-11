@@ -6,16 +6,33 @@
           . '<button type="submit" class="' . e($class) . '">' . e($label) . '</button></form>';
   };
 ?>
-<p><a href="<?= e(route('users')) ?>">← All users</a></p>
+<p class="back"><a href="<?= e(route('users')) ?>">← All users</a></p>
 
-<div class="actions">
-  <span class="status status-<?= $user['enabled'] ? 'success' : 'denied' ?>"><?= $user['enabled'] ? 'enabled' : 'disabled' ?></span>
-  <?php if ($user['locked']): ?><span class="status status-failure">locked</span><?php endif; ?>
-  <?php if ($user['locked'] && $perm['unlock']): ?><?= $action('unlock', 'Unlock') ?><?php endif; ?>
-  <?php if ($perm['manage']): ?>
-    <?= $user['enabled'] ? $action('disable', 'Disable', 'Disable ' . $user['user'] . '? RADIUS logins will be refused.') : $action('enable', 'Enable') ?>
-  <?php endif; ?>
+<?php
+  $who = trim((string) ($user['display_name'] ?: $user['description']));
+  $letters = '';
+  foreach (array_slice(preg_split('/[\s._-]+/u', $who ?: $user['user']) ?: [], 0, 2) as $word) { $letters .= mb_strtoupper(mb_substr($word, 0, 1)); }
+?>
+<div class="profile">
+  <span class="avatar avatar-lg" aria-hidden="true"><?= e($letters) ?></span>
+  <div class="profile-main">
+    <p class="profile-name"><?= e('' !== $who ? $who : $user['user']) ?></p>
+    <p class="profile-meta">
+      <span class="status status-<?= $user['enabled'] ? 'success' : 'denied' ?>"><?= $user['enabled'] ? 'enabled' : 'disabled' ?></span>
+      <?php if ($user['locked']): ?><span class="status status-failure">locked</span><?php endif; ?>
+      <span class="badge"><?= $user['synchronized'] ? 'Directory' : 'Local' ?></span>
+      <?php if ('' !== (string) $user['email']): ?><span class="muted"><?= e($user['email']) ?></span><?php endif; ?>
+    </p>
+  </div>
+  <div class="actions profile-actions">
+    <?php if ($user['locked'] && $perm['unlock']): ?><?= $action('unlock', 'Unlock', '', 'button-primary') ?><?php endif; ?>
+    <?php if ($perm['manage']): ?>
+      <?= $user['enabled'] ? $action('disable', 'Disable', 'Disable ' . $user['user'] . '? RADIUS logins will be refused.') : $action('enable', 'Enable') ?>
+    <?php endif; ?>
+  </div>
 </div>
+
+<div class="grid-2">
 
 <section class="panel">
   <h2>Details</h2>
@@ -65,7 +82,8 @@
 
 <?php if ($perm['enroll'] || $perm['resync'] || $perm['tokens']): ?>
 <section class="panel">
-  <h2>Token</h2>
+  <h2>Authenticator and token</h2>
+  <p class="hint"><?= '' !== $user['token_serial'] ? 'Hardware token ' . e($user['token_serial']) . ' is assigned.' : 'Uses an authenticator app.' ?> <?= (int) $user['recovery_codes'] ?> recovery code(s) left.</p>
   <div class="actions">
     <?php if ($perm['enroll'] && '' === $user['token_serial']): ?>
       <?= $action('enroll', 'Enrol new authenticator', 'This replaces the current token: the old app entry stops working. Continue?', 'button-primary') ?>
@@ -78,7 +96,7 @@
     <?php endif; ?>
   </div>
   <?php if ($perm['tokens'] && '' === $user['token_serial'] && [] !== $freeTokens): ?>
-    <form method="post" action="<?= e(route('user-action')) ?>" class="toolbar">
+    <form method="post" action="<?= e(route('user-action')) ?>" class="toolbar subform">
       <?= csrf_field() ?>
       <input type="hidden" name="u" value="<?= e($user['user']) ?>">
       <input type="hidden" name="op" value="assign-token">
@@ -89,7 +107,7 @@
     </form>
   <?php endif; ?>
   <?php if ($perm['resync']): ?>
-    <form method="post" action="<?= e(route('user-action')) ?>" class="toolbar">
+    <form method="post" action="<?= e(route('user-action')) ?>" class="toolbar subform">
       <?= csrf_field() ?>
       <input type="hidden" name="u" value="<?= e($user['user']) ?>">
       <input type="hidden" name="op" value="resync">
@@ -100,10 +118,11 @@
   <?php endif; ?>
 </section>
 <?php endif; ?>
+</div>
 
 <?php if ($perm['manage']): ?>
 <section class="panel">
-  <h2>Edit</h2>
+  <h2>Edit user</h2>
   <?php if ($user['synchronized']): ?><p class="hint">This user comes from the directory: the next sync may overwrite name, email and mobile.</p><?php endif; ?>
   <form method="post" action="<?= e(route('user-action')) ?>" class="form narrow">
     <?= csrf_field() ?>
@@ -117,7 +136,7 @@
     <div class="actions"><button type="submit" class="button-primary">Save</button></div>
   </form>
   <div class="actions danger-zone">
-    <?= $action('delete', 'Delete user', 'Delete ' . $user['user'] . ' permanently?' . ($user['synchronized'] ? ' It will be created again by the next sync if it is still in the directory.' : ''), 'button') ?>
+    <?= $action('delete', 'Delete user', 'Delete ' . $user['user'] . ' permanently?' . ($user['synchronized'] ? ' It will be created again by the next sync if it is still in the directory.' : ''), 'button-danger') ?>
   </div>
 </section>
 <?php endif; ?>

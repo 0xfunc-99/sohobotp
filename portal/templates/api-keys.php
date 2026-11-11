@@ -25,12 +25,12 @@
             <td class="row-actions">
               <form method="post" action="<?= e(route('api-keys')) ?>" class="inline" data-confirm="Revoke the API key <?= e($k['name']) ?>? Programs using it stop working at once.">
                 <?= csrf_field() ?><input type="hidden" name="op" value="revoke"><input type="hidden" name="id" value="<?= e($k['id']) ?>">
-                <button type="submit" class="button-small">Revoke</button>
+                <button type="submit" class="button-small button-danger">Revoke</button>
               </form>
             </td>
           </tr>
         <?php endforeach; ?>
-        <?php if ([] === $keys): ?><tr><td colspan="7" class="muted">No API keys yet.</td></tr><?php endif; ?>
+        <?php if ([] === $keys): ?><tr><td colspan="7" class="empty">No API keys yet. Create one below for each program that uses the API.</td></tr><?php endif; ?>
       </tbody>
     </table>
   </div>

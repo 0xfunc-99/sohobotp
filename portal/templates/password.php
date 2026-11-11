@@ -2,7 +2,8 @@
 <?php if ($forced): ?>
   <div class="alert alert-info" role="status">You signed in with a temporary password. Choose your own password to continue.</div>
 <?php endif; ?>
-<form method="post" action="<?= e(route('password')) ?>" class="form narrow">
+<section class="panel panel-narrow">
+<form method="post" action="<?= e(route('password')) ?>" class="form">
   <?= csrf_field() ?>
   <label>Current password
     <input type="password" name="current_password" autocomplete="current-password" required>
@@ -16,3 +17,4 @@
   </label>
   <button type="submit" class="button-primary">Change password</button>
 </form>
+</section>

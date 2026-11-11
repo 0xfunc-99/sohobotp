@@ -5,7 +5,7 @@
   <div class="card"><span class="card-label">Endpoints</span><span class="card-value"><?= (int) $total ?></span></div>
   <div class="card"><span class="card-label">Online</span><span class="card-value"><?= (int) $counts['online'] ?></span></div>
   <div class="card<?= $counts['offline'] > 0 ? ' card-warning' : '' ?>"><span class="card-label">Offline</span><span class="card-value"><?= (int) $counts['offline'] ?></span></div>
-  <div class="card<?= $counts['pending'] > 0 ? ' card-warning' : '' ?>"><a class="card-label" href="<?= e(route('endpoints', ['health' => 'pending'])) ?>">Waiting for approval</a><span class="card-value"><?= (int) $counts['pending'] ?></span></div>
+  <a class="card card-link<?= $counts['pending'] > 0 ? ' card-warning' : '' ?>" href="<?= e(route('endpoints', ['health' => 'pending'])) ?>"><span class="card-label">Waiting for approval</span><span class="card-value"><?= (int) $counts['pending'] ?></span></a>
   <div class="card<?= $counts['attention'] > 0 ? ' card-warning' : '' ?>"><span class="card-label">Need attention</span><span class="card-value"><?= (int) $counts['attention'] ?></span></div>
 </section>
 
@@ -14,7 +14,7 @@
     <h2>Endpoints</h2>
     <input type="search" class="search" placeholder="Search endpoints" data-filter-table="endpoints-table" aria-label="Search endpoints">
     <a class="button" href="<?= e(route('endpoint-groups')) ?>">Endpoint groups</a>
-    <?php if ($canManage): ?><a class="button" href="<?= e(route('endpoint-enrol')) ?>">Enrol endpoints</a><?php endif; ?>
+    <?php if ($canManage): ?><a class="button-primary" href="<?= e(route('endpoint-enrol')) ?>">+ Enrol endpoints</a><?php endif; ?>
   </div>
   <form method="get" action="index.php" class="filters">
     <input type="hidden" name="r" value="endpoints">
@@ -50,7 +50,7 @@
             <td><?= e($inv['agent_version']) ?></td>
           </tr>
         <?php endforeach; ?>
-        <?php if ([] === $rows): ?><tr><td colspan="7" class="muted"><?= 0 === $total ? 'No endpoints yet. Create an enrolment token and install the agent on a machine.' : 'No endpoint matches the filter.' ?></td></tr><?php endif; ?>
+        <?php if ([] === $rows): ?><tr><td colspan="7" class="empty"><?= 0 === $total ? 'No endpoints yet. Create an enrolment token and install the agent on a machine.' : 'No endpoint matches the filter.' ?></td></tr><?php endif; ?>
       </tbody>
     </table>
   </div>

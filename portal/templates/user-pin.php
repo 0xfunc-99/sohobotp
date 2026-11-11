@@ -4,4 +4,4 @@
   (for example <code><?= e($pin) ?>123456</code>). Give it over a trusted channel.
 </div>
 <p class="secret"><code><?= e($pin) ?></code></p>
-<p><a class="button" href="<?= e(route('user', ['u' => $name])) ?>">Done</a></p>
+<div class="actions"><a class="button-primary" href="<?= e(route('user', ['u' => $name])) ?>">Done</a></div>

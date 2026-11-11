@@ -8,4 +8,4 @@
 <?php endif; ?>
 <p class="hint">Manual entry key (time-based, 6 digits, 30 seconds):</p>
 <p class="secret"><code><?= e($secret) ?></code></p>
-<p><a class="button" href="<?= e(route('user', ['u' => $name])) ?>">Done</a></p>
+<div class="actions"><a class="button-primary" href="<?= e(route('user', ['u' => $name])) ?>">Done</a></div>

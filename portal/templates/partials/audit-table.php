@@ -17,7 +17,7 @@
         </tr>
       <?php endforeach; ?>
       <?php if ([] === $entries): ?>
-        <tr><td colspan="7" class="muted">No entries.</td></tr>
+        <tr><td colspan="7" class="empty">No entries match.</td></tr>
       <?php endif; ?>
     </tbody>
   </table>

@@ -1,9 +1,9 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
 <section class="panel">
   <div class="toolbar">
     <h2>Endpoint groups</h2>
-    <?php if ($canManage): ?><a class="button" href="<?= e(route('endpoint-group')) ?>">New group</a><?php endif; ?>
+    <?php if ($canManage): ?><a class="button-primary" href="<?= e(route('endpoint-group')) ?>">+ New group</a><?php endif; ?>
   </div>
   <p class="hint">A group sets the policy for every endpoint in it: which Linux logins and Windows sign-ins need a code, exclusions, offline cache.</p>
   <div class="table-wrap">
@@ -21,7 +21,7 @@
                 <a class="button-small" href="<?= e(route('endpoint-group', ['id' => $g['id']])) ?>">Edit</a>
                 <?php if (0 === (int) $g['endpoints']): ?>
                   <form method="post" action="<?= e(route('endpoint-group-delete')) ?>" class="inline" data-confirm="Delete group <?= e($g['name']) ?>?">
-                    <?= csrf_field() ?><input type="hidden" name="id" value="<?= e($g['id']) ?>"><button type="submit" class="button-small">Delete</button>
+                    <?= csrf_field() ?><input type="hidden" name="id" value="<?= e($g['id']) ?>"><button type="submit" class="button-small button-danger">Delete</button>
                   </form>
                 <?php endif; ?>
               </td>
@@ -43,7 +43,7 @@
   </div>
   <p class="hint">Rules put each machine in a group from its computer account: the first matching rule wins. They are re-checked every 15 minutes and when a machine enrols, so moving a computer to another OU or group changes its policy. Machines an administrator moved by hand are left alone.</p>
   <?php if (!$adReady): ?>
-    <p class="muted">Configure Active Directory on the <a href="<?= e(route('directory')) ?>">Directory</a> page first (the service account reads computer accounts).</p>
+    <div class="alert alert-info" role="status">Configure Active Directory on the <a href="<?= e(route('directory')) ?>">Directory</a> page first (the service account reads computer accounts).</div>
   <?php endif; ?>
   <div class="table-wrap">
     <table class="table">
@@ -59,7 +59,7 @@
                 <?php foreach (['up' => '↑', 'down' => '↓'] as $op => $arrow): ?>
                   <form method="post" action="<?= e(route('endpoint-rules')) ?>" class="inline"><?= csrf_field() ?><input type="hidden" name="op" value="<?= e($op) ?>"><input type="hidden" name="id" value="<?= e($rule['id']) ?>"><button type="submit" class="button-small" aria-label="Move <?= e($op) ?>"><?= $arrow ?></button></form>
                 <?php endforeach; ?>
-                <form method="post" action="<?= e(route('endpoint-rules')) ?>" class="inline" data-confirm="Delete this rule?"><?= csrf_field() ?><input type="hidden" name="op" value="delete"><input type="hidden" name="id" value="<?= e($rule['id']) ?>"><button type="submit" class="button-small">Delete</button></form>
+                <form method="post" action="<?= e(route('endpoint-rules')) ?>" class="inline" data-confirm="Delete this rule?"><?= csrf_field() ?><input type="hidden" name="op" value="delete"><input type="hidden" name="id" value="<?= e($rule['id']) ?>"><button type="submit" class="button-small button-danger">Delete</button></form>
               </td>
             <?php endif; ?>
           </tr>

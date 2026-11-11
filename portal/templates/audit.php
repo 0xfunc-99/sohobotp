@@ -1,6 +1,6 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <?php if ($chain['ok']): ?>
-  <p class="muted">Integrity check passed: <?= (int) $chain['entries'] ?> entries, hash chain unbroken.</p>
+  <div class="alert alert-success" role="status"><strong>Integrity check passed:</strong> <?= (int) $chain['entries'] ?> entries, hash chain unbroken.</div>
 <?php else: ?>
   <div class="alert alert-error" role="alert">Integrity check FAILED at line <?= (int) $chain['broken_at'] ?> of the audit file: entries were modified or removed.</div>
 <?php endif; ?>
@@ -24,7 +24,7 @@
   <a href="<?= e(route('audit')) ?>" class="button-link">Clear</a>
 </form>
 
-<p class="muted"><?= (int) $total ?> matching entries, newest first.</p>
+<p class="table-count"><?= (int) $total ?> matching entries, newest first.</p>
 <?php require PORTAL_ROOT . '/templates/partials/audit-table.php'; ?>
 
 <?php if ($pages > 1): ?>

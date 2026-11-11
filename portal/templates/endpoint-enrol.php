@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
 <section class="panel">
   <h2>New enrolment token</h2>
   <p class="hint">The agent uses a token once to register the machine. Give it to whoever installs the agent; it is shown only once.</p>
@@ -36,7 +36,7 @@
             <td><?= $t['usable'] ? '<span class="status status-success">usable</span>' : '<span class="status status-denied">' . ($t['revoked'] ? 'revoked' : ($t['uses'] >= $t['max_uses'] ? 'used up' : 'expired')) . '</span>' ?></td>
             <td><?php if ($t['usable']): ?>
               <form method="post" action="<?= e(route('endpoint-enrol')) ?>" class="inline" data-confirm="Revoke this token?">
-                <?= csrf_field() ?><input type="hidden" name="op" value="revoke"><input type="hidden" name="id" value="<?= e($t['id']) ?>"><button type="submit" class="button-small">Revoke</button></form>
+                <?= csrf_field() ?><input type="hidden" name="op" value="revoke"><input type="hidden" name="id" value="<?= e($t['id']) ?>"><button type="submit" class="button-small button-danger">Revoke</button></form>
             <?php endif; ?></td>
           </tr>
         <?php endforeach; ?>

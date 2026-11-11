@@ -10,7 +10,7 @@
       return null === $s ? ('port' === $key ? '1812' : '') : (string) $s[$key];
   };
 ?>
-<p><a href="<?= e(route('radius')) ?>">← RADIUS servers</a> · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
+<p class="back"><a href="<?= e(route('radius')) ?>">← RADIUS servers</a> · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
 
 <section class="panel">
   <h2>How it works</h2>

@@ -3,7 +3,7 @@
 <section class="panel">
   <h2>Import tokens</h2>
   <p class="hint">PSKC (RFC 6030, plain or encrypted), multiOTP CSV, Yubico CSV, Alpine XML/DAT and Authenex SQL files, as supported by multiOTP. Maximum 5 MB.</p>
-  <form method="post" action="<?= e(route('token-import')) ?>" enctype="multipart/form-data" class="toolbar">
+  <form method="post" action="<?= e(route('token-import')) ?>" enctype="multipart/form-data" class="toolbar subform">
     <?= csrf_field() ?>
     <label>Token file <input type="file" name="token_file" required></label>
     <label>File password (encrypted PSKC only) <input type="password" name="password" autocomplete="off"></label>
@@ -31,13 +31,13 @@
             <td><?php if ([] === $t['users']): ?>
               <form method="post" action="<?= e(route('token-action')) ?>" class="inline" data-confirm="Delete token <?= e($t['serial']) ?>?">
                 <?= csrf_field() ?><input type="hidden" name="op" value="delete"><input type="hidden" name="serial" value="<?= e($t['serial']) ?>">
-                <button type="submit" class="button-small">Delete</button>
+                <button type="submit" class="button-small button-danger">Delete</button>
               </form>
             <?php endif; ?></td>
           <?php endif; ?>
         </tr>
       <?php endforeach; ?>
-      <?php if ([] === $tokens): ?><tr><td colspan="7" class="muted">No hardware tokens yet.</td></tr><?php endif; ?>
+      <?php if ([] === $tokens): ?><tr><td colspan="7" class="empty">No hardware tokens yet.<?= $canManage ? ' Import a token file above to add some.' : '' ?></td></tr><?php endif; ?>
     </tbody>
   </table>
 </div>

@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<form method="get" action="index.php" class="toolbar">
+<form method="get" action="index.php" class="toolbar" role="search">
   <input type="hidden" name="r" value="users">
   <input type="search" name="q" value="<?= e($q) ?>" class="search" placeholder="Search name, email, group, token" aria-label="Search users">
   <select name="status" aria-label="Status">
@@ -8,17 +8,18 @@
     <?php endforeach; ?>
   </select>
   <button type="submit" class="button">Search</button>
-  <?php if ($canCreate): ?><a class="button-primary" href="<?= e(route('user-new')) ?>">New user</a><?php endif; ?>
+  <?php if ('' !== $q || '' !== $status): ?><a class="button-link" href="<?= e(route('users')) ?>">Clear</a><?php endif; ?>
+  <?php if ($canCreate): ?><a class="button-primary toolbar-end" href="<?= e(route('user-new')) ?>">+ New user</a><?php endif; ?>
 </form>
 
-<p class="muted"><?= (int) $total ?> user(s)<?= '' !== $q || '' !== $status ? ' matching' : '' ?>.</p>
+<p class="table-count"><?= (int) $total ?> user(s)<?= '' !== $q || '' !== $status ? ' matching' : '' ?>.</p>
 
 <form method="post" action="<?= e(route('user-bulk')) ?>" data-confirm="Apply this action to the selected users?">
   <?= csrf_field() ?>
   <input type="hidden" name="q" value="<?= e($q) ?>">
   <input type="hidden" name="status" value="<?= e($status) ?>">
   <?php if ([] !== $bulk): ?>
-    <div class="toolbar">
+    <div class="toolbar bulk-bar">
       <select name="op" aria-label="Action for selected users">
         <option value="">With selected…</option>
         <?php foreach ($bulk as $op): ?><option value="<?= e($op) ?>"><?= e(Portal\UsersController::BULK_LABELS[$op] ?? ucfirst($op)) ?></option><?php endforeach; ?>
@@ -51,7 +52,7 @@
           </tr>
         <?php endforeach; ?>
         <?php if ([] === $users): ?>
-          <tr><td colspan="8" class="muted">No users.</td></tr>
+          <tr><td colspan="8" class="empty"><?= '' !== $q || '' !== $status ? 'No user matches this search.' : 'No users yet. Create one, or connect a directory to sync them.' ?></td></tr>
         <?php endif; ?>
       </tbody>
     </table>

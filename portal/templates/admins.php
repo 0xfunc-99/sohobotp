@@ -1,7 +1,7 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <div class="toolbar">
   <input type="search" class="search" placeholder="Search administrators" data-filter-table="admins-table" aria-label="Search administrators">
-  <a class="button-primary" href="<?= e(route('admin-new')) ?>">New administrator</a>
+  <a class="button-primary toolbar-end" href="<?= e(route('admin-new')) ?>">+ New administrator</a>
 </div>
 <div class="table-wrap">
   <table class="table" id="admins-table">

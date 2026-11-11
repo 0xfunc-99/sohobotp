@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p><a href="<?= e(route('radius')) ?>">← RADIUS servers</a></p>
+<p class="back"><a href="<?= e(route('radius')) ?>">← RADIUS servers</a></p>
 <form method="post" action="<?= e(route('radius-client', null === $client ? [] : ['id' => $client['id']])) ?>" class="form narrow">
   <?= csrf_field() ?>
   <label>Name <input name="name" value="<?= e($input['name']) ?>" pattern="[a-z0-9][a-z0-9\-]{0,39}" maxlength="40" required placeholder="vpn-paris">

@@ -4,4 +4,4 @@
 </div>
 <p class="secret"><code><?= e($secret) ?></code></p>
 <p>Use it as <code>Authorization: Bearer <?= e(substr($secret, 0, 19)) ?>…</code>. Permissions: <?= e(implode(', ', $key['scopes'])) ?>.</p>
-<p><a class="button" href="<?= e(route('api-keys')) ?>">Back to API keys</a></p>
+<div class="actions"><a class="button-primary" href="<?= e(route('api-keys')) ?>">Back to API keys</a></div>

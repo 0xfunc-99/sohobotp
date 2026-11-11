@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p><a href="<?= e(route('radius')) ?>">← RADIUS servers</a></p>
+<p class="back"><a href="<?= e(route('radius')) ?>">← RADIUS servers</a></p>
 
 <section class="panel">
   <h2>FreeRADIUS</h2>

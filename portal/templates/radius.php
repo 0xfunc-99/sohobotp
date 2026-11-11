@@ -10,18 +10,20 @@
     <?php endif; ?>
   </div>
 <?php endif; ?>
-<?php if (null !== $state['last_apply']): ?>
-  <p class="muted">Last apply: <?= e(format_time($state['last_apply']['at'])) ?> —
+<div class="statusbar">
+  <?php if (null !== $state['last_apply']): ?>
+    <span class="muted">Last apply: <?= e(format_time($state['last_apply']['at'])) ?></span>
     <span class="status status-<?= 'applied' === $state['last_apply']['status'] ? 'success' : 'failure' ?>"><?= e($state['last_apply']['status']) ?></span>
-    · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
-<?php else: ?>
-  <p class="muted"><a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
-<?php endif; ?>
+  <?php else: ?>
+    <span class="muted">The configuration has not been applied from the portal yet.</span>
+  <?php endif; ?>
+  <a class="button toolbar-end" href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a>
+</div>
 
 <section class="panel">
   <div class="toolbar">
     <h2>Server groups</h2>
-    <?php if ($canManage): ?><a class="button" href="<?= e(route('radius-group')) ?>">New group</a><?php endif; ?>
+    <?php if ($canManage): ?><a class="button-primary" href="<?= e(route('radius-group')) ?>">+ New group</a><?php endif; ?>
   </div>
   <p class="hint">A group sets the login policy for every server in it (for example VPN, firewalls, Wi-Fi).</p>
   <div class="table-wrap">
@@ -46,14 +48,14 @@
                 <a class="button-small" href="<?= e(route('radius-client', ['group' => $g['id']])) ?>">Add server</a>
                 <?php if (0 === (int) $g['clients']): ?>
                   <form method="post" action="<?= e(route('radius-group-delete')) ?>" class="inline" data-confirm="Delete group <?= e($g['name']) ?>?">
-                    <?= csrf_field() ?><input type="hidden" name="id" value="<?= e($g['id']) ?>"><button type="submit" class="button-small">Delete</button>
+                    <?= csrf_field() ?><input type="hidden" name="id" value="<?= e($g['id']) ?>"><button type="submit" class="button-small button-danger">Delete</button>
                   </form>
                 <?php endif; ?>
               </td>
             <?php endif; ?>
           </tr>
         <?php endforeach; ?>
-        <?php if ([] === $groups): ?><tr><td colspan="4" class="muted">No server groups yet.</td></tr><?php endif; ?>
+        <?php if ([] === $groups): ?><tr><td colspan="4" class="empty">No server groups yet. Create a group first: it sets the login policy for the servers you add to it.</td></tr><?php endif; ?>
       </tbody>
     </table>
   </div>
@@ -79,7 +81,7 @@
   <div class="toolbar">
     <h2>Servers (RADIUS clients)</h2>
     <input type="search" class="search" placeholder="Search servers" data-filter-table="clients-table" aria-label="Search servers">
-    <?php if ($canManage && [] !== $groups): ?><a class="button" href="<?= e(route('radius-client')) ?>">Add server</a><?php endif; ?>
+    <?php if ($canManage && [] !== $groups): ?><a class="button-primary" href="<?= e(route('radius-client')) ?>">+ Add server</a><?php endif; ?>
   </div>
   <div class="table-wrap">
     <table class="table" id="clients-table">
@@ -101,13 +103,13 @@
                 </form>
                 <form method="post" action="<?= e(route('radius-client-action')) ?>" class="inline" data-confirm="Delete server <?= e($c['name']) ?>?">
                   <?= csrf_field() ?><input type="hidden" name="id" value="<?= e($c['id']) ?>"><input type="hidden" name="op" value="delete">
-                  <button type="submit" class="button-small">Delete</button>
+                  <button type="submit" class="button-small button-danger">Delete</button>
                 </form>
               </td>
             <?php endif; ?>
           </tr>
         <?php endforeach; ?>
-        <?php if ([] === $clients): ?><tr><td colspan="6" class="muted">No servers yet.</td></tr><?php endif; ?>
+        <?php if ([] === $clients): ?><tr><td colspan="6" class="empty">No servers yet. Add the VPNs, firewalls and other devices that send RADIUS requests.</td></tr><?php endif; ?>
       </tbody>
     </table>
   </div>

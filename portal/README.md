@@ -24,7 +24,7 @@ in those folders also refuses to run on its own.
 
 Deferred: push notifications (need a phone app and a push service; revisit after stage 8).
 
-Product name: **SohobOTP** (company identity: Sohobcom logo and colours, see Files and settings); page layouts are interim until the mockup arrives.
+Product name: **SohobOTP** (company identity: Sohobcom logo and colours, see Files and settings). Look and feel: see **Design system** under Files and settings.
 
 ## First administrator
 
@@ -383,7 +383,18 @@ Environment variables (all optional): `MULTIOTP_PORTAL_DATA`, `MULTIOTP_ETC_DIR`
 The product is called **SohobOTP**: `MULTIOTP_PORTAL_BRAND` sets the product name in the header
 and page titles (default `SohobOTP`), `MULTIOTP_PORTAL_COMPANY` the logo's text alternative
 (default `Sohobcom`); the authenticator-app issuer defaults to the product name unless
-`MULTIOTP_PORTAL_ISSUER` is set. The endpoint agent is the SohobOTP agent (`sohobotp-agent`). A "Powered by multiOTP open source" credit stays in the footer.
+`MULTIOTP_PORTAL_ISSUER` is set. The endpoint agent is the SohobOTP agent (`sohobotp-agent`). The footer shows the company and a link to the Licences page (open-source notices).
+
+**Design system.** `assets/portal.css` holds every style: colour tokens built from the brand
+colours (light and dark, following the system or the theme switch in the top bar, remembered per
+browser), typography, spacing, buttons (`button-primary`, `button`, `button-small`, `button-danger`,
+`button-link`), forms, tables, status pills (`status-success|failure|denied|info`), alerts, cards,
+panels and empty states. Text and controls meet WCAG AA contrast; focus is always visible. The
+layout is a sidebar grouped by Identity / Access / System (a drawer on phones). Icons are inline
+SVG in `templates/partials/icons.php`. Everything is self-hosted (no web fonts or CDNs) and works
+with the strict CSP: no inline scripts or `style=` attributes. `assets/portal.js` only adds
+enhancements (theme switch, confirmations, copy buttons, table filters, job progress); every page
+works without JavaScript.
 
 ## Changes to the legacy code in this stage
 

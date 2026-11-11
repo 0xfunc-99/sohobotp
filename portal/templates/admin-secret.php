@@ -7,4 +7,4 @@
 <?php if (null === $subject['mfa_mode']): ?>
   <p class="hint">At sign-in, <?= e($subject['username']) ?> will set up an authenticator app before getting access.</p>
 <?php endif; ?>
-<p><a class="button" href="<?= e(null === $me ? route('login') : route('admins')) ?>"><?= null === $me ? 'Go to sign-in' : 'Back to administrators' ?></a></p>
+<div class="actions"><a class="button-primary" href="<?= e(null === $me ? route('login') : route('admins')) ?>"><?= null === $me ? 'Go to sign-in' : 'Back to administrators' ?></a></div>

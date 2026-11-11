@@ -1,7 +1,7 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <?php $inv = $endpoint['inventory']; $healthLabel = ['online' => 'Online', 'offline' => 'Offline', 'never' => 'Never checked in', 'pending' => 'Waiting for approval', 'disabled' => 'Disabled']; ?>
 <?php $ad = $endpoint['directory'] ?? null; $assigned = $endpoint['assigned_by'] ?? 'token'; ?>
-<p><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
 <?php if (null !== $endpoint['attention']): ?>
   <div class="alert alert-error" role="alert"><?= e($endpoint['attention']) ?></div>
 <?php endif; ?>
@@ -71,7 +71,7 @@
           <?= csrf_field() ?><input type="hidden" name="op" value="enable"><button type="submit" class="button-small">Enable</button></form>
       <?php endif; ?>
       <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>" class="inline" data-confirm="Delete this endpoint? Its RADIUS client is removed too. The machine keeps its last configuration until the agent is uninstalled.">
-        <?= csrf_field() ?><input type="hidden" name="op" value="delete"><button type="submit" class="button-small">Delete</button></form>
+        <?= csrf_field() ?><input type="hidden" name="op" value="delete"><button type="submit" class="button-small button-danger">Delete</button></form>
     </div>
   <?php endif; ?>
 </section>

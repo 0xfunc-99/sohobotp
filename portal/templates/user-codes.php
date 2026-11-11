@@ -7,4 +7,4 @@
   <?php foreach ($codes as $code): ?><li><code><?= e(substr($code, 0, 4) . ' ' . substr($code, 4)) ?></code></li><?php endforeach; ?>
 </ol>
 <p class="hint">Type the code without the space.</p>
-<p><a class="button" href="<?= e(route('user', ['u' => $name])) ?>">Done</a></p>
+<div class="actions"><a class="button-primary" href="<?= e(route('user', ['u' => $name])) ?>">Done</a></div>

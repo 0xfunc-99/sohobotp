@@ -14,7 +14,7 @@
     }
     return $html . '</select>';
 }; ?>
-<p><a href="<?= e(route('endpoint-groups')) ?>">← Endpoint groups</a></p>
+<p class="back"><a href="<?= e(route('endpoint-groups')) ?>">← Endpoint groups</a></p>
 <form method="post" action="<?= e(route('endpoint-group', null === $group ? [] : ['id' => $group['id']])) ?>" class="form narrow">
   <?= csrf_field() ?>
   <label>Name <input name="name" value="<?= e($input['name']) ?>" required maxlength="64" placeholder="Office laptops"></label>

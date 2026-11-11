@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p><a href="<?= e(route('directory')) ?>">← Directory</a></p>
+<p class="back"><a href="<?= e(route('directory')) ?>">← Directory</a></p>
 <div class="table-wrap">
   <table class="table">
     <thead><tr><th>Job</th><th>Requested</th><th>By</th><th>Status</th><th>Duration</th><th>Result</th></tr></thead>
@@ -21,7 +21,7 @@
           </td>
         </tr>
       <?php endforeach; ?>
-      <?php if ([] === $jobs): ?><tr><td colspan="6" class="muted">No jobs yet.</td></tr><?php endif; ?>
+      <?php if ([] === $jobs): ?><tr><td colspan="6" class="empty">No jobs yet. Syncs and previews you start appear here.</td></tr><?php endif; ?>
     </tbody>
   </table>
 </div>

@@ -36,7 +36,7 @@
       <form method="post" action="<?= e(route('directory-test')) ?>" class="inline"><?= csrf_field() ?>
         <button type="submit" class="button">Test connection</button></form>
     <?php endif; ?>
-    <?php if ($perm['jobs']): ?><a href="<?= e(route('jobs')) ?>">History</a><?php endif; ?>
+    <?php if ($perm['jobs']): ?><a class="button-link toolbar-end" href="<?= e(route('jobs')) ?>">Sync history</a><?php endif; ?>
   </div>
   <?php if (null !== $test): ?>
     <div class="alert alert-<?= $test['ok'] ? 'success' : 'error' ?>" role="status"><?= e($test['message']) ?></div>
@@ -46,7 +46,7 @@
 
 <form method="post" action="<?= e(route('directory-save')) ?>" class="form settings-form">
   <?= csrf_field() ?>
-  <?php if (!$perm['manage']): ?><p class="muted">Read only: your role cannot change directory settings.</p><?php endif; ?>
+  <?php if (!$perm['manage']): ?><div class="alert alert-info" role="status">Read only: your role cannot change directory settings.</div><?php endif; ?>
 
   <fieldset>
     <legend>Connection</legend>
