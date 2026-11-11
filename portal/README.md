@@ -18,7 +18,7 @@ in those folders also refuses to run on its own.
 | 3 | FreeRADIUS clients and **server groups**, shared secrets, validation, reloads, diagnostics; per-user login format | **done** (tested against real FreeRADIUS) |
 | 4 | Windows and Linux **endpoint agent** (Go): enrolment, pushed configuration, inventory and health, self-update, **endpoint groups**; see [docs/endpoints.md](docs/endpoints.md) | **done** (agent in `agent/`: Debian and Rocky tested end to end, signed self-update with self-test and roll back, MSI for Group Policy with upgrades; Windows tested automatically on Windows Server 2022, sign-in screen by hand) |
 | 5 | REST API for automation and authentication (API keys, scopes, rate limits, audit) | **done** (see REST API below) |
-| 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | |
+| 6 | MariaDB backend for 100,000 users (paged queries, load test) and **master-slave HA** with MariaDB replication | **done** (see Database and high availability) |
 | 7 | Raspberry Pi / virtual appliance image with the portal and worker | |
 | 8 | Integration testing on test systems (real AD, RADIUS clients, Credential Provider) | |
 
@@ -283,6 +283,40 @@ nginx: the API has its own location (before the rules that refuse legacy paths s
 `/users`), with PATH_INFO and the Authorization header passed to PHP. Tests: `tests/e2e.php`
 (29 API checks: permissions, networks, rate limit, key guessing, revoke, audit),
 `tests/appliance-api.php` (through nginx and PHP-FPM).
+
+## Database and high availability (stage 6)
+
+**Database** page (super administrators): multiOTP keeps users, tokens, RADIUS devices and
+groups in files (default) or in MariaDB / MySQL, on the appliance (MariaDB is in the image;
+the root helper `bin/sohobotp-db local-enable` creates the database `sohobotp` and a local
+user with a random password, and MariaDB then starts at boot) or on another server
+(connection test, optional TLS). Moving runs in the worker (`database.migrate`) with the
+engine's "migration from file" mode, checks the counts, keeps the files as a backup and goes
+back to files on any failure. With MariaDB the users list is one SQL query per page. Load
+test (`tests/appliance-db.php`, 100,000 users): users page 0.10 s, search 0.35 s, one user
+< 0.01 s, RADIUS logins 0.08-0.21 s. Administrators, endpoints and portal settings stay in
+the portal's own files.
+
+**High availability** page: two appliances with MariaDB replication.
+- Primary (data in MariaDB on the appliance): *Create the pairing code* with its own address,
+  the secondary's address and its portal URL. The helper (`ha-primary`) turns on the binary
+  log, opens MariaDB to the secondary's address only, creates the replication and
+  application users (TLS required) and a certificate for the database (its address); the
+  code (shown once) carries the passwords, the pairing key and that certificate.
+- Secondary (a fresh appliance): *Join* with the code (`ha-replica`): local MariaDB, a
+  verified TLS copy from the primary, then replication (GTID, TLS, the primary's certificate
+  pinned), read-only. Its engine uses the PRIMARY's database while the primary is up (TLS,
+  pinned: engine setting `sql_ca_file`, all engine copies), because every login writes.
+  Every minute it copies the primary's RADIUS configuration (clients, Symantec VIP servers,
+  routing file) from `portal/ha.php`: HMAC-authenticated request from the secondary's
+  address only, answer encrypted with the pairing key (secretbox), applied by the RADIUS
+  helper. RADIUS changes are made on the primary (the secondary refuses its own apply).
+- Primary down: *Promote to primary now* on the secondary (or automatically after N
+  minutes without the primary's database; off by default because a network split would
+  make both primaries): replication stopped, writable, the engine on its own database.
+- Point VPNs and other RADIUS devices to both appliances; allow TCP 3306 and 443 between
+  them. Test: `tests/run-ha-test.sh` (two appliances: join, replication of a new user, login
+  through the secondary, primary stopped, promotion, login and replay protection after).
 
 ## Background worker
 

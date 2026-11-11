@@ -49,15 +49,27 @@ function log_line(string $text): void
     fwrite(STDOUT, gmdate('Y-m-d H:i:s') . " $text\n");
 }
 
+/** Log a step of the loop that took more than 5 seconds (it delays every queued job). */
+function timed(string $step, callable $fn): mixed
+{
+    $started = microtime(true);
+    $result = $fn();
+    $took = microtime(true) - $started;
+    if ($took > 5) {
+        log_line(sprintf('slow: %s took %.0f s', $step, $took));
+    }
+    return $result;
+}
+
 /** Run every queued job, plus the scheduled sync when it is due. */
 function tick(): void
 {
     $directory = new Directory();
-    $stale = Jobs::recoverStale();
+    $stale = timed('recovering interrupted jobs', static fn (): int => Jobs::recoverStale());
     if ($stale > 0) {
         log_line("marked $stale interrupted job(s) as failed");
     }
-    if ($directory->isScheduleDue(time())) {
+    if (timed('directory schedule check', static fn (): bool => $directory->isScheduleDue(time()))) {
         $job = Jobs::enqueue('directory.sync', [], 'scheduler');
         $directory->updateState(static function (array &$state): void {
             $state['last_scheduled_at'] = time();
@@ -65,15 +77,18 @@ function tick(): void
         log_line('scheduled directory sync ' . (empty($job['already_active']) ? 'queued' : 'skipped (one is already active)'));
     }
     $endpoints = new Portal\Endpoints();
-    if ($endpoints->isDirectoryCheckDue(time())) {
+    if (timed('endpoint AD check due', static fn (): bool => $endpoints->isDirectoryCheckDue(time()))) {
         $job = Jobs::enqueue('endpoints.directory', [], 'scheduler');
         log_line('scheduled endpoint AD check ' . (empty($job['already_active']) ? 'queued' : 'skipped (one is already active)'));
     }
     // user groups change with directory syncs and edits: keep the RADIUS restriction data fresh
-    if ((new Portal\VipMigration())->refreshIfStale(300)) {
+    if (timed('RADIUS routing refresh', static fn (): bool => (new Portal\VipMigration())->refreshIfStale(300))) {
         log_line('RADIUS routing file refreshed (user group restrictions)');
     }
-    while (null !== ($job = Jobs::claimNext())) {
+    timed('high availability', static function (): void {
+        (new Portal\Ha())->tick(static fn (string $line) => log_line($line));
+    });
+    while (null !== ($job = timed('claiming the next job', static fn (): ?array => Jobs::claimNext()))) {
         log_line("running {$job['type']} {$job['id']} for {$job['requested_by']}");
         run_job($job, $directory);
         MultiotpService::reset();
@@ -127,6 +142,18 @@ function run_job(array $job, Directory $directory): void
                 Jobs::finish($job['id'], $result['ok'] ? 'succeeded' : 'failed', ['log' => explode("\n", $result['output'])], $error);
                 $audit->record('radius.apply', $result['ok'] ? 'success' : 'failure', '', ['job' => $job['id']]);
                 log_line("radius apply {$job['id']} " . ($result['ok'] ? 'applied' : 'failed'));
+                break;
+
+            case 'database.migrate':
+                $connection = json_decode(Portal\Crypto::decrypt((string) ($job['params']['connection'] ?? '')), true);
+                if (!is_array($connection)) {
+                    Jobs::finish($job['id'], 'failed', null, 'The connection details of this job cannot be read.');
+                    break;
+                }
+                $result = Portal\Database::migrate($connection, static fn (string $step) => Jobs::progress($job['id'], $step));
+                Jobs::finish($job['id'], $result['ok'] ? 'succeeded' : 'failed', ['before' => $result['before'], 'after' => $result['after']], $result['error']);
+                $audit->record('database.migrate', $result['ok'] ? 'success' : 'failure', $connection['host'] ?? '', ['before' => $result['before'], 'after' => $result['after'], 'job' => $job['id']]);
+                log_line("database migrate {$job['id']} " . ($result['ok'] ? 'done ' . json_encode($result['after']) : 'failed: ' . $result['error']));
                 break;
 
             case 'radius.vip_seed':

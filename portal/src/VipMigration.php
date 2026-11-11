@@ -147,6 +147,9 @@ final class VipMigration
      */
     public function export(): array
     {
+        if (Ha::isSecondary()) { // the routing file comes from the primary (Ha::sync)
+            return ['enabled' => false, 'clients' => 0, 'sohobotp' => 0, 'restricted' => 0, 'file' => self::routeFile(), 'written' => false];
+        }
         $radius = new Radius();
         $clients = $radius->vipActive() ? $radius->forwardingClients() : [];
         $sohobotp = [];

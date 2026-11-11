@@ -932,6 +932,14 @@ if [ -e /usr/local/bin/multiotp/portal/bin/multiotp-portal-radius ] ; then
   mkdir -p /etc/multiotp/portal/radius
   chown -R www-data:www-data /etc/multiotp/portal
 fi
+# SohobOTP database helper (MariaDB on this appliance): root-owned copy run through sudo
+if [ -e /usr/local/bin/multiotp/portal/bin/sohobotp-db ] ; then
+  install -o root -g root -m 0755 /usr/local/bin/multiotp/portal/bin/sohobotp-db /usr/local/sbin/sohobotp-db
+fi
+# MariaDB is installed in the image but only started once SohobOTP uses it (newvm.sh)
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 ; then
+  systemctl disable mariadb >/dev/null 2>&1 || true
+fi
 # SohobOTP Symantec VIP migration: routing program run by FreeRADIUS (root-owned copy), and
 # the folder where the portal writes the routing file (read by FreeRADIUS through its group)
 if [ -e /usr/local/bin/multiotp/portal/bin/sohobotp-vip-route ] ; then

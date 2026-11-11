@@ -934,7 +934,7 @@ $postRoutes = [
     'radius-diagnostics' => ['op' => 'disable-default-client'], 'radius-vip' => ['op' => 'save', 'address_1' => '192.0.2.99', 'secret_1' => 'Evil-Secret-12345'],
     'endpoint&id=' . $linux->id => ['op' => 'delete'], 'endpoint-group' => ['name' => 'Evil'], 'endpoint-group-delete' => ['id' => $endpointGroupId],
     'endpoint-rules' => ['op' => 'check'], 'endpoint-enrol' => ['op' => 'create', 'group_id' => $endpointGroupId],
-    'api-keys' => ['op' => 'create', 'name' => 'evil', 'scopes' => ['users.write']], 'admin-new' => ['username' => 'evil', 'role' => 'superadmin'], 'admin-edit' => [], 'admin-action' => ['op' => 'delete'],
+    'api-keys' => ['op' => 'create', 'name' => 'evil', 'scopes' => ['users.write']], 'ha' => ['op' => 'promote'], 'database' => ['op' => 'local'], 'admin-new' => ['username' => 'evil', 'role' => 'superadmin'], 'admin-edit' => [], 'admin-action' => ['op' => 'delete'],
 ];
 $deniedBefore = substr_count((string) file_get_contents(Portal\Config::auditFile()), '"action":"access.denied"');
 foreach ($postRoutes as $route => $fields) {
@@ -1129,6 +1129,32 @@ $help->get('/portal/index.php?r=api-keys');
 check('helpdesk cannot open API keys', 403 === $help->status);
 $auditText = (string) file_get_contents(Portal\Config::auditFile());
 check('audit: API keys created and revoked, never the key', str_contains($auditText, '"action":"api_key.create"') && str_contains($auditText, '"action":"api_key.revoke"') && !str_contains($auditText, substr($apiKey, 19)));
+
+// ---------------------------------------------------------------- Database page (MariaDB itself: appliance-db.php)
+$admin->get('/portal/index.php?r=database');
+check('Database page: files now, MariaDB offered', 200 === $admin->status && str_contains($admin->body, 'Files on this appliance') && str_contains($admin->body, 'Use MariaDB on this appliance'));
+$admin->post('/portal/index.php?r=database', ['op' => 'test', 'host' => '127.0.0.1', 'port' => '1', 'database' => 'sohobotp', 'user' => 'sohobotp', 'password' => 'Wrong-Password-123']);
+check('Database: connection test reports an unreachable server, no move', 200 === $admin->status && str_contains($admin->body, 'Cannot connect') && 'files' === Portal\Database::current()['backend'], strip_tags(substr($admin->body, 0, 0)));
+$admin->get('/portal/index.php?r=database');
+$admin->post('/portal/index.php?r=database', ['op' => 'test', 'host' => 'bad host;', 'database' => 'x', 'user' => 'x', 'password' => 'x']);
+check('Database: invalid server name refused', str_contains($admin->body, 'IP address or a host name'));
+$help->get('/portal/index.php?r=database');
+check('helpdesk cannot open the Database page', 403 === $help->status);
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('audit: database test recorded, never the password', str_contains($auditText, '"action":"database.test"') && !str_contains($auditText, 'Wrong-Password-123'));
+
+// ---------------------------------------------------------------- High availability page (two appliances: run-ha-test.sh)
+$admin->get('/portal/index.php?r=ha');
+check('High availability page: not paired, MariaDB needed first', 200 === $admin->status && str_contains($admin->body, 'Not paired') && str_contains($admin->body, 'First move the data to MariaDB'));
+$admin->post('/portal/index.php?r=ha', ['op' => 'join', 'code' => 'SOHOBOTP-HA-bm90IGEgY29kZQ']);
+check('High availability: an invalid pairing code is refused', str_contains($admin->body, 'not a valid pairing code') && 'none' === (new Portal\Ha())->state()['role']);
+$admin->get('/portal/index.php?r=ha');
+$admin->post('/portal/index.php?r=ha', ['op' => 'pair', 'primary_ip' => '192.0.2.10', 'secondary_ip' => '192.0.2.11', 'portal_url' => 'https://192.0.2.10']);
+check('High availability: pairing refused while the data is on files', str_contains($admin->body, 'First move the data to MariaDB'));
+$haProbe = (new Browser($base))->raw('GET', '/portal/ha.php', null, ['X-HA-Time' => (string) time(), 'X-HA-Signature' => str_repeat('0', 64)]);
+check('ha.php refuses requests without the pairing key', 403 === $haProbe->status);
+$help->get('/portal/index.php?r=ha');
+check('helpdesk cannot open High availability', 403 === $help->status);
 
 $admin->get('/portal/index.php?r=dashboard');
 check('footer shows the company and a Licences link, not a third-party credit', str_contains($admin->body, '© Sohobcom') && str_contains($admin->body, 'r=licences') && !str_contains($admin->body, 'Powered by'));

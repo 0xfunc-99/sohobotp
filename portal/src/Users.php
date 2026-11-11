@@ -39,6 +39,12 @@ final class Users
     /** @return array{total: int, users: list<array>} */
     public function search(string $query, string $status, int $page, int $perPage): array
     {
+        if ('mysql' === $this->engine->GetBackendType() && $this->engine->GetBackendTypeValidated() && class_exists(\mysqli::class)) {
+            $found = $this->searchSql($query, $status, $page, $perPage);
+            if (null !== $found) {
+                return $found;
+            }
+        }
         $all = $this->engine->ApiGetUsersArray(['page' => 1, 'itemsPerPage' => 1000000])['users'] ?? [];
         $query = mb_strtolower(trim($query));
         $matches = array_values(array_filter($all, static function (array $u) use ($query, $status): bool {
@@ -58,6 +64,67 @@ final class Users
             };
         }));
         return ['total' => count($matches), 'users' => array_slice($matches, ($page - 1) * $perPage, $perPage)];
+    }
+
+    /**
+     * The same search in SQL (MariaDB / MySQL backend): one page and a count, so 100,000 users
+     * are not read into PHP. null: no connection (the caller falls back to the engine).
+     */
+    private function searchSql(string $query, string $status, int $page, int $perPage): ?array
+    {
+        $c = $this->engine->_config_data;
+        [$host, $port] = array_pad(explode(':', (string) ($c['sql_server'] ?? '')), 2, '3306');
+        mysqli_report(MYSQLI_REPORT_OFF);
+        $db = mysqli_init();
+        $db->options(MYSQLI_OPT_CONNECT_TIMEOUT, 5);
+        if (!@$db->real_connect($host, (string) ($c['sql_username'] ?? ''), (string) ($c['sql_password'] ?? ''), (string) ($c['sql_database'] ?? ''), (int) $port)) {
+            return null;
+        }
+        $db->set_charset('utf8mb4');
+        $table = '`' . str_replace('`', '', (string) ($c['sql_users_table'] ?? 'multiotp_users')) . '`';
+        $where = [];
+        $types = '';
+        $params = [];
+        $query = trim($query);
+        if ('' !== $query) {
+            $like = '%' . addcslashes($query, '%_\\') . '%';
+            $where[] = '(`user` LIKE ? OR `display_name` LIKE ? OR `description` LIKE ? OR `email` LIKE ? OR `group` LIKE ? OR `token_serial` LIKE ?)';
+            $types .= 'ssssss';
+            array_push($params, $like, $like, $like, $like, $like, $like);
+        }
+        $where[] = match ($status) {
+            'enabled'  => '`desactivated` = 0',
+            'disabled' => '`desactivated` = 1',
+            'locked'   => '`locked` = 1',
+            'synced'   => '`synchronized` = 1',
+            'local'    => '`synchronized` = 0',
+            default    => '1 = 1',
+        };
+        $sqlWhere = implode(' AND ', $where);
+        $count = $db->prepare("SELECT COUNT(*) FROM $table WHERE $sqlWhere");
+        $rows = $db->prepare("SELECT `user`, `display_name`, `description`, `email`, `group`, `token_serial`, `desactivated`, `locked`, `synchronized`
+            FROM $table WHERE $sqlWhere ORDER BY `user` LIMIT ? OFFSET ?");
+        if (false === $count || false === $rows) {
+            $db->close();
+            return null;
+        }
+        if ('' !== $types) {
+            $count->bind_param($types, ...$params);
+        }
+        $count->execute();
+        $total = (int) ($count->get_result()->fetch_row()[0] ?? 0);
+        $limit = $perPage;
+        $offset = max(0, ($page - 1) * $perPage);
+        $rows->bind_param($types . 'ii', ...[...$params, $limit, $offset]);
+        $rows->execute();
+        $users = [];
+        foreach ($rows->get_result()->fetch_all(MYSQLI_ASSOC) as $r) {
+            $users[] = ['user' => $r['user'], 'display_name' => (string) $r['display_name'], 'description' => (string) $r['description'],
+                'email' => (string) $r['email'], 'group' => (string) $r['group'], 'token' => (string) $r['token_serial'],
+                'enabled' => 0 === (int) $r['desactivated'], 'locked' => 1 === (int) $r['locked'], 'synchronized' => (int) $r['synchronized']];
+        }
+        $db->close();
+        return ['total' => $total, 'users' => $users];
     }
 
     public function exists(string $user): bool

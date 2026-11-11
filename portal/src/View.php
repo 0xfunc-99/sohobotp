@@ -41,6 +41,8 @@ final class View
             ['route' => 'endpoints', 'label' => 'Endpoints', 'permission' => ['endpoints.view']],
             ['route' => 'admins', 'label' => 'Administrators', 'permission' => ['admins.manage']],
             ['route' => 'api-keys', 'label' => 'API keys', 'permission' => ['api.manage']],
+            ['route' => 'database', 'label' => 'Database', 'permission' => ['database.manage']],
+            ['route' => 'ha', 'label' => 'High availability', 'permission' => ['database.manage']],
             ['route' => 'audit', 'label' => 'Audit trail', 'permission' => ['audit.view']],
             ['route' => 'account', 'label' => 'My account', 'permission' => []],
         ];

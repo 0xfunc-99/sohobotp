@@ -18,6 +18,12 @@ final class MultiotpService
         if (null !== self::$instance) {
             return self::$instance;
         }
+        return self::$instance = self::create(false);
+    }
+
+    /** A new engine instance (not shared); $initializeBackend: for a database switch (Database). */
+    public static function create(bool $initializeBackend): \Multiotp
+    {
         if (!class_exists('Multiotp', false)) {
             $cwd = getcwd();
             chdir(Config::multiotpDir());
@@ -30,7 +36,7 @@ final class MultiotpService
             }
         }
         $etc = Config::hasEtcDir() ? Config::etcDir() : '';
-        $multiotp = new \Multiotp('DefaultCliEncryptionKey', false, '', '' === $etc ? '' : $etc . '/config');
+        $multiotp = new \Multiotp('DefaultCliEncryptionKey', $initializeBackend, '', '' === $etc ? '' : $etc . '/config');
         $multiotp->SetHashSalt(_MULTIOTP_DEFAULT_HASH_SALT_);
         $multiotp->ForceNoDisplayLog();
         if ('' !== $etc) {
@@ -45,7 +51,7 @@ final class MultiotpService
             $multiotp->SetLinuxFileMode('0666');
         }
         $multiotp->ReadConfigData();
-        return self::$instance = $multiotp;
+        return $multiotp;
     }
 
     /** Used by tests to start from a fresh engine. */

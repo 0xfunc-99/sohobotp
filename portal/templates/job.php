@@ -92,6 +92,10 @@
   <?php endif; ?>
 <?php endif; ?>
 
+<?php if ('database.migrate' === $job['type'] && is_array($r) && isset($r['before'])): ?>
+  <p>Before (files): <?= e(json_encode($r['before'])) ?><?php if ([] !== $r['after']): ?> · in the database: <?= e(json_encode($r['after'])) ?><?php endif; ?>. <a href="<?= e(route('database')) ?>">Database</a></p>
+<?php endif; ?>
+
 <?php if ('radius.vip_seed' === $job['type'] && is_array($r) && isset($r['marked'])): ?>
   <p><?= (int) $r['marked'] ?> user(s) already using SohobOTP were moved to SohobOTP.
     In all, <?= (int) $r['on_sohobotp'] ?> user(s) sign in with SohobOTP; <?= (int) $r['sent_back'] ?> were sent back to Symantec VIP by hand.

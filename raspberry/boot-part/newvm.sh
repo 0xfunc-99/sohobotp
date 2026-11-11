@@ -664,6 +664,15 @@ if [[ "${TYPE}" != "DOCKER" ]]; then
 
 else
 
+  # SohobOTP: MariaDB on this appliance, when the portal keeps its data there (before FreeRADIUS)
+  if [ -e /etc/multiotp/portal/database/local-enabled ] ; then
+    if [ -e /etc/init.d/mariadb ] ; then
+      /etc/init.d/mariadb start
+    else
+      service mariadb start
+    fi
+  fi
+
   if [ -e /etc/init.d/freeradius ] ; then
     /etc/init.d/freeradius start
   else

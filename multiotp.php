@@ -967,6 +967,7 @@ class Multiotp
           'smtp_ssl'                    => "int(1) DEFAULT 0",
           'smtp_username'               => "TEXT DEFAULT ''",
           'sql_server'                  => "TEXT DEFAULT ''",
+          'sql_ca_file'                 => "TEXT DEFAULT ''",
           'sql_username'                => "TEXT DEFAULT ''",
           'sql_password'                => "TEXT DEFAULT ''",
           'sql_database'                => "TEXT DEFAULT ''",
@@ -5616,6 +5617,20 @@ class Multiotp
   }
 
 
+  // SohobOTP: CA certificate to verify the database server (TLS); empty: no TLS
+  function SetSqlCaFile(
+      $file
+  ) {
+      $this->_config_data['sql_ca_file'] = $file;
+  }
+
+
+  function GetSqlCaFile()
+  {
+      return isset($this->_config_data['sql_ca_file']) ? nullable_trim($this->_config_data['sql_ca_file']) : '';
+  }
+
+
   function GetSqlServer()
   {
       return nullable_trim($this->_config_data['sql_server']);
@@ -5792,11 +5807,24 @@ class Multiotp
                   }
 
                   try {
+                    // SohobOTP: TLS with verification of the server certificate when sql_ca_file is set
+                    $sql_ca_file = isset($this->_config_data['sql_ca_file']) ? nullable_trim($this->_config_data['sql_ca_file']) : '';
+                    if ('' != $sql_ca_file) {
+                        $this->_mysqli = mysqli_init();
+                        $this->_mysqli->options(MYSQLI_OPT_SSL_VERIFY_SERVER_CERT, true);
+                        $this->_mysqli->ssl_set(NULL, NULL, $sql_ca_file, NULL, NULL);
+                        @$this->_mysqli->real_connect($sql_server,
+                                                      $this->_config_data['sql_username'],
+                                                      $this->_config_data['sql_password'],
+                                                      $this->_config_data['sql_database'],
+                                                      $sql_port, NULL, MYSQLI_CLIENT_SSL);
+                    } else {
                     $this->_mysqli = @new mysqli($sql_server,
                                                  $this->_config_data['sql_username'],
                                                  $this->_config_data['sql_password'],
                                                  $this->_config_data['sql_database'],
                                                  $sql_port);
+                    }
                     if (0 != $this->_mysqli->connect_errno) {
                         $this->WriteLog("Error: Bad SQL authentication parameters, ".$this->_mysqli->connect_errno.', '.nullable_trim($this->_mysqli->connect_error), TRUE, FALSE, _MULTIOTP_SYSTEM_SQL_ERROR_, 'System', "", 3);
                         unset($this->_mysqli);

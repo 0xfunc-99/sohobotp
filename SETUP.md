@@ -81,12 +81,13 @@ The first build downloads the Debian packages and takes 10–20 minutes. Then st
 ```bash
 sudo docker run -d --name sohobotp --restart unless-stopped --network host \
   -v sohobotp-etc:/etc/multiotp -v sohobotp-radius:/etc/freeradius \
-  -v sohobotp-log:/var/log/multiotp sohobotp-portal
+  -v sohobotp-log:/var/log/multiotp -v sohobotp-db:/var/lib/mysql sohobotp-portal
 ```
 
 Wait one minute, then check that it runs: `sudo docker logs sohobotp | tail`.
 
-All data lives in the Docker volumes `sohobotp-etc`, `sohobotp-radius` and `sohobotp-log`;
+All data lives in the Docker volumes `sohobotp-etc`, `sohobotp-radius`, `sohobotp-log` and
+`sohobotp-db` (MariaDB, when used);
 back them up (including `/etc/multiotp/portal/portal.key`, without which encrypted secrets
 cannot be read after a restore).
 
@@ -262,6 +263,19 @@ goes back to the device).
 Good to know: a user on SohobOTP with a wrong code is refused (never retried at Symantec); a
 user who is not on SohobOTP is refused when the gateway does not answer; users SohobOTP does
 not know at all are forwarded.
+
+## Optional — Many users, and a second appliance
+
+- **Many users** (thousands to 100,000): portal → **Database** → *Use MariaDB on this
+  appliance* (or another MariaDB/MySQL server). RADIUS keeps working during the move; the
+  files stay as a backup (the volume `sohobotp-db` of step 2 keeps the database).
+- **Second appliance (high availability)**: install a second portal server exactly like
+  steps 1–3 (with its own certificate), and allow TCP
+  3306 and 443 between the two. On the first one (data already in MariaDB): **High
+  availability** → *Create the pairing code* (its own IP, the second one's IP). On the
+  second one: **High availability** → *Join as secondary* → paste the code. Add the second
+  appliance as another RADIUS server on your VPNs. If the first one fails: on the second
+  one, *Promote to primary now* (or set automatic promotion after some minutes).
 
 ## Step 8 — Test checklist
 

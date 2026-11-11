@@ -143,6 +143,7 @@ final class DirectoryController extends Controller
             'directory.preview' => 'Sync preview',
             'radius.apply'      => 'RADIUS configuration',
             'radius.vip_seed'   => 'Symantec VIP migration: users already on SohobOTP',
+            'database.migrate'  => 'Move the data to MariaDB / MySQL',
             'endpoints.directory' => 'Endpoint check in Active Directory',
             default             => $type,
         };

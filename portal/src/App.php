@@ -101,7 +101,11 @@ final class App
         $radius = new RadiusController($this->admin, $this->audit, $this->view);
         $endpoints = new EndpointsController($this->admin, $this->audit, $this->view);
         $apiKeys = new ApiKeysController($this->admin, $this->audit, $this->view);
+        $database = new DatabaseController($this->admin, $this->audit, $this->view);
+        $ha = new HaController($this->admin, $this->audit, $this->view);
         match ($route) {
+            'ha'                   => $ha->index(),
+            'database'             => $database->index(),
             'api-keys'             => $apiKeys->index(),
             'radius'               => $radius->index(),
             'radius-group'         => $radius->group(),

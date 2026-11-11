@@ -87,6 +87,9 @@ RUN apt-get update && \
     ${PHPINSTALLPREFIX}-gd \
     ${PHPINSTALLPREFIX}-gmp \
     ${PHPINSTALLPREFIX}-ldap \
+    ${PHPINSTALLPREFIX}-mysql \
+    mariadb-server \
+    mariadb-client \
     ${PHPINSTALLPREFIXVERSION}-${SQLITEVERSION} \
     slapd \
     snmp \
@@ -130,6 +133,6 @@ RUN chmod 777 /boot/*.sh && \
 
 EXPOSE 80/tcp 443/tcp 1812/udp 1813/udp
 
-VOLUME /etc/multiotp /etc/freeradius /var/log/multiotp /var/log/freeradius
+VOLUME /etc/multiotp /etc/freeradius /var/log/multiotp /var/log/freeradius /var/lib/mysql
 
 ENTRYPOINT ["/boot/newvm.sh", "RUNDOCKER"]

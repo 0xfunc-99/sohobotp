@@ -274,6 +274,9 @@ final class Radius
      */
     public function apply(): array
     {
+        if (Ha::isSecondary()) {
+            return ['ok' => false, 'available' => true, 'output' => 'This appliance is a high-availability secondary: its RADIUS configuration is copied from the primary every minute.'];
+        }
         $candidate = self::candidateFile();
         $content = $this->render();
         $vip = $this->renderVip();

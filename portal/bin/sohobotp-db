@@ -1,0 +1,217 @@
+#!/bin/sh
+# SohobOTP - database helper (runs as root through sudo), installed as /usr/local/sbin/sohobotp-db.
+# The web server user may run it with one fixed command and no other argument:
+#
+#   local-enable   start MariaDB on this appliance and create the database "sohobotp" and the
+#                  user "sohobotp" (localhost only) with the password from the portal's
+#                  candidate file (exactly 32 letters/digits); MariaDB then starts at boot
+#   status         print mariadb=running|stopped and local=enabled|disabled
+#
+# High availability (two appliances, MariaDB replication; portal page "High availability"):
+#   ha-primary     this appliance is the primary: binary log, listens on the network, creates
+#                  the replication user and the application user for the secondary's address
+#   ha-replica     this appliance becomes the secondary of the primary in the candidate file:
+#                  copies the database from the primary, then replicates continuously (TLS),
+#                  read-only
+#   ha-promote     the secondary becomes a primary: replication stopped, writable
+#   ha-status      role, replication threads, delay, last error
+# Their parameters come from /etc/multiotp/portal/database/ha.candidate (key=value lines,
+# every value checked below; nothing is passed on the command line).
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+CANDIDATE=/etc/multiotp/portal/database/local.candidate
+HA_CANDIDATE=/etc/multiotp/portal/database/ha.candidate
+HA_CNF=/etc/mysql/mariadb.conf.d/90-sohobotp-ha.cnf
+TLS_DIR=/etc/mysql/sohobotp-tls
+PRIMARY_CA_CANDIDATE=/etc/multiotp/portal/database/primary-ca.pem
+FLAG=/etc/multiotp/portal/database/local-enabled
+
+say() { printf '%s\n' "$*"; }
+fail() { say "ERROR: $*"; exit 1; }
+
+start_mariadb() {
+  pidof mariadbd >/dev/null 2>&1 || pidof mysqld >/dev/null 2>&1 && return 0
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl start mariadb >/dev/null 2>&1
+  elif [ -x /etc/init.d/mariadb ]; then
+    /etc/init.d/mariadb start >/dev/null 2>&1
+  else
+    service mariadb start >/dev/null 2>&1
+  fi
+  i=0
+  while [ $i -lt 30 ]; do
+    mariadb -uroot -e 'SELECT 1' >/dev/null 2>&1 && return 0
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
+restart_mariadb() {
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl restart mariadb >/dev/null 2>&1
+  elif [ -x /etc/init.d/mariadb ]; then
+    /etc/init.d/mariadb restart >/dev/null 2>&1
+  else
+    service mariadb restart >/dev/null 2>&1
+  fi
+  i=0
+  while [ $i -lt 30 ]; do
+    mariadb -uroot -e 'SELECT 1' >/dev/null 2>&1 && return 0
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
+# ha_value KEY PATTERN: the value of KEY in the candidate, refused unless it matches PATTERN
+ha_value() {
+  v=$(grep -E "^$1=" "$HA_CANDIDATE" | head -n 1 | cut -d= -f2-)
+  printf '%s' "$v" | grep -Eqx "$2" || { say "ERROR: candidate value $1 rejected" >&2; exit 1; }
+  printf '%s' "$v"
+}
+
+ha_candidate_check() {
+  [ -f "$HA_CANDIDATE" ] || fail "no candidate file"
+  [ "$(wc -c < "$HA_CANDIDATE")" -lt 2000 ] || fail "candidate file too large"
+  bad=$(grep -Evn '^(role|primary|replica|repl_password|app_password)=[A-Za-z0-9.]{1,64}$' "$HA_CANDIDATE" | head -n 3)
+  [ -z "$bad" ] || fail "candidate file rejected"
+  [ -f "$FLAG" ] || fail "MariaDB on this appliance is not enabled (Database page first)"
+}
+
+IP4='([0-9]{1,3}\.){3}[0-9]{1,3}'
+PW='[A-Za-z0-9]{32}'
+
+case "${1:-}" in
+  ha-primary)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    ha_candidate_check
+    primary=$(ha_value primary "$IP4") || exit 1
+    replica=$(ha_value replica "$IP4") || exit 1
+    repl=$(ha_value repl_password "$PW") || exit 1
+    app=$(ha_value app_password "$PW") || exit 1
+    # TLS certificate of this database for its address (the secondary pins it)
+    mkdir -p "$TLS_DIR"
+    if ! openssl x509 -in "$TLS_DIR/server.pem" -noout -ext subjectAltName 2>/dev/null | grep -q "IP Address:$primary\$"; then
+      openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=SohobOTP database $primary" \
+        -addext "subjectAltName=IP:$primary" -addext "basicConstraints=critical,CA:TRUE" \
+        -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" -addext "extendedKeyUsage=serverAuth" \
+        -keyout "$TLS_DIR/server-key.pem" -out "$TLS_DIR/server.pem" >/dev/null 2>&1 || fail "cannot create the database certificate"
+    fi
+    chown -R mysql:mysql "$TLS_DIR" && chmod 0700 "$TLS_DIR" && chmod 0600 "$TLS_DIR/server-key.pem" && chmod 0644 "$TLS_DIR/server.pem"
+    cat > "$HA_CNF.new" <<CNF
+# SohobOTP high availability: primary (managed by sohobotp-db)
+[mariadbd]
+ssl_cert = $TLS_DIR/server.pem
+ssl_key = $TLS_DIR/server-key.pem
+server_id = 1
+log_bin = sohobotp-bin
+binlog_format = ROW
+log_slave_updates = 1
+gtid_strict_mode = 1
+bind_address = 0.0.0.0
+read_only = 0
+CNF
+    mv -f "$HA_CNF.new" "$HA_CNF" && chmod 0644 "$HA_CNF"
+    restart_mariadb || fail "MariaDB does not restart"
+    mariadb -uroot <<SQL || fail "could not create the replication users"
+CREATE USER IF NOT EXISTS 'sohobotp_repl'@'$replica' IDENTIFIED BY '$repl' REQUIRE SSL;
+ALTER USER 'sohobotp_repl'@'$replica' IDENTIFIED BY '$repl' REQUIRE SSL;
+GRANT REPLICATION SLAVE, BINLOG MONITOR ON *.* TO 'sohobotp_repl'@'$replica';
+CREATE USER IF NOT EXISTS 'sohobotp'@'$replica' IDENTIFIED BY '$app' REQUIRE SSL;
+ALTER USER 'sohobotp'@'$replica' IDENTIFIED BY '$app' REQUIRE SSL;
+GRANT ALL PRIVILEGES ON sohobotp.* TO 'sohobotp'@'$replica';
+GRANT RELOAD, REPLICATION CLIENT ON *.* TO 'sohobotp'@'$replica';
+FLUSH PRIVILEGES;
+SQL
+    say "ha=primary replica=$replica"
+    cat "$TLS_DIR/server.pem"
+    ;;
+  ha-replica)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    ha_candidate_check
+    primary=$(ha_value primary "$IP4") || exit 1
+    repl=$(ha_value repl_password "$PW") || exit 1
+    app=$(ha_value app_password "$PW") || exit 1
+    # the primary's database certificate from the pairing code: a certificate for that address
+    [ -f "$PRIMARY_CA_CANDIDATE" ] && [ "$(wc -c < "$PRIMARY_CA_CANDIDATE")" -lt 10000 ] || fail "no primary certificate"
+    openssl x509 -in "$PRIMARY_CA_CANDIDATE" -noout -ext subjectAltName 2>/dev/null | grep -q "IP Address:$primary\$" || fail "the primary certificate is not for $primary"
+    mkdir -p "$TLS_DIR" && openssl x509 -in "$PRIMARY_CA_CANDIDATE" -out "$TLS_DIR/primary-ca.pem" || fail "cannot store the primary certificate"
+    chown -R mysql:mysql "$TLS_DIR" && chmod 0755 "$TLS_DIR" && chmod 0644 "$TLS_DIR/primary-ca.pem"
+    cat > "$HA_CNF.new" <<CNF
+# SohobOTP high availability: secondary (managed by sohobotp-db)
+[mariadbd]
+server_id = 2
+log_bin = sohobotp-bin
+binlog_format = ROW
+log_slave_updates = 1
+gtid_strict_mode = 1
+relay_log = sohobotp-relay
+read_only = 1
+CNF
+    mv -f "$HA_CNF.new" "$HA_CNF" && chmod 0644 "$HA_CNF"
+    restart_mariadb || fail "MariaDB does not restart"
+    dump=$(mktemp)
+    mariadb-dump -h "$primary" -u sohobotp -p"$app" --ssl-ca="$TLS_DIR/primary-ca.pem" --ssl-verify-server-cert --single-transaction --gtid --master-data=1 \
+      --databases sohobotp > "$dump" 2>/tmp/sohobotp-dump.err || { rm -f "$dump"; fail "copy from the primary failed: $(head -c 300 /tmp/sohobotp-dump.err)"; }
+    # a fresh appliance: its own binary log (local database creation) must not compete with
+    # the primary's transactions; the copy is imported without writing a binary log
+    mariadb -uroot -e "STOP SLAVE; RESET SLAVE ALL; RESET MASTER; SET GLOBAL read_only = 0;" >/dev/null 2>&1
+    mariadb -uroot --init-command="SET SESSION sql_log_bin=0" < "$dump" || { rm -f "$dump"; fail "import of the copy failed"; }
+    rm -f "$dump"
+    mariadb -uroot <<SQL || fail "replication could not start"
+CHANGE MASTER TO MASTER_HOST='$primary', MASTER_USER='sohobotp_repl', MASTER_PASSWORD='$repl',
+  MASTER_USE_GTID=slave_pos, MASTER_SSL=1, MASTER_SSL_CA='$TLS_DIR/primary-ca.pem', MASTER_SSL_VERIFY_SERVER_CERT=1,
+  MASTER_CONNECT_RETRY=10;
+SET GLOBAL read_only = 1;
+START SLAVE;
+SQL
+    sleep 2
+    mariadb -uroot -e "SHOW SLAVE STATUS\G" | grep -E "Slave_(IO|SQL)_Running:" | tr -d ' ' | tr '\n' ' '
+    say ""
+    say "ha=replica primary=$primary"
+    ;;
+  ha-promote)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    [ -f "$HA_CNF" ] || fail "this appliance is not part of a high-availability pair"
+    mariadb -uroot -e "STOP SLAVE; RESET SLAVE ALL; SET GLOBAL read_only = 0;" || fail "could not promote"
+    sed -i 's/^read_only = 1$/read_only = 0/; s/^# SohobOTP high availability: secondary/# SohobOTP high availability: promoted primary/' "$HA_CNF"
+    grep -q '^bind_address' "$HA_CNF" || printf 'bind_address = 0.0.0.0\n' >> "$HA_CNF"
+    say "ha=promoted"
+    ;;
+  ha-status)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    if [ -f "$HA_CNF" ]; then say "ha_config=$(sed -n 's/^# SohobOTP high availability: \([a-z ]*\).*/\1/p' "$HA_CNF" | tr ' ' '-')"; else say "ha_config=none"; fi
+    say "read_only=$(mariadb -uroot -N -e 'SELECT @@read_only' 2>/dev/null || echo unknown)"
+    mariadb -uroot -e "SHOW SLAVE STATUS\G" 2>/dev/null | grep -E "^ *(Master_Host|Slave_IO_Running|Slave_SQL_Running|Seconds_Behind_Master|Last_IO_Error|Last_SQL_Error|Gtid_IO_Pos):" | sed 's/^ *//; s/: /=/'
+    ;;
+  local-enable)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    command -v mariadb >/dev/null 2>&1 || fail "MariaDB is not installed on this appliance"
+    [ -f "$CANDIDATE" ] || fail "no candidate file"
+    line=$(head -n 1 "$CANDIDATE")
+    printf '%s' "$line" | grep -Eq '^password=[A-Za-z0-9]{32}$' || fail "candidate file rejected"
+    [ "$(wc -l < "$CANDIDATE")" -le 1 ] || fail "candidate file rejected"
+    password=${line#password=}
+    start_mariadb || fail "MariaDB does not start"
+    mariadb -uroot <<SQL || fail "could not create the database"
+CREATE DATABASE IF NOT EXISTS sohobotp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'sohobotp'@'localhost' IDENTIFIED BY '$password';
+CREATE USER IF NOT EXISTS 'sohobotp'@'127.0.0.1' IDENTIFIED BY '$password';
+ALTER USER 'sohobotp'@'localhost' IDENTIFIED BY '$password';
+ALTER USER 'sohobotp'@'127.0.0.1' IDENTIFIED BY '$password';
+GRANT ALL PRIVILEGES ON sohobotp.* TO 'sohobotp'@'localhost';
+GRANT ALL PRIVILEGES ON sohobotp.* TO 'sohobotp'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+    mkdir -p "$(dirname "$FLAG")" && : > "$FLAG" && chown root:root "$FLAG" && chmod 0644 "$FLAG"
+    say "local_db=ready"
+    ;;
+  status)
+    [ $# -eq 1 ] || fail "no extra arguments allowed"
+    if pidof mariadbd >/dev/null 2>&1 || pidof mysqld >/dev/null 2>&1; then say "mariadb=running"; else say "mariadb=stopped"; fi
+    if [ -f "$FLAG" ]; then say "local=enabled"; else say "local=disabled"; fi
+    ;;
+  *)
+    fail "usage: sohobotp-db local-enable|status|ha-primary|ha-replica|ha-promote|ha-status"
+    ;;
+esac

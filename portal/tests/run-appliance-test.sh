@@ -39,7 +39,7 @@ docker exec "$NAME" php -r '
   $check("security headers through nginx", (bool) preg_match("/content-security-policy/i", $headers));
   $check("__Host- session cookie over HTTPS", (bool) preg_match("/set-cookie: __Host-motp_portal/i", $headers));
   $check("HSTS header", (bool) preg_match("/strict-transport-security/i", $headers));
-  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md", "/portal/tests/AgentSim.php", "/portal/bin/sohobotp-vip-route", "/portal/tests/fake-vip-radius.php", "/portal/src/Api.php", "/portal/tests/appliance-api.php", "/portal/src/Endpoints.php", "/portal/docs/agent-protocol-vectors.json"] as $p) {
+  foreach (["/portal/src/App.php", "/portal/templates/login.php", "/portal/bin/portal-admin.php", "/portal/bin/multiotp-portal-radius", "/portal/tests/appliance-radius.php", "/portal/README.md", "/portal/docs/endpoints.md", "/portal/tasks/codex-ad-tests.md", "/portal/tests/AgentSim.php", "/portal/bin/sohobotp-vip-route", "/portal/tests/fake-vip-radius.php", "/portal/src/Api.php", "/portal/tests/appliance-api.php", "/portal/bin/sohobotp-db", "/portal/src/Database.php", "/portal/src/Endpoints.php", "/portal/docs/agent-protocol-vectors.json"] as $p) {
     [$c] = $get("https://localhost" . $p);
     $check("$p refused by nginx ($c)", 404 === $c);
   }
@@ -74,6 +74,10 @@ echo "== Symantec VIP migration: forwarding through real FreeRADIUS to a stand-i
 docker exec -d "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/fake-vip-radius.php 18121 Vip-Gateway-Secret-0123 /tmp/fake-vip.count"
 sleep 1
 docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-vip.php" || STATUS=1
+
+echo "== Database: MariaDB on the appliance, migration, 100,000 users (last: the appliance stays on MariaDB)"
+docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-db.php" || STATUS=1
+docker exec "$NAME" sh -c '[ "$(stat -c %U /usr/local/sbin/sohobotp-db)" = root ]' && echo "ok   database helper owned by root" || { echo "FAIL database helper owner"; STATUS=1; }
 
 if [ "$STATUS" != 0 ]; then
   echo "== worker log"; docker exec "$NAME" tail -n 30 /var/log/multiotp/portal-worker.log || true
