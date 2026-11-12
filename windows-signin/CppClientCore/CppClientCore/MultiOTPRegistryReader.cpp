@@ -17,6 +17,7 @@
  *
  *********************************************************************/
 #include "MultiOTPRegistryReader.h"
+#include "SohobotpRegistry.h" // SohobOTP: HKEY_CLASSES_ROOT -> HKLM\SOFTWARE\Classes only
 
 #include <Windows.h>
 #include <tchar.h>
@@ -36,7 +37,7 @@ std::wstring MultiOTPRegistryReader::getRegistry(std::wstring name, HKEY contain
 {
 	DWORD dwRet = NULL;
 	HKEY hKey = nullptr;
-	dwRet = RegOpenKeyEx(
+	dwRet = SohobotpRegOpenKeyEx(
 		container,
 		wpath.c_str(),
 		NULL,
@@ -86,7 +87,7 @@ DWORD MultiOTPRegistryReader::getRegistryDWORD(std::wstring name, HKEY container
 {
 	DWORD dwRet = NULL;
 	HKEY hKey = nullptr;
-	dwRet = RegOpenKeyEx(
+	dwRet = SohobotpRegOpenKeyEx(
 		container,
 		wpath.c_str(),
 		NULL,
@@ -132,7 +133,7 @@ bool MultiOTPRegistryReader::getAll(const std::wstring& path, std::map<std::wstr
 	// Open handle to realm-mapping key
 	HKEY hKey = nullptr;
 
-	if (RegOpenKeyEx(container,
+	if (SohobotpRegOpenKeyEx(container,
 		path.c_str(),
 		0,
 		KEY_READ,

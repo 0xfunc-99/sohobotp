@@ -23,6 +23,11 @@
 * Change Log
 *   2026-11-12 SohobOTP (Sohobcom) ENH: Remote Desktop reconnect grace period (registry "multiOTPTimeoutReconnect"),
 *                                     unlock grace refactored into hasloggedInRecently(minutes) and userHasSession().
+*   2026-11-12 SohobOTP (Sohobcom) SEC: grace periods only on the sign-in and unlock screens; sign-in history read
+*                                     and written in HKLM only (not the merged HKEY_CLASSES_ROOT, which includes the
+*                                     user's writable HKCU\Software\Classes); reconnect bound to the real network
+*                                     address of the connection (not the client-reported WTSClientAddress); session
+*                                     users resolved as DOMAIN\user.
 *   2026-01-05 5.10.1.2 SysCo/yj ENH: In remote desktop mode, if 2FA disabled then passthrough without asking for the password.
 *                                     New registry config key "multiOTPDisplayUserLocked" to enable message "User locked" or "User delayed" before asking OTP.
 *   2025-10-22 5.9.9.4  SysCo/yj ENH: push token support
@@ -1010,9 +1015,13 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	// Grace periods, counted from the last sign-in WITH a code (a grace sign-in does not extend them):
 	// - unlock: the user's session is still active on this computer (multiOTP);
 	// - reconnect (SohobOTP): a Remote Desktop connection resumes the user's existing session
-	//   (active or disconnected) from the same client address it was last connected from.
-	//   A new session, or a connection from another computer, always asks for a code.
-	if (userSID != NULL && _config->multiOTPTimeoutUnlock > 0) {
+	//   (active or disconnected), and this connection comes from the same network address as the
+	//   last sign-in with a code (the real address of the connection, kept in HKLM at that sign-in).
+	//   A new session, a console sign-in or another address always asks for a code.
+	// Only on the sign-in and unlock screens (LogonUI, as SYSTEM): never in a credential prompt
+	// inside a session (UAC, Run as), where the user's own process could influence what is read.
+	const bool graceScreen = _config->provider.cpu == CPUS_LOGON || _config->provider.cpu == CPUS_UNLOCK_WORKSTATION;
+	if (graceScreen && userSID != NULL && _config->multiOTPTimeoutUnlock > 0) {
 		ReleaseDebugPrint("multiOTP timeout Unlock is configured on : " + std::to_string(_config->multiOTPTimeoutUnlock) + " minutes");
 		if (hasloggedInRecently(userSID, _config->multiOTPTimeoutUnlock) && userHasSession(userSID, false)) {
 			ReleaseDebugPrint("Unlock grace: recent sign-in and an active session for this user");
@@ -1020,7 +1029,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 			return S_OK;
 		}
 	}
-	if (userSID != NULL && _config->multiOTPTimeoutReconnect > 0) {
+	if (graceScreen && userSID != NULL && _config->multiOTPTimeoutReconnect > 0) {
 		ReleaseDebugPrint("SohobOTP reconnect grace is configured on : " + std::to_string(_config->multiOTPTimeoutReconnect) + " minutes");
 		if (hasloggedInRecently(userSID, _config->multiOTPTimeoutReconnect) && userHasSession(userSID, true)) {
 			ReleaseDebugPrint("Reconnect grace: recent sign-in, existing session reconnected from the same client address");
@@ -1427,11 +1436,97 @@ HRESULT CCredential::getSid(LPCWSTR wszAccName, PSID* ppSid)
 }
 
 
+/*
+* SohobOTP: the sign-in history (time of the last sign-in with a code, and the network address of
+* that connection) lives in HKLM\SOFTWARE\Classes\CLSID\{this provider}\history, read and written
+* explicitly there. Through HKEY_CLASSES_ROOT, a process running as the user would also see the
+* user's own writable HKCU\Software\Classes, where a fake entry could be planted.
+*/
+// the same key as multiOTP's other history values (CppClientCore guid.h, defined in CppClientCore.lib)
+EXTERN_C const GUID CLSID_Multiotp;
+
+static std::wstring historyKeyPath()
+{
+	LPOLESTR clsid = NULL;
+	std::wstring path;
+	if (SUCCEEDED(StringFromCLSID(CLSID_Multiotp, &clsid)) && clsid != NULL) {
+		path = std::wstring(L"SOFTWARE\\Classes\\CLSID\\") + clsid + L"\\history";
+		CoTaskMemFree(clsid);
+	}
+	return path;
+}
+
+/*
+* Real network address of a Remote Desktop connection (not the address the client reports about
+* itself, WTSClientAddress, which the client chooses). winsta.dll WinStationQueryInformationW with
+* WinStationRemoteAddress (29). false when unavailable: the caller then asks for a code.
+*/
+typedef struct {
+	USHORT sin_family;
+	union {
+		struct { USHORT sin_port; ULONG sin_addr; UCHAR sin_zero[8]; } ipv4;
+		struct { USHORT sin6_port; ULONG sin6_flowinfo; USHORT sin6_addr[8]; ULONG sin6_scope_id; } ipv6;
+	};
+} SOHOBOTP_WINSTATIONREMOTEADDRESS;
+typedef BOOLEAN(WINAPI* SohobotpWinStationQueryInformationW)(HANDLE, ULONG, int, PVOID, ULONG, PULONG);
+
+static bool sessionRemoteAddress(DWORD sessionId, BYTE address[16], DWORD* length)
+{
+	*length = 0;
+	HMODULE winsta = LoadLibraryExW(L"winsta.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	if (winsta == NULL) {
+		return false;
+	}
+	bool ok = false;
+	SohobotpWinStationQueryInformationW query = (SohobotpWinStationQueryInformationW)GetProcAddress(winsta, "WinStationQueryInformationW");
+	SOHOBOTP_WINSTATIONREMOTEADDRESS remote;
+	ULONG returned = 0;
+	ZeroMemory(&remote, sizeof(remote));
+	if (query != NULL && query(NULL, sessionId, 29 /* WinStationRemoteAddress */, &remote, sizeof(remote), &returned)) {
+		if (remote.sin_family == 2 /* AF_INET */ && remote.ipv4.sin_addr != 0) {
+			memcpy(address, &remote.ipv4.sin_addr, 4);
+			*length = 4;
+			ok = true;
+		} else if (remote.sin_family == 23 /* AF_INET6 */) {
+			memcpy(address, remote.ipv6.sin6_addr, 16);
+			*length = 16;
+			BYTE zero[16] = { 0 };
+			ok = 0 != memcmp(address, zero, 16);
+		}
+	}
+	FreeLibrary(winsta);
+	return ok;
+}
+
+/* The network address of the connection this sign-in screen belongs to (false on the console). */
+static bool currentConnectionAddress(BYTE address[16], DWORD* length, DWORD* sessionId)
+{
+	*length = 0;
+	return ProcessIdToSessionId(GetCurrentProcessId(), sessionId) && sessionRemoteAddress(*sessionId, address, length);
+}
+
 HRESULT CCredential::storeSidAndTimeStamp(PSID ppsid) {
 	LPTSTR StringSid = NULL;
-	ConvertSidToStringSid(ppsid, &StringSid);
-	const int timestamp = minutesSinceEpoch();
-	writeKeyValueIntegerInMultiOTPRegistry(HKEY_CLASSES_ROOT, L"history", StringSid, timestamp);
+	if (ppsid == NULL || !ConvertSidToStringSid(ppsid, &StringSid) || StringSid == NULL) {
+		return E_INVALIDARG;
+	}
+	const std::wstring path = historyKeyPath();
+	HKEY key = NULL;
+	if (!path.empty() && ERROR_SUCCESS == RegCreateKeyExW(HKEY_LOCAL_MACHINE, path.c_str(), 0, NULL, 0, KEY_SET_VALUE, NULL, &key, NULL)) {
+		const DWORD timestamp = (DWORD)minutesSinceEpoch();
+		RegSetValueExW(key, StringSid, 0, REG_DWORD, (const BYTE*)&timestamp, sizeof(timestamp));
+		// the address of this connection: a reconnect grace needs the same one (none on the console)
+		const std::wstring addressValue = std::wstring(StringSid) + L"-address";
+		BYTE address[16] = { 0 };
+		DWORD length = 0, session = 0;
+		if (currentConnectionAddress(address, &length, &session)) {
+			RegSetValueExW(key, addressValue.c_str(), 0, REG_BINARY, address, length);
+		} else {
+			RegDeleteValueW(key, addressValue.c_str());
+		}
+		RegCloseKey(key);
+	}
+	LocalFree(StringSid);
 	return S_OK;
 }
 
@@ -1444,7 +1539,12 @@ bool CCredential::hasloggedInRecently(LPTSTR userId, int minutes) {
 	if (minutes <= 0) {
 		return false;
 	}
-	const DWORD lastLoggedInTime = readKeyValueInMultiOTPRegistryInteger(HKEY_CLASSES_ROOT, L"history", userId, 0);
+	DWORD lastLoggedInTime = 0;
+	DWORD size = sizeof(lastLoggedInTime);
+	const std::wstring path = historyKeyPath();
+	if (path.empty() || ERROR_SUCCESS != RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), userId, RRF_RT_REG_DWORD, NULL, &lastLoggedInTime, &size)) {
+		lastLoggedInTime = 0;
+	}
 	ReleaseDebugPrint(L"LAST LOGGED IN TIME FOR USER: " + (std::wstring)userId);
 	ReleaseDebugPrint(lastLoggedInTime);
 	if (lastLoggedInTime == 0) {
@@ -1455,37 +1555,11 @@ bool CCredential::hasloggedInRecently(LPTSTR userId, int minutes) {
 }
 
 /*
-* Client address of a Remote Desktop session (IPv4 or IPv6 bytes); false for a console session.
-*/
-static bool sessionClientAddress(DWORD sessionId, BYTE address[16], DWORD* length)
-{
-	LPWSTR buffer = NULL;
-	DWORD size = 0;
-	bool ok = false;
-	if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, sessionId, WTSClientAddress, &buffer, &size) && buffer != NULL && size >= sizeof(WTS_CLIENT_ADDRESS)) {
-		const WTS_CLIENT_ADDRESS* client = (const WTS_CLIENT_ADDRESS*)buffer;
-		// AddressFamily 2 = AF_INET (bytes 2..5), 23 = AF_INET6 (bytes 2..17)
-		if (client->AddressFamily == 2) {
-			memcpy(address, &client->Address[2], 4);
-			*length = 4;
-			ok = true;
-		} else if (client->AddressFamily == 23) {
-			memcpy(address, &client->Address[2], 16);
-			*length = 16;
-			ok = true;
-		}
-	}
-	if (buffer != NULL) {
-		WTSFreeMemory(buffer);
-	}
-	return ok;
-}
-
-/*
 * Is there a session of this user on this computer?
 * remoteReconnect = false: an ACTIVE session (unlock grace).
-* remoteReconnect = true: an active or DISCONNECTED session last connected from the same client
-* address as the Remote Desktop connection being signed in now (reconnect grace).
+* remoteReconnect = true: an active or DISCONNECTED session of the user (other than this one), and
+* this Remote Desktop connection comes from the network address stored at the user's last sign-in
+* with a code (reconnect grace).
 */
 bool CCredential::userHasSession(LPTSTR userSID, bool remoteReconnect)
 {
@@ -1494,8 +1568,17 @@ bool CCredential::userHasSession(LPTSTR userSID, bool remoteReconnect)
 	DWORD currentSession = 0;
 	if (remoteReconnect) {
 		// The sign-in screen runs in the new session of the incoming connection
-		if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) || !sessionClientAddress(currentSession, currentAddress, &currentLength)) {
-			ReleaseDebugPrint("Reconnect grace: not a Remote Desktop connection");
+		if (!currentConnectionAddress(currentAddress, &currentLength, &currentSession)) {
+			ReleaseDebugPrint("Reconnect grace: not a Remote Desktop connection, or its address is unknown");
+			return false;
+		}
+		BYTE stored[16] = { 0 };
+		DWORD storedLength = sizeof(stored);
+		const std::wstring path = historyKeyPath();
+		const std::wstring addressValue = std::wstring(userSID) + L"-address";
+		if (path.empty() || ERROR_SUCCESS != RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), addressValue.c_str(), RRF_RT_REG_BINARY, NULL, stored, &storedLength)
+			|| storedLength != currentLength || 0 != memcmp(stored, currentAddress, currentLength)) {
+			ReleaseDebugPrint("Reconnect grace: not the network address of the last sign-in with a code");
 			return false;
 		}
 	}
@@ -1519,18 +1602,21 @@ bool CCredential::userHasSession(LPTSTR userSID, bool remoteReconnect)
 			continue;
 		}
 		if (name[0] != L'\0') {
+			// DOMAIN\user: a bare name could resolve to another account (local "john" and DOMAIN\john)
+			std::wstring account = name;
+			LPWSTR domain = NULL;
+			DWORD domainSize = 0;
+			if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, pSessionInfo[index].SessionId, WTSDomainName, &domain, &domainSize) && domain != NULL) {
+				if (domain[0] != L'\0') {
+					account = std::wstring(domain) + L"\\" + name;
+				}
+				WTSFreeMemory(domain);
+			}
 			PSID pSessionUserSid = NULL;
-			if (SUCCEEDED(CCredential::getSid(name, &pSessionUserSid)) && pSessionUserSid != NULL) {
+			if (SUCCEEDED(CCredential::getSid(account.c_str(), &pSessionUserSid)) && pSessionUserSid != NULL) {
 				LPTSTR sessionSidAsString = NULL;
 				if (ConvertSidToStringSid(pSessionUserSid, &sessionSidAsString)) {
-					bool sameUser = wcscmp(userSID, sessionSidAsString) == 0;
-					if (sameUser && remoteReconnect) {
-						BYTE address[16] = { 0 };
-						DWORD length = 0;
-						sameUser = sessionClientAddress(pSessionInfo[index].SessionId, address, &length)
-							&& length == currentLength && 0 == memcmp(address, currentAddress, length);
-					}
-					found = sameUser;
+					found = wcscmp(userSID, sessionSidAsString) == 0;
 					LocalFree(sessionSidAsString);
 				}
 				delete[] (BYTE*)pSessionUserSid;

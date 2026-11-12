@@ -31,6 +31,7 @@
  *********************************************************************/
 
 #include "MultiotpRegistry.h"
+#include "SohobotpRegistry.h" // SohobOTP: HKEY_CLASSES_ROOT -> HKLM\SOFTWARE\Classes only
 #include "guid.h"
 #include "MultiotpHelpers.h"
 
@@ -56,7 +57,7 @@ VOID writeKeyValueInMultiOTPRegistry(_In_ HKEY rootKeyValue, _In_ PWSTR keyName,
 		if (DEVELOP_MODE) PrintLn(L"Writing REGISTRY Key: ", confKeyNameCLSID, L"\\", valueName);
 
 		// Check if the registry key confKeyNameCLSID exists otherwise create it
-		LONG result = ::RegCreateKeyExW(rootKeyValue, confKeyNameCLSID, 0, L"REG_SZ", REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE | KEY_SET_VALUE, NULL, &regKey, NULL);
+		LONG result = SohobotpRegCreateKeyEx(rootKeyValue, confKeyNameCLSID, 0, L"REG_SZ", REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE | KEY_SET_VALUE, NULL, &regKey, NULL);
 
 		if (result == ERROR_SUCCESS) {
 			result = ::RegSetValueEx(
@@ -92,7 +93,7 @@ VOID writeRegistryValueString(_In_ CONF_VALUE conf_value, _In_ PWSTR writeValue)
 		CoTaskMemFree(clsid); //not needed
 		if (DEVELOP_MODE) PrintLn(L"Writing REGISTRY Key: ", confKeyNameCLSID, L"\\", confValueName);
 
-		LONG result = ::RegOpenKeyEx(rootKeyValue, confKeyNameCLSID, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &regKey);
+		LONG result = SohobotpRegOpenKeyEx(rootKeyValue, confKeyNameCLSID, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &regKey);
 		if (result == ERROR_SUCCESS) {
 			result = ::RegSetValueEx(
 				regKey,
@@ -134,7 +135,7 @@ DWORD readKeyValueInMultiOTPRegistry(_In_ HKEY rootKeyValue, _In_ PWSTR keyName,
 		DWORD keyType = 0;
 		DWORD dataSize = 0;
 		const DWORD flags = RRF_RT_REG_SZ; // Only read strings (REG_SZ)
-		LONG result = ::RegGetValue(
+		LONG result = SohobotpRegGetValue(
 			rootKeyValue,
 			confKeyNameCLSID,
 			valueName,
@@ -145,7 +146,7 @@ DWORD readKeyValueInMultiOTPRegistry(_In_ HKEY rootKeyValue, _In_ PWSTR keyName,
 		if ((result == ERROR_SUCCESS) && (keyType == REG_SZ)) {
 			//reserve read return
 			*data = (PWSTR)CoTaskMemAlloc(dataSize);
-			result = ::RegGetValue(
+			result = SohobotpRegGetValue(
 				rootKeyValue,
 				confKeyNameCLSID,
 				valueName,
@@ -181,10 +182,10 @@ DWORD readRegistryValueString(_In_ CONF_VALUE conf_value, _Outptr_result_nullonf
 	// Administrators can read (the CLSID key is readable by every user). Read it there first.
 	if (conf_value == CONF_SHARED_SECRET) {
 		DWORD protectedSize = 0;
-		if (::RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\SohobOTP\\SignIn", L"multiOTPSharedSecret",
+		if (SohobotpRegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\SohobOTP\\SignIn", L"multiOTPSharedSecret",
 				RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, nullptr, &protectedSize) == ERROR_SUCCESS && protectedSize > sizeof(WCHAR)) {
 			*data = (PWSTR)CoTaskMemAlloc(protectedSize);
-			if (*data != nullptr && ::RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\SohobOTP\\SignIn", L"multiOTPSharedSecret",
+			if (*data != nullptr && SohobotpRegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\SohobOTP\\SignIn", L"multiOTPSharedSecret",
 					RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, *data, &protectedSize) == ERROR_SUCCESS) {
 				return protectedSize / sizeof(WCHAR);
 			}
@@ -217,7 +218,7 @@ DWORD readRegistryValueString(_In_ CONF_VALUE conf_value, _Outptr_result_nullonf
 		DWORD keyType = 0;
 		DWORD dataSize = 0;
 		const DWORD flags = RRF_RT_REG_SZ; // Only read strings (REG_SZ)
-		LONG result = ::RegGetValue(
+		LONG result = SohobotpRegGetValue(
 			rootKeyValue,
 			confKeyNameCLSID,
 			confValueName,
@@ -228,7 +229,7 @@ DWORD readRegistryValueString(_In_ CONF_VALUE conf_value, _Outptr_result_nullonf
 		if ((result == ERROR_SUCCESS) && (keyType == REG_SZ)) {
 			//reserve read return
 			*data = (PWSTR)CoTaskMemAlloc(dataSize);
-			result = ::RegGetValue(
+			result = SohobotpRegGetValue(
 				rootKeyValue,
 				confKeyNameCLSID,
 				confValueName,
@@ -285,7 +286,7 @@ DWORD readRegistryValueInteger(_In_ CONF_VALUE conf_value, _In_ DWORD defaultVal
 
 		dataSize = sizeof(DWORD);
 
-		LONG result = ::RegGetValue(
+		LONG result = SohobotpRegGetValue(
 			rootKeyValue,
 			confKeyNameCLSID,
 			confValueName,
@@ -333,7 +334,7 @@ VOID writeRegistryValueInteger(_In_ CONF_VALUE conf_value, _In_ DWORD writeValue
 		CoTaskMemFree(clsid); //not needed
 		if (DEVELOP_MODE) PrintLn(L"Writing REGISTRY Key: ", confKeyNameCLSID, L"\\", confValueName);
 
-		LONG result = ::RegOpenKeyEx(rootKeyValue, confKeyNameCLSID, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &regKey);
+		LONG result = SohobotpRegOpenKeyEx(rootKeyValue, confKeyNameCLSID, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &regKey);
 		PrintLn(L"Writing REGISTRY Key: Line 323");
 		if (result == ERROR_SUCCESS) {
 			result = ::RegSetValueEx(
@@ -375,7 +376,7 @@ VOID writeKeyValueIntegerInMultiOTPRegistry(_In_ HKEY rootKeyValue, _In_ PWSTR k
 		if (DEVELOP_MODE) PrintLn(L"Writing REGISTRY Key: ", confKeyNameCLSID, L"\\", valueName);
 
 		// Check if the registry key confKeyNameCLSID exists otherwise create it
-		LONG result = ::RegCreateKeyExW(rootKeyValue, confKeyNameCLSID, 0, L"REG_SZ", REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE | KEY_SET_VALUE, NULL, &regKey, NULL);
+		LONG result = SohobotpRegCreateKeyEx(rootKeyValue, confKeyNameCLSID, 0, L"REG_SZ", REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE | KEY_SET_VALUE, NULL, &regKey, NULL);
 
 		if (result == ERROR_SUCCESS) {
 			result = ::RegSetValueEx(
@@ -415,7 +416,7 @@ DWORD readKeyValueInMultiOTPRegistryInteger(_In_ HKEY rootKeyValue, _In_ PWSTR k
 
 		if (DEVELOP_MODE) PrintLn(L"Reading REGISTRY Key 402: ", confKeyNameCLSID, L"\\", valueName);
 		
-		LONG result = ::RegGetValue(
+		LONG result = SohobotpRegGetValue(
 			rootKeyValue,
 			confKeyNameCLSID,
 			valueName,
