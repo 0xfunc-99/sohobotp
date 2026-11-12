@@ -40,6 +40,8 @@ final class EndpointsController extends Controller
             'names' => array_column($groups, 'name', 'id'),
             'groupFilter' => $groupFilter,
             'healthFilter' => $healthFilter,
+            'coverage' => $endpoints->coverage(),
+            'adReady' => (static function (): bool { $d = (new Directory())->settings(); return $d['enabled'] && 1 === $d['server_type']; })(),
             'canManage' => $this->can('endpoints.manage'),
         ]);
     }
@@ -137,7 +139,10 @@ final class EndpointsController extends Controller
         $endpoints = new Endpoints();
         $id = $this->query('id', 32);
         $group = '' === $id ? null : ($endpoints->group($id) ?? $this->notFound('This endpoint group does not exist.'));
-        $input = ['name' => $group['name'] ?? '', 'description' => $group['description'] ?? ''] + Endpoints::policyToInput($group['policy'] ?? []);
+        $template = null === $group ? $this->query('template', 16) : '';
+        $template = isset(Endpoints::TEMPLATES[$template]) ? $template : '';
+        $input = ['name' => $group['name'] ?? '', 'description' => $group['description'] ?? '']
+            + (null === $group ? Endpoints::templateInput($template) : Endpoints::policyToInput($group['policy']));
         $error = null;
         if ($this->isPost()) {
             try {
@@ -159,6 +164,7 @@ final class EndpointsController extends Controller
             'group' => $group,
             'input' => $input,
             'radiusGroups' => (new Radius())->groups(),
+            'template' => $template,
             'error' => $error,
         ]);
     }
@@ -190,6 +196,14 @@ final class EndpointsController extends Controller
                     $this->audit->record('endpoint.rule_order', 'success', $this->post('id', 12), ['direction' => $this->post('op', 16)]);
                     Jobs::enqueue('endpoints.directory', [], $this->admin['username']);
                     break;
+                case 'coverage':
+                    $coverage = $endpoints->checkCoverage();
+                    $this->audit->record('endpoint.coverage_check', 'success', '', array_diff_key($coverage, ['unprotected' => true, 'checked_at' => true]));
+                    Session::flash('success', 0 === count($coverage['unprotected'])
+                        ? 'Every enabled computer in Active Directory has the SohobOTP agent.'
+                        : count($coverage['unprotected']) . ' enabled computer(s) in Active Directory have no SohobOTP agent.');
+                    $this->redirect('endpoints');
+                    // no break: redirect() ends the request
                 case 'check':
                     $job = Jobs::enqueue('endpoints.directory', [], $this->admin['username']);
                     $this->audit->record('endpoint.directory_check', 'success', '', ['job' => $job['id']]);
@@ -198,7 +212,7 @@ final class EndpointsController extends Controller
         } catch (ValidationException $invalid) {
             Session::flash('error', $invalid->getMessage());
         }
-        $this->redirect('endpoint-groups');
+        $this->redirect('coverage' === $this->post('op', 16) ? 'endpoints' : 'endpoint-groups');
     }
 
     public function groupDelete(): void

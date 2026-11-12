@@ -56,3 +56,51 @@
   </div>
   <p class="hint">Configuration: version applied on the machine / version the portal wants it to have.</p>
 </section>
+
+<section class="panel" id="coverage">
+  <div class="toolbar">
+    <h2>Computers without the agent</h2>
+    <?php if ($canManage && $adReady): ?>
+      <form method="post" action="<?= e(route('endpoint-rules')) ?>" class="inline"><?= csrf_field() ?><input type="hidden" name="op" value="coverage">
+        <button type="submit" class="button"><?= null === $coverage ? 'Check Active Directory' : 'Check again' ?></button></form>
+    <?php endif; ?>
+  </div>
+  <p class="hint">Compares the computer accounts in Active Directory with the enrolled endpoints. A computer without the agent accepts a password alone at its sign-in screen and for Remote Desktop.</p>
+  <?php if (!$adReady): ?>
+    <div class="alert alert-info" role="status">Connect Active Directory on the <a href="<?= e(route('directory')) ?>">Directory</a> page to find computers without the agent.</div>
+  <?php elseif (null === $coverage): ?>
+    <p class="muted">Not checked yet.<?= $canManage ? '' : ' An administrator can run the check.' ?></p>
+  <?php else: ?>
+    <?php $enabledTotal = $coverage['total'] - $coverage['disabled']; $missing = count($coverage['unprotected']); ?>
+    <div class="statusbar">
+      <span><strong><?= (int) $enabledTotal ?></strong> enabled computer(s) in Active Directory</span>
+      <span class="status status-success"><?= (int) $coverage['protected'] ?> with the agent</span>
+      <span class="status status-<?= $missing > 0 ? 'failure' : 'success' ?>"><?= (int) $missing ?> without</span>
+      <?php if ($coverage['servers_unprotected'] > 0): ?><span class="status status-denied"><?= (int) $coverage['servers_unprotected'] ?> server(s) without</span><?php endif; ?>
+      <span class="muted toolbar-end">Checked <?= e(format_time($coverage['checked_at'])) ?></span>
+    </div>
+    <?php if ($coverage['truncated']): ?><div class="alert alert-warning" role="status">Only the first 20,000 computer accounts were read.</div><?php endif; ?>
+    <?php if ($missing > 0): ?>
+      <div class="toolbar">
+        <input type="search" class="search" placeholder="Search computers" data-filter-table="coverage-table" aria-label="Search computers without the agent">
+        <?php if ($canManage): ?><a class="button-primary toolbar-end" href="<?= e(route('endpoint-enrol')) ?>">+ Enrol endpoints</a><?php endif; ?>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="coverage-table">
+          <thead><tr><th>Computer</th><th>Operating system</th><th>DNS name</th><th>Last sign-in (AD)</th></tr></thead>
+          <tbody>
+            <?php foreach ($coverage['unprotected'] as $c): ?>
+              <tr>
+                <td><strong><?= e(strtoupper($c['name'])) ?></strong><?php if ($c['server']): ?> <span class="badge">server</span><?php endif; ?><br><span class="muted"><?= e($c['dn']) ?></span></td>
+                <td><?= e($c['os'] ?: '—') ?></td>
+                <td><?= e($c['dns_host'] ?: '—') ?></td>
+                <td class="nowrap"><?= e(format_time($c['last_logon'])) ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">“Last sign-in” comes from Active Directory and can lag by up to two weeks. Computers not seen for months may be retired: disable them in Active Directory.</p>
+    <?php endif; ?>
+  <?php endif; ?>
+</section>

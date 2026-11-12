@@ -130,8 +130,20 @@ check('remove PC01 from All-Servers in AD', ldap_mod_del($ad, 'CN=All-Servers,CN
 $endpoints->checkDirectory(null, $resolver);
 check('membership removed: the OU rule applies again', $laptops['id'] === $state($pc)['group_id']);
 
+// ---------------------------------------------------------------- coverage: computers without the agent
+check('mark SRV01 as a server in AD', ldap_mod_replace($ad, 'CN=SRV01,OU=Servers,' . BASE, ['operatingSystem' => 'Windows Server 2022 Standard']));
+$accounts = (new Directory())->computerAccounts();
+$listed = array_column($accounts['computers'], 'name');
+check('computer accounts listed with paging', !$accounts['truncated'] && [] === array_diff(['pc01', 'pc02', 'srv01'], $listed), json_encode($listed));
+$coverage = $endpoints->checkCoverage($accounts);
+$missing = array_column($coverage['unprotected'], 'name');
+check('enrolled computers count as having the agent', !in_array('pc01', $missing, true) && !in_array('srv01', $missing, true), json_encode($missing));
+
 foreach ($machines as $agent) {
     $endpoints->deleteEndpoint((string) $agent->id);
 }
+$coverage = $endpoints->checkCoverage();
+$srvRow = array_values(array_filter($coverage['unprotected'], static fn (array $c): bool => 'srv01' === $c['name']))[0] ?? null;
+check('without endpoints SRV01 is listed as a server without the agent', null !== $srvRow && $srvRow['server'] && $coverage['servers_unprotected'] >= 1 && str_contains($srvRow['dn'], 'OU=Servers'), json_encode($srvRow));
 echo $failures > 0 ? "$failures endpoint AD check(s) failed.\n" : "All endpoint AD checks passed.\n";
 exit($failures > 0 ? 1 : 0);

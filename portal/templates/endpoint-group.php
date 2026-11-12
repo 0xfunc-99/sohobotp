@@ -15,6 +15,19 @@
     return $html . '</select>';
 }; ?>
 <p class="back"><a href="<?= e(route('endpoint-groups')) ?>">← Endpoint groups</a></p>
+<?php if (null === $group): ?>
+  <section class="panel">
+    <h2>Start from a template</h2>
+    <p class="hint">Fills in the settings below; you can still change any of them before saving.</p>
+    <div class="tiles template-picker">
+      <?php foreach (Portal\Endpoints::TEMPLATES as $key => $t): ?>
+        <a class="tile" href="<?= e(route('endpoint-group', ['template' => $key])) ?>"<?= $template === $key ? ' aria-current="true"' : '' ?>>
+          <span><strong><?= e($t['label']) ?></strong><span><?= e($t['description']) ?></span></span>
+        </a>
+      <?php endforeach; ?>
+    </div>
+  </section>
+<?php endif; ?>
 <form method="post" action="<?= e(route('endpoint-group', null === $group ? [] : ['id' => $group['id']])) ?>" class="form narrow">
   <?= csrf_field() ?>
   <label>Name <input name="name" value="<?= e($input['name']) ?>" required maxlength="64" placeholder="Office laptops"></label>
@@ -55,9 +68,11 @@
 
   <fieldset>
     <legend>Windows (SohobOTP Sign-in)</legend>
-    <label>Sign-in <?= $modes('win_cpus_logon') ?></label>
+    <label>Sign-in (console and Remote Desktop into this machine) <?= $modes('win_cpus_logon') ?>
+      <small>Protects the machine itself: anyone signing in here, at the keyboard or by Remote Desktop, needs a code. Choose “SohobOTP only” on servers: with “other sign-in options too” the normal Windows password tile stays available and skips the code.</small></label>
     <label>Unlock <?= $modes('win_cpus_unlock') ?></label>
-    <label>Administrator prompts (UAC) <?= $modes('win_cpus_credui') ?></label>
+    <label>Credential prompts on this machine (UAC, Remote Desktop app, Run as) <?= $modes('win_cpus_credui') ?>
+      <small>The “Enter your credentials” windows shown on this machine. When on, every Remote Desktop connection started here asks for a code, even to servers that ask for their own. Usually Off: protect each server with its own sign-in instead.</small></label>
     <label>Account never asked for a code <input name="win_excluded_account" value="<?= e($input['win_excluded_account']) ?>" placeholder="COMPUTER\breakglass">
       <small>One local break-glass account, DOMAIN\user or COMPUTER\user.</small></label>
     <label class="choice"><input type="checkbox" name="win_cache_enabled" value="1"<?= $on('win_cache_enabled') ?>>

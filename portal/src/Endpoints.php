@@ -44,7 +44,7 @@ final class Endpoints
         'windows' => [
             'cpus_logon'       => '0e',
             'cpus_unlock'      => '0e',
-            'cpus_credui'      => '0e',
+            'cpus_credui'      => '3e', // credential prompts on the machine itself (UAC, Remote Desktop app, Run as): off unless chosen
             'excluded_account' => '',
             'cache_enabled'    => false,
             'cache_days'       => 7,
@@ -57,6 +57,33 @@ final class Endpoints
             'login_text'       => 'SohobOTP',
             'otp_text'         => '',
             'server_timeout'   => 5,
+        ],
+    ];
+    /**
+     * Starting points for a new endpoint group (only the values that differ from DEFAULT_POLICY).
+     * Credential prompts = the "Enter your credentials" windows on the machine itself (UAC,
+     * the Remote Desktop app, Run as): on, every outgoing Remote Desktop connection asks for a code.
+     */
+    public const TEMPLATES = [
+        'server' => [
+            'label' => 'Servers',
+            'description' => 'Code at the console and for Remote Desktop into the server. No code in credential prompts on the server itself.',
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => false]],
+        ],
+        'workstation' => [
+            'label' => 'Desktops',
+            'description' => 'Code at sign-in and unlock. Remote Desktop to other machines asks for their own code, not here.',
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => false]],
+        ],
+        'laptop' => [
+            'label' => 'Laptops',
+            'description' => 'Like desktops, plus the offline cache so users can sign in away from the network.',
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => true, 'cache_days' => 7]],
+        ],
+        'admin' => [
+            'label' => 'Admin workstations (strict)',
+            'description' => 'Also asks for a code in every credential prompt: UAC, Run as and each Remote Desktop connection started here.',
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '0e', 'cache_enabled' => false]],
         ],
     ];
     public const APPROVAL = [
@@ -298,6 +325,69 @@ final class Endpoints
             $input['win_' . $key] = $value;
         }
         return $input;
+    }
+
+    /** Form values for a new group started from a template ('' or unknown: plain defaults). */
+    public static function templateInput(string $template): array
+    {
+        $policy = self::TEMPLATES[$template]['policy'] ?? [];
+        return self::policyToInput(['windows' => $policy['windows'] ?? [], 'linux' => $policy['linux'] ?? []]);
+    }
+
+    // ------------------------------------------------------------------
+    // Coverage: computers in Active Directory without the agent
+    // ------------------------------------------------------------------
+
+    /** Last coverage check, or null when never run. */
+    public function coverage(): ?array
+    {
+        return $this->store->read()['coverage'] ?? null;
+    }
+
+    /**
+     * Lists every computer account in Active Directory and keeps those with no endpoint
+     * (matched by computer DN, then by NetBIOS name of the bound or reported host name).
+     * Disabled computer accounts are counted apart and never listed as unprotected.
+     */
+    public function checkCoverage(?array $accounts = null): array
+    {
+        $accounts ??= (new Directory())->computerAccounts();
+        $dns = [];
+        $names = [];
+        foreach ($this->endpoints() as $endpoint) {
+            if ('' !== ($endpoint['directory']['dn'] ?? '')) {
+                $dns[strtolower($endpoint['directory']['dn'])] = true;
+            }
+            foreach ([$endpoint['ad_name'] ?? '', $endpoint['inventory']['hostname'] ?? ''] as $host) {
+                if ('' !== $host) {
+                    $names[strtolower(substr(explode('.', $host)[0], 0, 15))] = true;
+                }
+            }
+        }
+        $summary = ['checked_at' => time(), 'total' => 0, 'disabled' => 0, 'protected' => 0, 'servers' => 0, 'servers_unprotected' => 0, 'truncated' => (bool) $accounts['truncated'], 'unprotected' => []];
+        foreach ($accounts['computers'] as $computer) {
+            $summary['total']++;
+            if (!$computer['enabled']) {
+                $summary['disabled']++;
+                continue;
+            }
+            $server = (bool) preg_match('/server/i', $computer['os']);
+            $summary['servers'] += $server ? 1 : 0;
+            if (isset($dns[strtolower($computer['dn'])]) || isset($names[$computer['name']])) {
+                $summary['protected']++;
+                continue;
+            }
+            $summary['servers_unprotected'] += $server ? 1 : 0;
+            if (count($summary['unprotected']) < 2000) {
+                $summary['unprotected'][] = ['server' => $server] + array_intersect_key($computer, array_flip(['name', 'dn', 'dns_host', 'os', 'last_logon']));
+            }
+        }
+        // servers first, then by name
+        usort($summary['unprotected'], static fn (array $a, array $b): int => [$b['server'], $a['name']] <=> [$a['server'], $b['name']]);
+        $this->store->update(static function (array &$data) use ($summary): void {
+            $data['coverage'] = $summary;
+        });
+        return $summary;
     }
 
     // ------------------------------------------------------------------

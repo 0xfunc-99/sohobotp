@@ -79,12 +79,16 @@ final class DashboardInsights
         return ['days' => $list, 'ok' => array_sum(array_column($list, 'ok')), 'failed' => array_sum(array_column($list, 'failed'))];
     }
 
-    /** @return array{total: int, online: int, offline: int, never: int, pending: int, disabled: int} */
+    /** @return array{total: int, online: int, offline: int, never: int, pending: int, disabled: int, coverage: ?array} */
     public static function endpoints(): array
     {
-        $counts = ['total' => 0, 'online' => 0, 'offline' => 0, 'never' => 0, 'pending' => 0, 'disabled' => 0];
+        $counts = ['total' => 0, 'online' => 0, 'offline' => 0, 'never' => 0, 'pending' => 0, 'disabled' => 0, 'coverage' => null];
         try {
             $endpoints = new Endpoints();
+            $coverage = $endpoints->coverage();
+            if (null !== $coverage) {
+                $counts['coverage'] = ['without' => count($coverage['unprotected']), 'servers_without' => (int) $coverage['servers_unprotected'], 'checked_at' => $coverage['checked_at']];
+            }
             foreach ($endpoints->endpoints() as $endpoint) {
                 $health = $endpoints->health($endpoint);
                 $counts['total']++;

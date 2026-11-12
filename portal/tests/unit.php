@@ -258,6 +258,15 @@ $form = static fn (array $over = []): array => $over + [
     'win_excluded_account' => 'PC01\\breakglass', 'win_cache_enabled' => '1', 'win_cache_days' => '7', 'win_timeout_unlock' => '0', 'win_server_timeout' => '5',
 ];
 $endpoints = new Endpoints();
+check('new groups: no code in credential prompts by default', '3e' === Endpoints::templateInput('')['win_cpus_credui'] && '3e' === Endpoints::effectivePolicy([])['windows']['cpus_credui']);
+check('templates: strict admin workstation asks in credential prompts, laptops cache offline', '0e' === Endpoints::templateInput('admin')['win_cpus_credui'] && true === Endpoints::templateInput('laptop')['win_cache_enabled'] && '3e' === Endpoints::templateInput('server')['win_cpus_credui'] && '0e' === Endpoints::templateInput('server')['win_cpus_logon']);
+$coverage = $endpoints->checkCoverage(['truncated' => false, 'computers' => [
+    ['name' => 'web01', 'dn' => 'CN=WEB01,OU=Servers,DC=x', 'dns_host' => 'web01.x', 'os' => 'Windows Server 2022', 'enabled' => true, 'last_logon' => null],
+    ['name' => 'pc09', 'dn' => 'CN=PC09,OU=PCs,DC=x', 'dns_host' => '', 'os' => 'Windows 11 Pro', 'enabled' => true, 'last_logon' => null],
+    ['name' => 'old', 'dn' => 'CN=OLD,OU=PCs,DC=x', 'dns_host' => '', 'os' => '', 'enabled' => false, 'last_logon' => null],
+]]);
+check('coverage: enabled computers without agent listed, servers first, disabled ignored', ['web01', 'pc09'] === array_column($coverage['unprotected'], 'name') && 1 === $coverage['servers_unprotected'] && 1 === $coverage['disabled'] && 3 === $coverage['total'], json_encode($coverage));
+check('coverage: result kept for the dashboard', ($endpoints->coverage()['checked_at'] ?? 0) === $coverage['checked_at']);
 check('group: Linux 2FA needs a RADIUS group', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['linux_radius_group_id' => ''])), ValidationException::class));
 check('group: invalid Linux user name refused', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['linux_excluded_users' => 'a;rm -rf'])), ValidationException::class));
 check('group: invalid CP mode refused', throws(static fn () => $endpoints->saveGroup(null, ['name' => 'Bad'] + $form(['win_cpus_logon' => '9x'])), ValidationException::class));

@@ -479,6 +479,7 @@ a.card-label { color: var(--accent); }
 }
 .details-cell { min-width: 16rem; max-width: 28rem; }
 .details-cell code { word-break: break-all; font-size: .75rem; background: transparent; border: 0; padding: 0; color: var(--muted); }
+.table-wrap + .hint, .table-wrap + p { margin-top: var(--space-3); }
 .table-count { margin: 0 0 var(--space-3); color: var(--muted); font-size: .85rem; }
 
 .pager { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); align-items: center; justify-content: center; font-size: .875rem; color: var(--muted); }
@@ -644,6 +645,8 @@ pre:has(> code) { position: relative; }
 .notices li:last-child { border-bottom: 0; }
 .notice-name { color: var(--text-strong); font-weight: 600; }
 .notice-meta { color: var(--muted); font-size: .8rem; }
+
+.template-picker .tile[aria-current] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* Phone overrides (after the components they adjust) */
 @media (max-width: 600px) {
