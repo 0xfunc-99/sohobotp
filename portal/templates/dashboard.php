@@ -19,6 +19,7 @@
       $issues[] = ['level' => $level, 'text' => $text, 'href' => $href];
   };
   if (null !== $stats['error']) { $issue('critical', $stats['error'], null); }
+  if (null === $stats['error'] && Portal\EngineKey::isPublic()) { $issue('critical', 'Token secrets use the public default key', $can('database.manage') ? route('database') : null); }
   if (null !== $radius && true === $radius['catch_all']) { $issue('critical', 'Any address can send RADIUS requests with the default secret', route('radius-diagnostics')); }
   if (null !== $radius && false === $radius['service']) { $issue('critical', 'FreeRADIUS is stopped', route('radius-diagnostics')); }
   if ($locked > 0) { $issue('warning', $locked . ' user' . (1 === $locked ? ' is' : 's are') . ' locked out', $can('users.view') ? route('users', ['status' => 'locked']) : null); }

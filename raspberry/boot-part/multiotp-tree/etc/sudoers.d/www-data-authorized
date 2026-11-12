@@ -1,2 +1,4 @@
-www-data ALL = NOPASSWD: /bin/chmod,/bin/chown,/bin/cp,/usr/bin/7za,/usr/local/bin/multiotp/scripts/multiotp-service.sh,/usr/local/bin/multiotp/scripts/multiotp.pl
+# SohobOTP: the web server may only run the portal helpers below, with fixed arguments.
+# (multiOTP granted /bin/chmod, /bin/chown, /bin/cp, /usr/bin/7za and the network script with any
+# argument, which made the web server user equivalent to root.)
 www-data ALL = (root) NOPASSWD: /usr/local/sbin/multiotp-portal-radius apply, /usr/local/sbin/multiotp-portal-radius check, /usr/local/sbin/multiotp-portal-radius status, /usr/local/sbin/multiotp-portal-radius restart, /usr/local/sbin/multiotp-portal-radius disable-default-client, /usr/local/sbin/sohobotp-db local-enable, /usr/local/sbin/sohobotp-db status, /usr/local/sbin/sohobotp-db ha-primary, /usr/local/sbin/sohobotp-db ha-replica, /usr/local/sbin/sohobotp-db ha-promote, /usr/local/sbin/sohobotp-db ha-status

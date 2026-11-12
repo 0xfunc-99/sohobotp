@@ -12,6 +12,7 @@
  *   php portal/bin/portal-admin.php unlock --username=alice
  *   php portal/bin/portal-admin.php enable|disable --username=alice
  *   php portal/bin/portal-admin.php verify-audit
+ *   php portal/bin/portal-admin.php engine-key   (encrypt token secrets with a private key; status: --state=status)
  *   php portal/bin/portal-admin.php agent-release-add --file=sohobotp-agent-linux-amd64 --manifest=manifest.json
  *   php portal/bin/portal-admin.php agent-release-list
  *       signed agent releases for self-update (sign them OFFLINE: sohobotp-agent release sign)
@@ -183,6 +184,33 @@ try {
             } else {
                 fail('Audit trail integrity check FAILED at line ' . $result['broken_at'] . '.', 2);
             }
+            break;
+
+        case 'engine-key':
+            if ('status' === ($options['state'] ?? '')) {
+                out(Portal\EngineKey::isPublic() ? 'Token secrets use the PUBLIC default key: run engine-key.' : 'Token secrets use a private key (' . Portal\EngineKey::path() . ').');
+                $legacy = Portal\MultiotpService::get();
+                out('Legacy multiOTP admin password: ' . ('' === (string) $legacy->GetConfigAttribute('admin_password_hash') || $legacy->CheckAdminPassword(_MULTIOTP_DEFAULT_PASSWORD_) ? 'DEFAULT (1234): run engine-key.' : 'random.'));
+                break;
+            }
+            if ('secondary' === ((new Portal\Ha())->state()['role'] ?? 'none')) {
+                fail('This appliance is an HA secondary: it takes the key from its primary.');
+            }
+            if (Portal\MultiotpService::lockLegacyAdmin()) {
+                $audit->record('engine.legacy_admin_locked', 'success');
+                out('Legacy multiOTP admin password replaced by a random one.');
+            }
+            $summary = Portal\EngineKey::protect();
+            if (!$summary['changed']) {
+                out('Token secrets already use a private key.');
+                break;
+            }
+            $audit->record('engine.key_protected', [] === $summary['failed'] ? 'success' : 'failure', '', $summary);
+            out(sprintf('Re-encrypted %d user(s), %d token(s), %d RADIUS device(s), %d group(s) with a private key (%s).', $summary['users'], $summary['tokens'], $summary['devices'], $summary['groups'], Portal\EngineKey::path()));
+            if ([] !== $summary['failed']) {
+                fail('Not re-encrypted: ' . implode(', ', $summary['failed']), 2);
+            }
+            out('Back up this key file with your data: without it, the data cannot be read.');
             break;
 
         case 'agent-release-add':

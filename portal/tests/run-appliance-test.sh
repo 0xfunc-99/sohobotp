@@ -47,6 +47,16 @@ docker exec "$NAME" php -r '
   $check("portal assets still served ($c)", 200 === $c && "" !== $b);
   [$c] = $get("http://localhost/portal/");
   $check("plain HTTP redirected to HTTPS ($c)", 301 === $c);
+  [$c, $h] = $get("https://localhost/");
+  $check("home page redirects to the portal ($c)", 302 === $c && str_contains($h, "/portal/"));
+  foreach (["/index.php", "/multiotp.server.php", "/multiotp.proxy.php", "/test-tokens.csv", "/templates/template.html", "/readme_5.10.4.2.txt"] as $p) {
+    [$c] = $get("https://localhost" . $p);
+    $check("legacy $p refused by nginx ($c)", 404 === $c);
+  }
+  $ctx = stream_context_create(["http" => ["method" => "POST", "ignore_errors" => true, "header" => "Prefer: api=vuejs\r\nContent-Type: application/json", "content" => "{\"c\":\"getSalt\"}"], "ssl" => ["verify_peer" => false, "verify_peer_name" => false]]);
+  @file_get_contents("https://localhost/", false, $ctx);
+  preg_match("{HTTP/\S+ (\d+)}", $http_response_header[0] ?? "", $m);
+  $check("legacy admin API not reachable (" . ($m[1] ?? "?") . ")", in_array((int) ($m[1] ?? 0), [302, 404], true));
   exit($failed > 0 ? 1 : 0);
 ' || STATUS=1
 docker exec "$NAME" sh -c '
@@ -58,6 +68,14 @@ docker exec "$NAME" sh -c '
   [ "$(stat -c %U /usr/local/sbin/multiotp-portal-radius)" = root ] && ok "helper owned by root" || fail "helper owner"
   su -s /bin/sh www-data -c "sudo -n /usr/local/sbin/multiotp-portal-radius status" >/dev/null && ok "www-data may run the helper" || fail "sudo helper"
   su -s /bin/sh www-data -c "sudo -n /usr/local/sbin/multiotp-portal-radius apply /etc/shadow" >/dev/null 2>&1 && fail "helper accepted an extra argument" || ok "sudo refuses other arguments"
+  for cmd in "/bin/cp /etc/hostname /tmp/x" "/bin/chmod 0644 /etc/hostname" "/bin/chown root /etc/hostname" "/usr/bin/7za"; do
+    su -s /bin/sh www-data -c "sudo -n $cmd" >/dev/null 2>&1 && fail "www-data may run sudo $cmd" || ok "www-data may not run sudo ${cmd%% *}"
+  done
+  sleep 2
+  [ -s /etc/multiotp/engine.key ] && ok "private engine key created at first start" || fail "no engine key"
+  grep -q "^encryption_key_full_path=/etc/multiotp/engine.key" /etc/multiotp/config/multiotp.ini && ok "engine settings point at the key" || fail "encryption_key_full_path not set"
+  su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/bin/portal-admin.php engine-key --state=status" | grep -q "private key" && ok "token secrets use the private key" || fail "token secrets still on the public key"
+  su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/bin/portal-admin.php engine-key --state=status" | grep -q "admin password: random" && ok "legacy admin password is not 1234" || fail "legacy admin still accepts 1234"
   exit $FAILED
 ' || STATUS=1
 

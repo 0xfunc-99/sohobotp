@@ -18,6 +18,19 @@ final class DatabaseController extends Controller
         if ($this->isPost()) {
             $op = $this->post('op', 16);
             try {
+                if ('engine-key' === $op) {
+                    if ('secondary' === ((new Ha())->state()['role'] ?? 'none')) {
+                        throw new ValidationException('This appliance is an HA secondary: it takes the key from its primary.');
+                    }
+                    $summary = EngineKey::protect();
+                    if ($summary['changed']) {
+                        $this->audit->record('engine.key_protected', [] === $summary['failed'] ? 'success' : 'failure', '', $summary);
+                    }
+                    Session::flash([] === $summary['failed'] ? 'success' : 'error', [] === $summary['failed']
+                        ? 'Token secrets are now encrypted with a private key. Back up ' . EngineKey::path() . ' with your data.'
+                        : 'Some records could not be re-encrypted: ' . implode(', ', array_slice($summary['failed'], 0, 20)));
+                    $this->redirect('database');
+                }
                 if ('files' !== $current['backend']) {
                     throw new ValidationException('The data is already in a database.');
                 }
@@ -44,6 +57,8 @@ final class DatabaseController extends Controller
             'dbNow'   => $current,
             'counts'  => Database::counts(),
             'helper'  => Database::helper('status'),
+            'enginePublic' => EngineKey::isPublic(),
+            'engineKeyPath' => EngineKey::path(),
             'active'  => self::activeJob(),
             'input'   => $input,
             'test'    => $test,

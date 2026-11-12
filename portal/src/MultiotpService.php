@@ -54,6 +54,23 @@ final class MultiotpService
         return $multiotp;
     }
 
+    /**
+     * The legacy multiOTP admin API (web service "Prefer: api=vuejs") signs in "admin" with the
+     * password 1234 when none is set. SohobOTP never uses it: give it a long random password that
+     * nobody knows. Returns true when it was changed.
+     */
+    public static function lockLegacyAdmin(): bool
+    {
+        $engine = self::get();
+        $hash = (string) $engine->GetConfigAttribute('admin_password_hash');
+        if ('' !== $hash && !$engine->CheckAdminPassword(_MULTIOTP_DEFAULT_PASSWORD_)) {
+            return false;
+        }
+        $engine->SetAdminPassword(bin2hex(random_bytes(24)));
+        $engine->WriteConfigData();
+        return true;
+    }
+
     /** Used by tests to start from a fresh engine. */
     public static function reset(): void
     {

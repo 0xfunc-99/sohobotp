@@ -44,6 +44,34 @@ if (false === $lock || !flock($lock, LOCK_EX | LOCK_NB)) {
 
 Audit::setIp('local');
 
+// Token seeds must not stay encrypted with the engine's public default key (see EngineKey).
+// Runs once on each appliance's first start (never at image build, so keys differ per appliance).
+// An HA secondary never makes its own key: it adopts the primary's during the sync.
+if (Config::hasEtcDir() && Portal\EngineKey::isPublic() && 'secondary' !== ((new Portal\Ha())->state()['role'] ?? 'none')) {
+    try {
+        $summary = Portal\EngineKey::protect();
+        if ($summary['changed']) {
+            Audit::setActor('system');
+            Audit::default()->record('engine.key_protected', [] === $summary['failed'] ? 'success' : 'failure', '', $summary);
+            fwrite(STDOUT, gmdate('Y-m-d H:i:s') . ' token secrets now encrypted with a private key: ' . json_encode($summary) . "\n");
+        }
+    } catch (Throwable $error) {
+        fwrite(STDOUT, gmdate('Y-m-d H:i:s') . ' could not protect the engine key: ' . $error->getMessage() . "\n");
+    }
+}
+// The legacy multiOTP admin API must not accept its default password (1234)
+if (Config::hasEtcDir() && 'secondary' !== ((new Portal\Ha())->state()['role'] ?? 'none')) {
+    try {
+        if (MultiotpService::lockLegacyAdmin()) {
+            Audit::setActor('system');
+            Audit::default()->record('engine.legacy_admin_locked', 'success');
+            fwrite(STDOUT, gmdate('Y-m-d H:i:s') . " legacy multiOTP admin password replaced by a random one\n");
+        }
+    } catch (Throwable $error) {
+        fwrite(STDOUT, gmdate('Y-m-d H:i:s') . ' could not lock the legacy admin: ' . $error->getMessage() . "\n");
+    }
+}
+
 function log_line(string $text): void
 {
     fwrite(STDOUT, gmdate('Y-m-d H:i:s') . " $text\n");

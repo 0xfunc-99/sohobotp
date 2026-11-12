@@ -1161,5 +1161,26 @@ check('footer shows the company only, no licences link, no third-party credit', 
 $admin->get('/portal/index.php?r=account');
 check('open-source notices linked from My account', str_contains($admin->body, 'r=licences'));
 
+// ---------------------------------------------------------------- engine key (security review)
+Portal\MultiotpService::reset();
+check('worker gave the engine a private key at start', !Portal\EngineKey::isPublic() && is_file(Portal\EngineKey::path()) && 64 === strlen(trim((string) file_get_contents(Portal\EngineKey::path()))));
+$seedLine = '';
+foreach (glob(Portal\Config::etcDir() . '/users/*.db') ?: [] as $userFile) {
+    foreach (file($userFile) ?: [] as $line) {
+        if (str_starts_with($line, 'token_seed:=')) {
+            $seedLine = trim(substr($line, strlen('token_seed:=')));
+            break 2;
+        }
+    }
+}
+$raw = (string) base64_decode($seedLine);
+$guess = '';
+for ($i = 0; $i < strlen($raw); $i++) {
+    $guess .= chr(ord('DefaultCliEncryptionKey'[$i % 23]) ^ ord('token_seed'[$i % 10]) ^ ord($raw[$i]));
+}
+check('stored seeds cannot be decrypted with the public default key', '' !== $seedLine && !ctype_xdigit($guess));
+check('engine-key is idempotent', false === Portal\EngineKey::protect()['changed']);
+check('legacy admin password is not the default', !Portal\MultiotpService::get()->CheckAdminPassword(_MULTIOTP_DEFAULT_PASSWORD_));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -354,6 +354,21 @@ Every administrator needs a second factor; there is no way to skip it.
 - The last active super administrator cannot be disabled or demoted; nobody can disable
   themselves or reset their own second factor.
 - Strict Content-Security-Policy (no inline script), `X-Frame-Options: DENY`, `no-store`.
+- **Engine key.** multiOTP encrypts token seeds, PINs, RADIUS device secrets and passwords in
+  its settings with a key that is public in its source code. At its first start the background
+  worker gives each appliance its own random key (`/etc/multiotp/engine.key`), re-encrypts every
+  user, token, RADIUS device and group (files or MariaDB) and the engine settings, and points the
+  settings at the key file (`encryption_key_full_path`), where the engine and FreeRADIUS read it.
+  Also: `portal-admin.php engine-key` (`--state=status`), or the Database page. An HA secondary
+  takes the primary's key with the minute-by-minute sync. **Back up `engine.key` with the data**:
+  without it, users and tokens cannot be read.
+- **Legacy multiOTP web service.** nginx serves only `/portal/`; the home page redirects there and
+  the legacy admin API, `multiotp.server.php`, the demo token file and templates answer 404. The
+  worker also replaces the legacy admin password (`1234` by default) with a random one.
+- **sudo.** The web server user may only run the portal helpers with fixed arguments
+  (`etc/sudoers.d/www-data-authorized`); multiOTP's rule for `cp`, `chmod`, `chown`, `7za` and the
+  network script is removed.
+- TLS 1.2 and 1.3 only, AEAD ciphers, HSTS on every path.
 
 ## Audit trail
 

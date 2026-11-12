@@ -137,7 +137,9 @@ final class Ha
         }
         $radius = new Radius();
         $route = @file_get_contents(VipMigration::routeFile());
-        $payload = (string) json_encode(['clients' => $radius->render(), 'vip' => $radius->renderVip(), 'route' => false === $route ? '' : $route, 'at' => time()]);
+        // engine_key: the secondary reads the same database, so it must decrypt with the same key
+        $payload = (string) json_encode(['clients' => $radius->render(), 'vip' => $radius->renderVip(), 'route' => false === $route ? '' : $route,
+            'engine_key' => EngineKey::current(), 'at' => time()]);
         $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
         $box = sodium_crypto_secretbox($payload, $nonce, hash('sha256', self::MAGIC . $key, true));
         $ha->store->update(static function (array &$d): void {
@@ -227,6 +229,14 @@ final class Ha
         if (!is_array($payload)) {
             $error = false === $raw ? 'The primary portal does not answer.' : 'The primary refused the request or its answer could not be authenticated.';
         } else {
+            $engineKey = (string) ($payload['engine_key'] ?? '');
+            if ('' !== $engineKey && $engineKey !== (string) EngineKey::current()) {
+                try {
+                    EngineKey::protect($engineKey);
+                } catch (\Throwable $keyError) {
+                    $error = 'The primary\'s engine key could not be adopted: ' . $keyError->getMessage();
+                }
+            }
             $hash = hash('sha256', $payload['clients'] . "\n" . $payload['vip']);
             if ($force || $hash !== ($data['last_sync_hash'] ?? '')) {
                 file_put_contents(Radius::candidateFile(), $payload['clients']);

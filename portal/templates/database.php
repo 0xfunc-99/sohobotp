@@ -18,6 +18,21 @@
     if anything fails, SohobOTP stays on the files. Administrators, endpoints and portal settings stay in the portal's own files.</p>
 </section>
 
+<section class="panel">
+  <h2>Token secrets</h2>
+  <?php if ($enginePublic): ?>
+    <div class="alert alert-error" role="alert">Token seeds, PINs and RADIUS secrets are encrypted with the engine's <strong>public default key</strong>: anyone with a copy of the data could clone every authenticator.</div>
+    <p class="hint">Normally done automatically when the background worker starts. Re-encrypting takes a few seconds per thousand users; logins checked during that time may fail once.</p>
+    <form method="post" action="<?= e(route('database')) ?>" class="inline" data-confirm="Re-encrypt all token secrets with a new private key now?">
+      <?= csrf_field() ?><input type="hidden" name="op" value="engine-key">
+      <button type="submit" class="button-primary">Encrypt with a private key</button>
+    </form>
+  <?php else: ?>
+    <p><span class="status status-success">private key</span> Token seeds, PINs and RADIUS secrets are encrypted with this appliance's own key: <code><?= e($engineKeyPath) ?></code>.</p>
+    <p class="hint">Back up this file together with your data: without it, the users and tokens cannot be read. An HA secondary receives the key from its primary.</p>
+  <?php endif; ?>
+</section>
+
 <?php if ('files' === $dbNow['backend'] && null === $active): ?>
 <?php if (null !== $error): ?><div class="alert alert-error" role="alert"><?= e($error) ?></div><?php endif; ?>
 <section class="panel">
