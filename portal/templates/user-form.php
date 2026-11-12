@@ -17,7 +17,7 @@
       <label class="choice"><input type="radio" name="token_serial" value="<?= e($serial) ?>"<?= $input['token_serial'] === $serial ? ' checked' : '' ?>>
         <span>Hardware token <code><?= e($serial) ?></code></span></label>
     <?php endforeach; ?>
-    <?php if ([] === $freeTokens): ?><p class="muted">No unassigned hardware tokens. Import them on the Hardware tokens page.</p><?php endif; ?>
+    <?php if ([] === $freeTokens): ?><p class="muted">No unassigned hardware tokens. Import them on the Key fobs page.</p><?php endif; ?>
   </fieldset>
   <div class="actions">
     <button type="submit" class="button-primary">Create user</button>

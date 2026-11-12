@@ -1,6 +1,6 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <?php $p = $input['policy']; $on = static fn (string $k): string => !empty($p[$k]) ? ' checked' : ''; ?>
-<p class="back"><a href="<?= e(route('radius')) ?>">← RADIUS servers</a></p>
+<p class="back"><a href="<?= e(route('radius')) ?>">← VPNs and devices</a></p>
 <form method="post" action="<?= e(route('radius-group', null === $group ? [] : ['id' => $group['id']])) ?>" class="form narrow">
   <?= csrf_field() ?>
   <label>Name <input name="name" value="<?= e($input['name']) ?>" required maxlength="64" placeholder="VPN gateways"></label>

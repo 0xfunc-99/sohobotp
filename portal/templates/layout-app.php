@@ -5,12 +5,11 @@
 
   // Sidebar sections. Entries the role cannot use are already left out of $nav; unknown entries go to "More".
   $sectionOf = [
-      'dashboard' => '', 'users' => 'Identity', 'tokens' => 'Identity', 'directory' => 'Identity',
-      'radius' => 'Access', 'endpoints' => 'Access', 'agent-download' => 'Access', 'api-keys' => 'Access',
-      'admins' => 'System', 'database' => 'System', 'ha' => 'System', 'audit' => 'System',
-      'account' => 'You',
+      'dashboard' => '', 'users' => '', 'directory' => '', 'radius' => '', 'endpoints' => '', 'agent-download' => '',
+      'tokens' => 'Advanced', 'admins' => 'Advanced', 'audit' => 'Advanced', 'api-keys' => 'Advanced',
+      'database' => 'Advanced', 'ha' => 'Advanced', 'account' => 'You',
   ];
-  $sections = ['' => [], 'Identity' => [], 'Access' => [], 'System' => [], 'More' => []];
+  $sections = ['' => [], 'Advanced' => [], 'More' => []];
   $accountItem = null;
   foreach ($nav as $navItem) {
       if ('account' === $navItem['route']) {
@@ -50,11 +49,11 @@
 
   $intros = [
       'users' => 'People who sign in with a SohobOTP code: search, enrol authenticators, unlock and manage accounts.',
-      'tokens' => 'Hardware tokens imported into SohobOTP and the users they are assigned to.',
-      'directory' => 'Connect Active Directory or LDAP so users are created, updated and disabled automatically.',
-      'radius' => 'VPNs, firewalls and other devices that check logins with SohobOTP over RADIUS.',
-      'endpoints' => 'Windows and Linux machines running the SohobOTP agent.',
-      'agent-download' => 'The agent for a Windows or Linux machine, ready to enrol: the portal address, a new enrolment token, the pin and the certificate are built into the download.',
+      'tokens' => 'Key fobs (hardware tokens) that show a code, and the users who carry them.',
+      'directory' => 'Connect Active Directory (or LDAP) so users are added, updated and disabled automatically.',
+      'radius' => 'VPNs, firewalls and Wi-Fi that ask for a SohobOTP code when someone signs in.',
+      'endpoints' => 'Windows and Linux computers that ask for a SohobOTP code at sign-in, and their policies.',
+      'agent-download' => 'Download the agent for a Windows or Linux computer. Run it there: it joins SohobOTP by itself, nothing to type.',
       'admins' => 'People who can sign in to this portal, and what each role may do.',
       'api-keys' => 'Keys for scripts and other applications that use the SohobOTP REST API.',
       'database' => 'Where SohobOTP stores users, tokens and RADIUS data.',
@@ -95,14 +94,21 @@
     <nav class="sidebar-nav" aria-label="Main">
       <?php foreach ($sections as $heading => $items): ?>
         <?php if ([] === $items) { continue; } ?>
-        <div class="nav-section">
-          <?php if ('' !== $heading): ?><p class="nav-heading"><?= e($heading) ?></p><?php endif; ?>
+        <?php $links = static function (array $items) use ($icon, $navRoute): void { ?>
           <ul>
             <?php foreach ($items as $navItem): ?>
               <li><a class="nav-link" href="<?= e(route($navItem['route'])) ?>"<?= $navRoute === $navItem['route'] ? ' aria-current="page"' : '' ?>><?= $icon($navItem['route']) ?><span><?= e($navItem['label']) ?></span></a></li>
             <?php endforeach; ?>
           </ul>
-        </div>
+        <?php }; ?>
+        <?php if ('' === $heading): ?>
+          <div class="nav-section"><?php $links($items); ?></div>
+        <?php else: ?>
+          <details class="nav-section nav-fold"<?= in_array($navRoute, array_column($items, 'route'), true) ? ' open' : '' ?>>
+            <summary class="nav-heading"><?= e($heading) ?></summary>
+            <?php $links($items); ?>
+          </details>
+        <?php endif; ?>
       <?php endforeach; ?>
       <?php if (null !== $accountItem): ?>
         <div class="nav-section">

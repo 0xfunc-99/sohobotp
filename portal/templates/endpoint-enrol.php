@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Computers</a></p>
 <section class="panel">
   <h2>New enrolment token</h2>
   <p class="hint">The agent uses a token once to register the machine. Give it to whoever installs the agent; it is shown only once.</p>

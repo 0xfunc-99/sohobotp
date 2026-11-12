@@ -2,7 +2,7 @@
 <?php $healthLabel = ['online' => 'Online', 'offline' => 'Offline', 'never' => 'Never checked in', 'pending' => 'Waiting for approval', 'disabled' => 'Disabled']; ?>
 <?php $healthClass = ['online' => 'success', 'offline' => 'failure', 'never' => 'info', 'pending' => 'info', 'disabled' => 'denied']; ?>
 <section class="cards" aria-label="Endpoint status">
-  <div class="card"><span class="card-label">Endpoints</span><span class="card-value"><?= (int) $total ?></span></div>
+  <div class="card"><span class="card-label">Computers</span><span class="card-value"><?= (int) $total ?></span></div>
   <div class="card"><span class="card-label">Online</span><span class="card-value"><?= (int) $counts['online'] ?></span></div>
   <div class="card<?= $counts['offline'] > 0 ? ' card-warning' : '' ?>"><span class="card-label">Offline</span><span class="card-value"><?= (int) $counts['offline'] ?></span></div>
   <a class="card card-link<?= $counts['pending'] > 0 ? ' card-warning' : '' ?>" href="<?= e(route('endpoints', ['health' => 'pending'])) ?>"><span class="card-label">Waiting for approval</span><span class="card-value"><?= (int) $counts['pending'] ?></span></a>
@@ -11,10 +11,10 @@
 
 <section class="panel">
   <div class="toolbar">
-    <h2>Endpoints</h2>
+    <h2>Computers</h2>
     <input type="search" class="search" placeholder="Search endpoints" data-filter-table="endpoints-table" aria-label="Search endpoints">
-    <a class="button" href="<?= e(route('endpoint-groups')) ?>">Endpoint groups</a>
-    <?php if ($canManage): ?><a class="button-primary" href="<?= e(route('endpoint-enrol')) ?>">+ Enrol endpoints</a><?php endif; ?>
+    <a class="button" href="<?= e(route('endpoint-groups')) ?>">Computer policies</a><?php if ($canManage): ?> <a class="button" href="<?= e(route('endpoint-enrol')) ?>">Enrolment tokens</a><?php endif; ?>
+    <?php if ($canManage): ?><a class="button-primary" href="<?= e(route('agent-download')) ?>">+ Add a computer</a><?php endif; ?>
   </div>
   <form method="get" action="index.php" class="filters">
     <input type="hidden" name="r" value="endpoints">
@@ -83,7 +83,7 @@
     <?php if ($missing > 0): ?>
       <div class="toolbar">
         <input type="search" class="search" placeholder="Search computers" data-filter-table="coverage-table" aria-label="Search computers without the agent">
-        <?php if ($canManage): ?><a class="button-primary toolbar-end" href="<?= e(route('endpoint-enrol')) ?>">+ Enrol endpoints</a><?php endif; ?>
+        <?php if ($canManage): ?><a class="button-primary toolbar-end" href="<?= e(route('agent-download')) ?>">+ Add a computer</a><?php endif; ?>
       </div>
       <div class="table-wrap">
         <table class="table" id="coverage-table">

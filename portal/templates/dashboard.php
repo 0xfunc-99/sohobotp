@@ -11,6 +11,7 @@
   $endpoints = $can('endpoints.view') ? Portal\DashboardInsights::endpoints() : null;
   $radius = $can('radius.view') ? Portal\DashboardInsights::radius() : null;
   $logins = Portal\DashboardInsights::logins(14);
+  $guide = Portal\GettingStarted::steps($me['role'], $users, $directory['enabled'], (int) $logins['ok']);
   $activity = $can('audit.view') ? Portal\DashboardInsights::activity(Portal\Audit::default(), 14) : null;
 
   // What needs a look, most serious first
@@ -20,15 +21,15 @@
   };
   if (null !== $stats['error']) { $issue('critical', $stats['error'], null); }
   if (null === $stats['error'] && Portal\EngineKey::isPublic()) { $issue('critical', 'Token secrets use the public default key', $can('database.manage') ? route('database') : null); }
-  if (null !== $radius && true === $radius['catch_all']) { $issue('critical', 'Any address can send RADIUS requests with the default secret', route('radius-diagnostics')); }
-  if (null !== $radius && false === $radius['service']) { $issue('critical', 'FreeRADIUS is stopped', route('radius-diagnostics')); }
+  if (null !== $radius && true === $radius['catch_all']) { $issue('critical', 'Any device can send sign-ins with the well-known default secret', route('radius-diagnostics')); }
+  if (null !== $radius && false === $radius['service']) { $issue('critical', 'The sign-in service for VPNs and devices (FreeRADIUS) is stopped', route('radius-diagnostics')); }
   if ($locked > 0) { $issue('warning', $locked . ' user' . (1 === $locked ? ' is' : 's are') . ' locked out', $can('users.view') ? route('users', ['status' => 'locked']) : null); }
   if ($lockedAdmins > 0) { $issue('warning', $lockedAdmins . ' administrator account' . (1 === $lockedAdmins ? ' is' : 's are') . ' locked', $can('admins.manage') ? route('admins') : null); }
-  if (null !== $radius && $radius['pending']) { $issue('warning', 'RADIUS changes are not applied yet', route('radius')); }
-  if (null !== $endpoints && $endpoints['pending'] > 0) { $issue('warning', $endpoints['pending'] . ' machine' . (1 === $endpoints['pending'] ? ' is' : 's are') . ' waiting for approval', route('endpoints', ['health' => 'pending'])); }
+  if (null !== $radius && $radius['pending']) { $issue('warning', 'Changes to VPNs and devices are not active yet: open the page and apply them', route('radius')); }
+  if (null !== $endpoints && $endpoints['pending'] > 0) { $issue('warning', $endpoints['pending'] . ' computer' . (1 === $endpoints['pending'] ? ' is' : 's are') . ' waiting for your approval', route('endpoints', ['health' => 'pending'])); }
   if (null !== $endpoints && null !== $endpoints['coverage'] && $endpoints['coverage']['servers_without'] > 0) { $n = $endpoints['coverage']['servers_without']; $issue('warning', $n . ' server' . (1 === $n ? '' : 's') . ' in Active Directory ' . (1 === $n ? 'has' : 'have') . ' no SohobOTP agent', route('endpoints') . '#coverage'); }
   elseif (null !== $endpoints && null !== $endpoints['coverage'] && $endpoints['coverage']['without'] > 0) { $n = $endpoints['coverage']['without']; $issue('info', $n . ' computer' . (1 === $n ? '' : 's') . ' in Active Directory ' . (1 === $n ? 'has' : 'have') . ' no SohobOTP agent', route('endpoints') . '#coverage'); }
-  if (null !== $endpoints && $endpoints['offline'] > 0) { $issue('info', $endpoints['offline'] . ' endpoint' . (1 === $endpoints['offline'] ? ' is' : 's are') . ' offline', route('endpoints', ['health' => 'offline'])); }
+  if (null !== $endpoints && $endpoints['offline'] > 0) { $issue('info', $endpoints['offline'] . ' computer' . (1 === $endpoints['offline'] ? ' is' : 's are') . ' offline', route('endpoints', ['health' => 'offline'])); }
   if ($directory['enabled'] && null !== $directory['last'] && 'succeeded' !== $directory['last']['status']) { $issue('warning', 'The last directory sync ' . $directory['last']['status'], route('directory')); }
   $worst = [] === $issues ? 'ok' : (in_array('critical', array_column($issues, 'level'), true) ? 'critical' : (in_array('warning', array_column($issues, 'level'), true) ? 'warning' : 'info'));
 
@@ -67,7 +68,7 @@
   </div>
   <div class="hero-actions">
     <?php if ($can('users.manage')): ?><a class="button-primary" href="<?= e(route('user-new')) ?>"><?= $icon('plus', '') ?>New user</a><?php endif; ?>
-    <?php if ($can('endpoints.manage')): ?><a class="button" href="<?= e(route('endpoint-enrol')) ?>"><?= $icon('endpoints', '') ?>Enrol machines</a><?php endif; ?>
+    <?php if ($can('endpoints.manage')): ?><a class="button" href="<?= e(route('agent-download')) ?>"><?= $icon('endpoints', '') ?>Add a computer</a><?php endif; ?>
     <?php if ($can('radius.view')): ?><a class="button" href="<?= e(route('radius-diagnostics')) ?>"><?= $icon('activity', '') ?>Diagnostics</a><?php endif; ?>
   </div>
   <?php if ([] !== $issues): ?>
@@ -83,15 +84,40 @@
   <?php endif; ?>
 </section>
 
+<?php if (!$guide['complete']): ?>
+  <section class="panel guide" aria-labelledby="guide-title">
+    <div class="panel-head">
+      <div><h2 id="guide-title">Get started</h2><p class="panel-sub"><?= (int) $guide['done'] ?> of 4 done. Each step ticks itself when it is set up.</p></div>
+      <span class="guide-meter guide-meter-<?= (int) $guide['done'] ?>" aria-hidden="true"><span></span></span>
+    </div>
+    <ol class="guide-steps">
+      <?php $nextShown = false; foreach ($guide['steps'] as $n => $step): $isNext = !$step['done'] && !$nextShown; $nextShown = $nextShown || $isNext; ?>
+        <li class="guide-step<?= $step['done'] ? ' is-done' : '' ?><?= $isNext ? ' is-next' : '' ?>">
+          <span class="guide-mark" aria-hidden="true"><?= $step['done'] ? $icon('check', '') : (string) ($n + 1) ?></span>
+          <span class="guide-body">
+            <strong><?= e($step['title']) ?></strong><span class="sr-only"><?= $step['done'] ? ' (done)' : ' (to do)' ?></span>
+            <span class="muted"><?= e($step['text']) ?></span>
+          </span>
+          <?php if (!$step['done']): ?>
+            <span class="guide-actions">
+              <?php foreach ($step['actions'] as $k => $a): ?><a class="<?= $isNext && 0 === $k ? 'button-primary' : 'button' ?> button-small" href="<?= e(route($a['route'])) ?>"><?= e($a['label']) ?></a><?php endforeach; ?>
+            </span>
+          <?php endif; ?>
+        </li>
+      <?php endforeach; ?>
+    </ol>
+  </section>
+<?php endif; ?>
+
 <section class="cards kpis" aria-label="SohobOTP status">
   <?= $kpi('users', 'Users', null === $users ? '—' : (string) $users, null === $active ? '' : 'Active users: ' . $active . ' · disabled: ' . (int) $disabled, $can('users.view') ? route('users') : null, 'good') ?>
   <?= $kpi('lock', 'Locked users', (string) $locked, $locked > 0 ? 'Unlock them from the user page' : 'No one is locked out', $can('users.view') ? route('users', ['status' => 'locked']) : null, $locked > 0 ? 'warn' : '') ?>
-  <?= $kpi('tokens', 'Hardware tokens', null === $stats['tokens'] ? '—' : (string) $stats['tokens'], 'Imported key fobs', $can('tokens.view') ? route('tokens') : null) ?>
+  <?= $kpi('tokens', 'Key fobs', null === $stats['tokens'] ? '—' : (string) $stats['tokens'], 'Imported key fobs', $can('tokens.view') ? route('tokens') : null) ?>
   <?php if (null !== $endpoints): ?>
-    <?= $kpi('endpoints', 'Endpoints online', (string) $endpoints['online'], 'of ' . $endpoints['total'] . ' machine' . (1 === $endpoints['total'] ? '' : 's'), route('endpoints'), $endpoints['pending'] > 0 ? 'warn' : '') ?>
+    <?= $kpi('endpoints', 'Computers online', (string) $endpoints['online'], 'of ' . $endpoints['total'] . ' machine' . (1 === $endpoints['total'] ? '' : 's'), route('endpoints'), $endpoints['pending'] > 0 ? 'warn' : '') ?>
   <?php endif; ?>
   <?php if (null !== $radius): ?>
-    <?= $kpi('radius', 'RADIUS servers', (string) $radius['servers'], 'in ' . $radius['groups'] . ' group' . (1 === $radius['groups'] ? '' : 's'), route('radius'), $radius['pending'] ? 'warn' : '') ?>
+    <?= $kpi('radius', 'VPNs and devices', (string) $radius['servers'], 'in ' . $radius['groups'] . ' group' . (1 === $radius['groups'] ? '' : 's'), route('radius'), $radius['pending'] ? 'warn' : '') ?>
   <?php endif; ?>
   <?= $kpi('admins', 'Portal administrators', (string) (int) $adminCount, $lockedAdmins > 0 ? $lockedAdmins . ' locked' : 'None locked', $can('admins.manage') ? route('admins') : null, $lockedAdmins > 0 ? 'warn' : '') ?>
 </section>
@@ -124,13 +150,13 @@
       ], 'Users by state') ?>
     <?php endif; ?>
     <?php if (null !== $endpoints && $endpoints['total'] > 0): ?>
-      <h3>Endpoints</h3>
+      <h3>Computers</h3>
       <?= $charts['segments']([
           ['label' => 'Online', 'value' => $endpoints['online'], 'class' => 'viz-good', 'href' => route('endpoints', ['health' => 'online'])],
           ['label' => 'Offline', 'value' => $endpoints['offline'], 'class' => 'viz-warn', 'href' => route('endpoints', ['health' => 'offline'])],
           ['label' => 'Waiting', 'value' => $endpoints['pending'] + $endpoints['never'], 'class' => 'viz-info', 'href' => route('endpoints', ['health' => 'pending'])],
           ['label' => 'Disabled', 'value' => $endpoints['disabled'], 'class' => 'viz-neutral', 'href' => route('endpoints', ['health' => 'disabled'])],
-      ], 'Endpoints by state') ?>
+      ], 'Computers by state') ?>
     <?php endif; ?>
   </section>
 
@@ -182,7 +208,7 @@
         <li>
           <span class="service-icon" aria-hidden="true"><?= $icon('endpoints', '') ?></span>
           <span class="service-body">
-            <strong>Endpoint agents</strong>
+            <strong>Computer agents</strong>
             <span class="muted"><?= $endpoints['total'] ?> enrolled · <?= $endpoints['online'] ?> online</span>
           </span>
           <?php if (0 === $endpoints['total']): ?><span class="status">none yet</span>

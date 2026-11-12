@@ -14,7 +14,7 @@ final class DirectoryController extends Controller
         $directory = new Directory();
         $state = $directory->state();
         $this->view->render('directory', [
-            'title'     => 'Directory (AD/LDAP)',
+            'title'     => 'Active Directory',
             'settings'  => $input ?? $directory->settings(),
             'hasPassword' => $directory->settings()['has_password'],
             'lastSync'  => $state['last_sync'] ?? null,

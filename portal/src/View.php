@@ -35,16 +35,16 @@ final class View
         $items = [
             ['route' => 'dashboard', 'label' => 'Dashboard', 'permission' => ['dashboard.view']],
             ['route' => 'users', 'label' => 'Users', 'permission' => ['users.view']],
-            ['route' => 'tokens', 'label' => 'Hardware tokens', 'permission' => ['tokens.view']],
-            ['route' => 'directory', 'label' => 'Directory (AD/LDAP)', 'permission' => ['settings.view', 'sync.view', 'directory.manage']],
-            ['route' => 'radius', 'label' => 'RADIUS servers', 'permission' => ['radius.view']],
-            ['route' => 'endpoints', 'label' => 'Endpoints', 'permission' => ['endpoints.view']],
-            ['route' => 'agent-download', 'label' => 'Download agent', 'permission' => ['endpoints.manage']],
+            ['route' => 'directory', 'label' => 'Active Directory', 'permission' => ['settings.view', 'sync.view', 'directory.manage']],
+            ['route' => 'radius', 'label' => 'VPNs and devices', 'permission' => ['radius.view']],
+            ['route' => 'endpoints', 'label' => 'Computers', 'permission' => ['endpoints.view']],
+            ['route' => 'agent-download', 'label' => 'Add a computer', 'permission' => ['endpoints.manage']],
+            ['route' => 'tokens', 'label' => 'Key fobs', 'permission' => ['tokens.view']],
             ['route' => 'admins', 'label' => 'Administrators', 'permission' => ['admins.manage']],
+            ['route' => 'audit', 'label' => 'Audit trail', 'permission' => ['audit.view']],
             ['route' => 'api-keys', 'label' => 'API keys', 'permission' => ['api.manage']],
             ['route' => 'database', 'label' => 'Database', 'permission' => ['database.manage']],
             ['route' => 'ha', 'label' => 'High availability', 'permission' => ['database.manage']],
-            ['route' => 'audit', 'label' => 'Audit trail', 'permission' => ['audit.view']],
             ['route' => 'account', 'label' => 'My account', 'permission' => []],
         ];
         return array_values(array_filter($items, static function (array $item) use ($role): bool {

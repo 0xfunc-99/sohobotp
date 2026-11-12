@@ -8,9 +8,9 @@
   $active = in_array($job['status'], Portal\Jobs::ACTIVE, true);
 ?>
 <?php if (str_starts_with($job['type'], 'endpoints.')): ?>
-<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a> · <a href="<?= e(route('endpoint-groups')) ?>">Endpoint groups and AD rules</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Computers</a> · <a href="<?= e(route('endpoint-groups')) ?>">Computer policies and AD rules</a></p>
 <?php elseif (str_starts_with($job['type'], 'radius.')): ?>
-<p class="back"><a href="<?= e(route('radius')) ?>">← RADIUS servers</a> · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
+<p class="back"><a href="<?= e(route('radius')) ?>">← VPNs and devices</a> · <a href="<?= e(route('radius-diagnostics')) ?>">Diagnostics</a></p>
 <?php else: ?>
 <p class="back"><a href="<?= e(route('directory')) ?>">← Directory</a> · <a href="<?= e(route('jobs')) ?>">All jobs</a></p>
 <?php endif; ?>

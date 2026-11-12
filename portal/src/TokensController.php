@@ -14,7 +14,7 @@ final class TokensController extends Controller
     {
         $this->requirePermission('tokens.view');
         $this->view->render('tokens', [
-            'title'     => 'Hardware tokens',
+            'title'     => 'Key fobs',
             'tokens'    => (new Tokens())->all(),
             'canManage' => $this->can('tokens.manage'),
         ]);

@@ -32,7 +32,7 @@ final class EndpointsController extends Controller
             $rows[] = $endpoint;
         }
         $this->view->render('endpoints', [
-            'title' => 'Endpoints',
+            'title' => 'Computers',
             'rows' => $rows,
             'total' => count($list),
             'counts' => $counts,
@@ -122,7 +122,7 @@ final class EndpointsController extends Controller
         $groups = $endpoints->groups();
         $settings = (new Directory())->settings();
         $this->view->render('endpoint-groups', [
-            'title' => 'Endpoint groups',
+            'title' => 'Computer policies',
             'groups' => $groups,
             'names' => array_column($groups, 'name', 'id'),
             'rules' => $endpoints->rules(),
@@ -273,7 +273,7 @@ final class EndpointsController extends Controller
             $this->redirect('endpoint-group');
         }
         $this->view->render('endpoint-enrol', [
-            'title' => 'Enrol endpoints',
+            'title' => 'Enrolment tokens',
             'tokens' => $endpoints->tokens(),
             'groups' => $groups,
             'names' => array_column($groups, 'name', 'id'),
@@ -350,7 +350,7 @@ final class EndpointsController extends Controller
             }
         }
         $this->view->render('agent-download', [
-            'title' => 'Download agent',
+            'title' => 'Add a computer',
             'groups' => $groups,
             'programs' => $programs,
             'values' => $values,

@@ -1,7 +1,7 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <?php $inv = $endpoint['inventory']; $healthLabel = ['online' => 'Online', 'offline' => 'Offline', 'never' => 'Never checked in', 'pending' => 'Waiting for approval', 'disabled' => 'Disabled']; ?>
 <?php $ad = $endpoint['directory'] ?? null; $assigned = $endpoint['assigned_by'] ?? 'token'; ?>
-<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Computers</a></p>
 <?php if (null !== $endpoint['attention']): ?>
   <div class="alert alert-error" role="alert"><?= e($endpoint['attention']) ?></div>
 <?php endif; ?>

@@ -1,5 +1,5 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
-<p class="back"><a href="<?= e(route('endpoints')) ?>">← Endpoints</a></p>
+<p class="back"><a href="<?= e(route('endpoints')) ?>">← Computers</a></p>
 <section class="panel">
   <div class="toolbar">
     <h2>Endpoint groups</h2>
@@ -8,7 +8,7 @@
   <p class="hint">A group sets the policy for every endpoint in it: which Linux logins and Windows sign-ins need a code, exclusions, offline cache.</p>
   <div class="table-wrap">
     <table class="table">
-      <thead><tr><th>Group</th><th>Endpoints</th><th>Linux</th><th>Windows</th><?php if ($canManage): ?><th></th><?php endif; ?></tr></thead>
+      <thead><tr><th>Group</th><th>Computers</th><th>Linux</th><th>Windows</th><?php if ($canManage): ?><th></th><?php endif; ?></tr></thead>
       <tbody>
         <?php foreach ($groups as $g): $l = $g['policy']['linux']; $w = $g['policy']['windows']; ?>
           <tr>

@@ -14,7 +14,7 @@ final class RadiusController extends Controller
         $radius = new Radius();
         $groups = $radius->groups();
         $this->view->render('radius', [
-            'title'    => 'RADIUS servers',
+            'title'    => 'VPNs and devices',
             'groups'   => $groups,
             'names'    => array_column($groups, 'name', 'id'),
             'clients'  => $radius->clients(),
