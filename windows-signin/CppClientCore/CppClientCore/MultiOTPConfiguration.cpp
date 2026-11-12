@@ -117,6 +117,7 @@ MultiOTPConfiguration::MultiOTPConfiguration() : Configuration()
 	winBuildNr = info.dwBuildNumber;
 
 	multiOTPTimeoutUnlock = rr.getRegistryDWORD(L"multiOTPTimeoutUnlock");
+	multiOTPTimeoutReconnect = rr.getRegistryDWORD(L"multiOTPTimeoutReconnect");
 	multiOTPDisplayLastUser = rr.getBoolRegistryDWORD(L"multiOTPDisplayLastUser");
 	multiOTPWithout2FA = rr.getBoolRegistryDWORD(L"multiOTPWithout2FA");
 	numlockOn = rr.getBoolRegistryDWORD(L"numlockOn");

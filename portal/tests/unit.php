@@ -259,6 +259,9 @@ $form = static fn (array $over = []): array => $over + [
 ];
 $endpoints = new Endpoints();
 check('new groups: no code in credential prompts by default', '3e' === Endpoints::templateInput('')['win_cpus_credui'] && '3e' === Endpoints::effectivePolicy([])['windows']['cpus_credui']);
+check('reconnect grace: 15 min for servers, off elsewhere, optional in older forms, capped at 480', 15 === Endpoints::templateInput('server')['win_timeout_reconnect'] && 0 === Endpoints::templateInput('workstation')['win_timeout_reconnect']
+    && 0 === Endpoints::policyFromInput($form())['windows']['timeout_reconnect'] && 30 === Endpoints::policyFromInput($form(['win_timeout_reconnect' => '30']))['windows']['timeout_reconnect']
+    && throws(static fn () => Endpoints::policyFromInput($form(['win_timeout_reconnect' => '600'])), ValidationException::class));
 check('templates: strict admin workstation asks in credential prompts, laptops cache offline', '0e' === Endpoints::templateInput('admin')['win_cpus_credui'] && true === Endpoints::templateInput('laptop')['win_cache_enabled'] && '3e' === Endpoints::templateInput('server')['win_cpus_credui'] && '0e' === Endpoints::templateInput('server')['win_cpus_logon']);
 $coverage = $endpoints->checkCoverage(['truncated' => false, 'computers' => [
     ['name' => 'web01', 'dn' => 'CN=WEB01,OU=Servers,DC=x', 'dns_host' => 'web01.x', 'os' => 'Windows Server 2022', 'enabled' => true, 'last_logon' => null],

@@ -51,6 +51,7 @@ final class Endpoints
             'upn_format'       => false,
             'default_prefix'   => '',
             'timeout_unlock'   => 0,
+            'timeout_reconnect' => 0, // minutes: Remote Desktop reconnect from the same client without a new code
             'without2fa'       => false,
             'two_step_hide_otp'      => false,
             'two_step_send_password' => false,
@@ -67,8 +68,8 @@ final class Endpoints
     public const TEMPLATES = [
         'server' => [
             'label' => 'Servers',
-            'description' => 'Code at the console and for Remote Desktop into the server. No code in credential prompts on the server itself.',
-            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => false]],
+            'description' => 'Code at the console and for Remote Desktop into the server; reconnecting to your own session from the same computer within 15 minutes needs no new code. No code in credential prompts on the server itself.',
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => false, 'timeout_reconnect' => 15]],
         ],
         'workstation' => [
             'label' => 'Desktops',
@@ -288,6 +289,7 @@ final class Endpoints
                 'upn_format'       => $flag('win_upn_format'),
                 'default_prefix'   => $text('win_default_prefix', 64),
                 'timeout_unlock'   => $int('win_timeout_unlock', 0, 1440, 'Unlock grace period'),
+                'timeout_reconnect' => array_key_exists('win_timeout_reconnect', $input) ? $int('win_timeout_reconnect', 0, 480, 'Remote Desktop reconnect grace period') : 0,
                 'without2fa'       => $flag('win_without2fa'),
                 'two_step_hide_otp'      => $flag('win_two_step_hide_otp'),
                 'two_step_send_password' => $flag('win_two_step_send_password'),
@@ -1153,6 +1155,7 @@ final class Endpoints
             'upn_format' => $w['upn_format'],
             'default_prefix' => $w['default_prefix'],
             'timeout_unlock' => $w['timeout_unlock'],
+            'timeout_reconnect' => (int) ($w['timeout_reconnect'] ?? 0),
             'without2fa' => $w['without2fa'],
             'two_step_hide_otp' => $w['two_step_hide_otp'],
             'two_step_send_password' => $w['two_step_send_password'],

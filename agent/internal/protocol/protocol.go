@@ -145,6 +145,7 @@ type WindowsPolicy struct {
 	UPNFormat           bool   `json:"upn_format"`
 	DefaultPrefix       string `json:"default_prefix"`
 	TimeoutUnlock       int    `json:"timeout_unlock"`
+	TimeoutReconnect    int    `json:"timeout_reconnect"` // minutes; 0 when an older portal leaves it out
 	Without2FA          bool   `json:"without2fa"`
 	TwoStepHideOTP      bool   `json:"two_step_hide_otp"`
 	TwoStepSendPassword bool   `json:"two_step_send_password"`

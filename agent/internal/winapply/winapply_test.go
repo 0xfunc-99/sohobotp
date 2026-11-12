@@ -48,7 +48,7 @@ func policy() *protocol.WindowsPolicy {
 	return &protocol.WindowsPolicy{
 		ServerURL: "https://portal.example.test/portal/cp.php?e=e8f2c1a9b4d7e6f5a3c2", ServerTimeout: 5,
 		CpusLogon: "0e", CpusUnlock: "0e", CpusCredui: "1d", ExcludedAccount: `PC01\breakglass`,
-		CacheEnabled: true, LoginText: "SohobOTP", TimeoutUnlock: 10,
+		CacheEnabled: true, LoginText: "SohobOTP", TimeoutUnlock: 10, TimeoutReconnect: 15,
 	}
 }
 
@@ -95,6 +95,9 @@ func TestApplyKeepsExistingTypes(t *testing.T) {
 	}
 	if _, ok := reg.values["multiOTPSharedSecret"]; ok {
 		t.Fatal("the secret must be removed from the Sign-in key (readable by every user)")
+	}
+	if reg.values["multiOTPTimeoutReconnect"] != (value{kind: DWord, n: 15}) {
+		t.Fatalf("reconnect grace not written: %+v", reg.values["multiOTPTimeoutReconnect"])
 	}
 	if reg.values["multiOTPTimeoutUnlock"] != (value{kind: DWord, n: 10}) || reg.values["cpus_credui"] != (value{kind: String, s: "1d"}) {
 		t.Fatalf("missing values must be created with the default type: %+v %+v", reg.values["multiOTPTimeoutUnlock"], reg.values["cpus_credui"])
@@ -150,10 +153,12 @@ func TestRefusals(t *testing.T) {
 		t.Fatalf("missing Credential Provider must be refused: %v", err)
 	}
 	bad := map[string]func(p *protocol.WindowsPolicy){
-		"mode":       func(p *protocol.WindowsPolicy) { p.CpusLogon = "9x" },
-		"no URL":     func(p *protocol.WindowsPolicy) { p.ServerURL = "" },
-		"timeout":    func(p *protocol.WindowsPolicy) { p.ServerTimeout = 0 },
-		"unlock 2 d": func(p *protocol.WindowsPolicy) { p.TimeoutUnlock = 2880 },
+		"mode":               func(p *protocol.WindowsPolicy) { p.CpusLogon = "9x" },
+		"no URL":             func(p *protocol.WindowsPolicy) { p.ServerURL = "" },
+		"timeout":            func(p *protocol.WindowsPolicy) { p.ServerTimeout = 0 },
+		"unlock 2 d":         func(p *protocol.WindowsPolicy) { p.TimeoutUnlock = 2880 },
+		"reconnect 9 h":      func(p *protocol.WindowsPolicy) { p.TimeoutReconnect = 540 },
+		"reconnect negative": func(p *protocol.WindowsPolicy) { p.TimeoutReconnect = -1 },
 	}
 	for name, mutate := range bad {
 		p := policy()

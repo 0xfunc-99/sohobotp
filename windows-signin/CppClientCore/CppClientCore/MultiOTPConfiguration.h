@@ -33,6 +33,7 @@ class MultiOTPConfiguration : public Configuration
 		bool multiOTPDisplayLastUser = false;
 		bool multiOTPWithout2FA = false;
 		int multiOTPTimeoutUnlock = 0;
+		int multiOTPTimeoutReconnect = 0; // SohobOTP: Remote Desktop reconnect grace (minutes)
 		bool numlockOn = false;
 		bool multiOTPDisplayLockedUser = false;
 };

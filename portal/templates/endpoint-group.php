@@ -79,6 +79,8 @@
       <span><strong>Offline cache</strong>: users who signed in on the machine can still sign in with a code when it is off the network. The machine then keeps a copy of their token secret: a stolen laptop carries it.</span></label>
     <label>Offline cache lifetime (days) <input name="win_cache_days" value="<?= (int) $input['win_cache_days'] ?>" inputmode="numeric"></label>
     <label>Unlock grace period (minutes) <input name="win_timeout_unlock" value="<?= (int) $input['win_timeout_unlock'] ?>" inputmode="numeric"><small>0: always ask on unlock.</small></label>
+    <label>Remote Desktop reconnect grace period (minutes) <input name="win_timeout_reconnect" value="<?= (int) $input['win_timeout_reconnect'] ?>" inputmode="numeric">
+      <small>After a sign-in with a code, the same user can reconnect to their own Remote Desktop session on this machine without a new code, from the same client address, for this many minutes (for example after a dropped connection). A new session or another computer always asks. 0: always ask. Up to 480. Needs SohobOTP Sign-in from this release.</small></label>
     <label>Server timeout (seconds) <input name="win_server_timeout" value="<?= (int) $input['win_server_timeout'] ?>" inputmode="numeric"></label>
     <label class="choice"><input type="checkbox" name="win_upn_format" value="1"<?= $on('win_upn_format') ?>><span>Send user names as user@domain (UPN)</span></label>
     <label>Default domain prefix <input name="win_default_prefix" value="<?= e($input['win_default_prefix']) ?>" maxlength="64"></label>

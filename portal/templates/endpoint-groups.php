@@ -15,7 +15,7 @@
             <td><strong><?= e($g['name']) ?></strong><?php if ('' !== $g['description']): ?><br><span class="muted"><?= e($g['description']) ?></span><?php endif; ?></td>
             <td><?= (int) $g['endpoints'] ?><?php if ('' !== ($g['policy']['agent_version'] ?? '')): ?><br><span class="muted">agent <?= e($g['policy']['agent_version']) ?></span><?php endif; ?></td>
             <td><?= $l['enabled'] ? e(implode(', ', array_map(static fn (string $s): string => Portal\Endpoints::LINUX_SERVICES[$s] ?? $s, $l['services']))) . ' · RADIUS group ' . e($radiusNames[$l['radius_group_id']] ?? '?') : 'off' ?></td>
-            <td>sign-in: <?= e(Portal\Endpoints::CP_MODES[$w['cpus_logon'][0]] ?? $w['cpus_logon']) ?><?= '3' !== (string) ($w['cpus_credui'][0] ?? '3') ? ' · <strong>code in credential prompts</strong>' : '' ?><?= $w['cache_enabled'] ? ' · offline cache ' . (int) $w['cache_days'] . ' days' : '' ?></td>
+            <td>sign-in: <?= e(Portal\Endpoints::CP_MODES[$w['cpus_logon'][0]] ?? $w['cpus_logon']) ?><?= (int) ($w['timeout_reconnect'] ?? 0) > 0 ? ' · reconnect without a new code for ' . (int) $w['timeout_reconnect'] . ' min' : '' ?><?= '3' !== (string) ($w['cpus_credui'][0] ?? '3') ? ' · <strong>code in credential prompts</strong>' : '' ?><?= $w['cache_enabled'] ? ' · offline cache ' . (int) $w['cache_days'] . ' days' : '' ?></td>
             <?php if ($canManage): ?>
               <td class="row-actions">
                 <a class="button-small" href="<?= e(route('endpoint-group', ['id' => $g['id']])) ?>">Edit</a>

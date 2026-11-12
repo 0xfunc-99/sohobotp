@@ -159,6 +159,7 @@ private:
 	std::wstring cleanUsername(std::wstring message);
 	HRESULT getSid(LPCWSTR wszAccName, PSID* ppSid);
 	HRESULT storeSidAndTimeStamp(PSID ppsid);
-	bool CCredential::hasloggedInRecently(LPTSTR userId);
+	bool hasloggedInRecently(LPTSTR userId, int minutes);
+	bool userHasSession(LPTSTR userSID, bool remoteReconnect);
 	LPTSTR getSidFromUsername(std::wstring username);
 };

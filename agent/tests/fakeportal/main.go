@@ -163,7 +163,7 @@ func (p *portal) config(id string, ep *endpoint) *protocol.Envelope {
 		policy = protocol.WindowsPolicy{
 			ServerURL: "https://" + p.addr + "/portal/cp.php?e=" + id, ServerTimeout: 5,
 			CpusLogon: "0e", CpusUnlock: "0d", CpusCredui: "3e", ExcludedAccount: `.\breakglass`,
-			CacheEnabled: true, TimeoutUnlock: 10, LoginText: "SohobOTP", OTPText: "SohobOTP code",
+			CacheEnabled: true, TimeoutUnlock: 10, TimeoutReconnect: 15, LoginText: "SohobOTP", OTPText: "SohobOTP code",
 		}
 		secrets["cp_shared_secret"] = seal(p.cpSecret)
 	} else {

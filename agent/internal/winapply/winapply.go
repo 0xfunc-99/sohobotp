@@ -79,7 +79,7 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 			return nil, fmt.Errorf("invalid Credential Provider mode %q", m)
 		}
 	}
-	if p.ServerTimeout < 1 || p.ServerTimeout > 60 || p.TimeoutUnlock < 0 || p.TimeoutUnlock > 1440 {
+	if p.ServerTimeout < 1 || p.ServerTimeout > 60 || p.TimeoutUnlock < 0 || p.TimeoutUnlock > 1440 || p.TimeoutReconnect < 0 || p.TimeoutReconnect > 480 {
 		return nil, errors.New("timeouts out of range")
 	}
 	num := func(name string, v uint32) Setting { return Setting{Name: name, Number: v, Numeric: true} }
@@ -95,6 +95,7 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 		num("multiOTPUPNFormat", boolNum(p.UPNFormat)),
 		txt("multiOTPDefaultPrefix", p.DefaultPrefix),
 		num("multiOTPTimeoutUnlock", uint32(p.TimeoutUnlock)),
+		num("multiOTPTimeoutReconnect", uint32(p.TimeoutReconnect)),
 		num("multiOTPWithout2FA", boolNum(p.Without2FA)),
 		num("two_step_hide_otp", boolNum(p.TwoStepHideOTP)),
 		num("two_step_send_password", boolNum(p.TwoStepSendPassword)),

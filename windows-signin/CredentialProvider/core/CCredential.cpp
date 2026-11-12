@@ -21,6 +21,8 @@
 **    limitations under the License.
 * 
 * Change Log
+*   2026-11-12 SohobOTP (Sohobcom) ENH: Remote Desktop reconnect grace period (registry "multiOTPTimeoutReconnect"),
+*                                     unlock grace refactored into hasloggedInRecently(minutes) and userHasSession().
 *   2026-01-05 5.10.1.2 SysCo/yj ENH: In remote desktop mode, if 2FA disabled then passthrough without asking for the password.
 *                                     New registry config key "multiOTPDisplayUserLocked" to enable message "User locked" or "User delayed" before asking OTP.
 *   2025-10-22 5.9.9.4  SysCo/yj ENH: push token support
@@ -1005,58 +1007,25 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	// Get user SID
 	LPTSTR userSID = getSidFromUsername(_config->provider.field_strings[FID_USERNAME]);
 
-	// Is multiOTP unlock timeout activated ?
-	if (_config->multiOTPTimeoutUnlock > 0) {
-		ReleaseDebugPrint("multiOTP timeout Unlock is configured on : "+ std::to_string(_config->multiOTPTimeoutUnlock) + " minutes");
-		ReleaseDebugPrint(L"User SID is : " + (std::wstring)userSID);
-
-		// Check the registry. Has this user logged in recently ?
-		if (userSID != NULL && hasloggedInRecently(userSID))
-		{
-			ReleaseDebugPrint("The user has logged in recently");
-			WTS_SESSION_INFOW* pSessionInfo = NULL;
-			DWORD count;
-			// Look for the user in the current computer sessions
-			if (0 != WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessionInfo, &count))
-			{
-				ReleaseDebugPrint("Number of active sessions:" + std::to_string(count));
-
-				// For each session
-				for (int index = 0; index < count; index++) {
-					ReleaseDebugPrint("Session number:   " + std::to_string(index));
-					ReleaseDebugPrint("        id:       " + std::to_string(pSessionInfo[index].SessionId));
-					ReleaseDebugPrint("        state:    " + std::to_string(pSessionInfo[index].State));
-
-					LPWSTR name;
-					DWORD nameSize;
-					WTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, pSessionInfo[index].SessionId, _WTS_INFO_CLASS::WTSUserName, &name, &nameSize);
-					ReleaseDebugPrint(L"        username: " + (wstring)name);
-
-					PSID pSessionUserSid = NULL;
-					HRESULT hr = MQ_OK;
-					hr = CCredential::getSid(name, &pSessionUserSid);
-					if (FAILED(hr)) {
-						ReleaseDebugPrint("FAILED to find the SID");
-					}
-					else {
-						LPTSTR sessionSidAsString = NULL;
-						ConvertSidToStringSid(pSessionUserSid, &sessionSidAsString);
-
-						ReleaseDebugPrint(L"        sid:      " + (wstring)sessionSidAsString);
-							
-						// Is the session linked to the user trying to connect ?
-						if (pSessionInfo[index].State == WTS_CONNECTSTATE_CLASS::WTSActive && wcscmp(userSID, sessionSidAsString)==0) {
-							ReleaseDebugPrint("Found a session for the user trying to connect");
-							_piStatus = PI_AUTH_SUCCESS; // Ne pas stocker l'heure de login sinon cela prolongerait le timeout
-							return S_OK;
-						}
-					}
-				}
-				ReleaseDebugPrint("No session found");
-			}
+	// Grace periods, counted from the last sign-in WITH a code (a grace sign-in does not extend them):
+	// - unlock: the user's session is still active on this computer (multiOTP);
+	// - reconnect (SohobOTP): a Remote Desktop connection resumes the user's existing session
+	//   (active or disconnected) from the same client address it was last connected from.
+	//   A new session, or a connection from another computer, always asks for a code.
+	if (userSID != NULL && _config->multiOTPTimeoutUnlock > 0) {
+		ReleaseDebugPrint("multiOTP timeout Unlock is configured on : " + std::to_string(_config->multiOTPTimeoutUnlock) + " minutes");
+		if (hasloggedInRecently(userSID, _config->multiOTPTimeoutUnlock) && userHasSession(userSID, false)) {
+			ReleaseDebugPrint("Unlock grace: recent sign-in and an active session for this user");
+			_piStatus = PI_AUTH_SUCCESS; // do not store the time: it would extend the grace period
+			return S_OK;
 		}
-		else {
-			ReleaseDebugPrint("The user has NOT logged in recently");
+	}
+	if (userSID != NULL && _config->multiOTPTimeoutReconnect > 0) {
+		ReleaseDebugPrint("SohobOTP reconnect grace is configured on : " + std::to_string(_config->multiOTPTimeoutReconnect) + " minutes");
+		if (hasloggedInRecently(userSID, _config->multiOTPTimeoutReconnect) && userHasSession(userSID, true)) {
+			ReleaseDebugPrint("Reconnect grace: recent sign-in, existing session reconnected from the same client address");
+			_piStatus = PI_AUTH_SUCCESS; // do not store the time: it would extend the grace period
+			return S_OK;
 		}
 	}
 
@@ -1277,7 +1246,7 @@ void CCredential::storeLastConnectedUserIfNeeded() {
 	PSID pTrustedUserSid = NULL;
 	HRESULT hr = MQ_OK;
 
-	if (_config->multiOTPDisplayLastUser || _config->multiOTPTimeoutUnlock > 0) {
+	if (_config->multiOTPDisplayLastUser || _config->multiOTPTimeoutUnlock > 0 || _config->multiOTPTimeoutReconnect > 0) {
 		wchar_t username[1024];
 
 		// R?cup?rer le SID
@@ -1468,22 +1437,107 @@ HRESULT CCredential::storeSidAndTimeStamp(PSID ppsid) {
 
 
 /*
-* Check if the SID exists in the history table AND check if the timeStamp is correct
+* Check if the SID exists in the history table AND if its last sign-in with a code is less than
+* $minutes old
 */
-bool CCredential::hasloggedInRecently(LPTSTR userId) {
-	DWORD lastLoggedInTime = 0;
-
-	// Is multiOTP configured for unlockTimeout ?
-	if (_config->multiOTPTimeoutUnlock > 0) {
-		// Search if the key exists
-		lastLoggedInTime = readKeyValueInMultiOTPRegistryInteger(HKEY_CLASSES_ROOT, L"history", userId, 0);
-		
-		ReleaseDebugPrint(L"LAST LOGGED IN TIME FOR USER: "+ (std::wstring)userId );
-		ReleaseDebugPrint(lastLoggedInTime);
-
-		const int timestamp = minutesSinceEpoch();
-
-		return (timestamp- lastLoggedInTime) < _config->multiOTPTimeoutUnlock;
+bool CCredential::hasloggedInRecently(LPTSTR userId, int minutes) {
+	if (minutes <= 0) {
+		return false;
 	}
-	return false;
+	const DWORD lastLoggedInTime = readKeyValueInMultiOTPRegistryInteger(HKEY_CLASSES_ROOT, L"history", userId, 0);
+	ReleaseDebugPrint(L"LAST LOGGED IN TIME FOR USER: " + (std::wstring)userId);
+	ReleaseDebugPrint(lastLoggedInTime);
+	if (lastLoggedInTime == 0) {
+		return false;
+	}
+	const int timestamp = minutesSinceEpoch();
+	return (timestamp - (int)lastLoggedInTime) >= 0 && (timestamp - (int)lastLoggedInTime) < minutes;
+}
+
+/*
+* Client address of a Remote Desktop session (IPv4 or IPv6 bytes); false for a console session.
+*/
+static bool sessionClientAddress(DWORD sessionId, BYTE address[16], DWORD* length)
+{
+	LPWSTR buffer = NULL;
+	DWORD size = 0;
+	bool ok = false;
+	if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, sessionId, WTSClientAddress, &buffer, &size) && buffer != NULL && size >= sizeof(WTS_CLIENT_ADDRESS)) {
+		const WTS_CLIENT_ADDRESS* client = (const WTS_CLIENT_ADDRESS*)buffer;
+		// AddressFamily 2 = AF_INET (bytes 2..5), 23 = AF_INET6 (bytes 2..17)
+		if (client->AddressFamily == 2) {
+			memcpy(address, &client->Address[2], 4);
+			*length = 4;
+			ok = true;
+		} else if (client->AddressFamily == 23) {
+			memcpy(address, &client->Address[2], 16);
+			*length = 16;
+			ok = true;
+		}
+	}
+	if (buffer != NULL) {
+		WTSFreeMemory(buffer);
+	}
+	return ok;
+}
+
+/*
+* Is there a session of this user on this computer?
+* remoteReconnect = false: an ACTIVE session (unlock grace).
+* remoteReconnect = true: an active or DISCONNECTED session last connected from the same client
+* address as the Remote Desktop connection being signed in now (reconnect grace).
+*/
+bool CCredential::userHasSession(LPTSTR userSID, bool remoteReconnect)
+{
+	BYTE currentAddress[16] = { 0 };
+	DWORD currentLength = 0;
+	DWORD currentSession = 0;
+	if (remoteReconnect) {
+		// The sign-in screen runs in the new session of the incoming connection
+		if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) || !sessionClientAddress(currentSession, currentAddress, &currentLength)) {
+			ReleaseDebugPrint("Reconnect grace: not a Remote Desktop connection");
+			return false;
+		}
+	}
+	WTS_SESSION_INFOW* pSessionInfo = NULL;
+	DWORD count = 0;
+	bool found = false;
+	if (0 == WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessionInfo, &count)) {
+		return false;
+	}
+	for (DWORD index = 0; index < count && !found; index++) {
+		const WTS_CONNECTSTATE_CLASS state = pSessionInfo[index].State;
+		if (state != WTSActive && !(remoteReconnect && state == WTSDisconnected)) {
+			continue;
+		}
+		if (remoteReconnect && pSessionInfo[index].SessionId == currentSession) {
+			continue;
+		}
+		LPWSTR name = NULL;
+		DWORD nameSize = 0;
+		if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, pSessionInfo[index].SessionId, WTSUserName, &name, &nameSize) || name == NULL) {
+			continue;
+		}
+		if (name[0] != L'\0') {
+			PSID pSessionUserSid = NULL;
+			if (SUCCEEDED(CCredential::getSid(name, &pSessionUserSid)) && pSessionUserSid != NULL) {
+				LPTSTR sessionSidAsString = NULL;
+				if (ConvertSidToStringSid(pSessionUserSid, &sessionSidAsString)) {
+					bool sameUser = wcscmp(userSID, sessionSidAsString) == 0;
+					if (sameUser && remoteReconnect) {
+						BYTE address[16] = { 0 };
+						DWORD length = 0;
+						sameUser = sessionClientAddress(pSessionInfo[index].SessionId, address, &length)
+							&& length == currentLength && 0 == memcmp(address, currentAddress, length);
+					}
+					found = sameUser;
+					LocalFree(sessionSidAsString);
+				}
+				delete[] (BYTE*)pSessionUserSid;
+			}
+		}
+		WTSFreeMemory(name);
+	}
+	WTSFreeMemory(pSessionInfo);
+	return found;
 }

@@ -86,6 +86,7 @@ $k = Get-Item $cpKey
 Check "multiOTPServerTimeout kept as DWORD" ($k.GetValueKind("multiOTPServerTimeout") -eq "DWord")
 Check "multiOTPCacheEnabled kept as its existing type, value 1" ($cp.multiOTPCacheEnabled -eq 1 -or $cp.multiOTPCacheEnabled -eq "1")
 Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
+Check "multiOTPTimeoutReconnect written (15)" ($cp.multiOTPTimeoutReconnect -eq 15)
 
 if ($SignInMsi -ne "") {
   Write-Host "== SohobOTP Sign-in pinned to the portal certificate"
