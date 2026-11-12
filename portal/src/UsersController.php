@@ -14,6 +14,39 @@ final class UsersController extends Controller
     public const BULK_LABELS = ['unlock' => 'Unlock', 'enable' => 'Enable', 'disable' => 'Disable', 'delete' => 'Delete',
         'to-sohobotp' => 'Move to SohobOTP (Symantec VIP migration)', 'to-vip' => 'Send back to Symantec VIP'];
 
+    /** Self-service set-up (enrol.php): open or close it, who has set up a code. */
+    public function selfService(): void
+    {
+        $this->requirePermission('directory.manage');
+        $enrol = new SelfEnrol();
+        $error = null;
+        if ($this->isPost()) {
+            try {
+                $settings = $enrol->saveSettings([
+                    'enabled' => $this->post('enabled', 1), 'days' => $this->post('days', 4), 'networks' => $this->post('networks', 4000),
+                ]);
+                $this->audit->record('self_enrol.settings', 'success', $settings['enabled'] ? 'open' : 'closed', [
+                    'until' => $settings['until'], 'networks' => implode(' ', $settings['networks']),
+                ]);
+                Session::flash('success', $settings['enabled'] ? 'Self-service set-up is open until ' . format_time($settings['until']) . '.' : 'Self-service set-up is closed.');
+                $this->redirect('self-service');
+            } catch (ValidationException $invalid) {
+                $error = $invalid->getMessage();
+            }
+        }
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        $host = preg_match('/^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]{1,253})(:\d{1,5})?$/', $host) ? strtolower($host) : 'localhost';
+        $this->view->render('self-service', [
+            'title' => 'Self-service set-up',
+            'settings' => $enrol->settings(),
+            'counts' => $enrol->counts(),
+            'recent' => $enrol->recent(),
+            'link' => 'https://' . $host . '/portal/enrol.php',
+            'directoryEnabled' => (bool) ((new Directory())->settings()['enabled'] ?? false),
+            'error' => $error,
+        ]);
+    }
+
     public function index(): void
     {
         $this->requirePermission('users.view');
@@ -74,6 +107,7 @@ final class UsersController extends Controller
             'user'       => $user,
             'freeTokens' => $this->can('tokens.manage') ? $users->freeTokens() : [],
             'vipRoute'   => (new VipMigration())->stateOf($user['user']),
+            'selfEnrol'  => ['record' => ($enrol = new SelfEnrol())->record($user['user']), 'refusal' => $enrol->refusal($user), 'open' => $enrol->settings()['enabled']],
             'vipGroups'  => (new Radius())->forwardingGroups(),
             'perm'       => [
                 'manage' => $this->can('users.manage'),
@@ -99,7 +133,7 @@ final class UsersController extends Controller
         $permission = match ($op) {
             'unlock'                        => 'users.unlock',
             'enable', 'disable', 'delete', 'save', 'login-format', 'vip-route' => 'users.manage',
-            'enroll', 'recovery-codes'      => 'tokens.enroll',
+            'enroll', 'recovery-codes', 'self-enrol-again' => 'tokens.enroll',
             'resync'                        => 'tokens.resync',
             'assign-token', 'remove-token'  => 'tokens.manage',
             default                         => $this->notFound('Unknown action.'),
@@ -152,7 +186,13 @@ final class UsersController extends Controller
                     $uri = $users->enrollSoftwareToken($name);
                     (new VipMigration())->set([$name], 'sohobotp', $this->admin['username'], 'authenticator enrolled');
                     $this->audit->record('user.token_enrolled', 'success', $name, ['type' => 'software TOTP']);
+                    (new SelfEnrol())->markDone($name, 'administrator', $this->admin['username']);
                     $this->showEnrolment($name, $uri, 'New authenticator enrolment');
+                case 'self-enrol-again':
+                    (new SelfEnrol())->allowAgain($name);
+                    $this->audit->record('self_enrol.allow_again', 'success', $name);
+                    Session::flash('success', 'This user can set up a new code on the self-service page (while it is open).');
+                    $this->redirect('user', ['u' => $name]);
                 case 'recovery-codes':
                     $codes = $users->newRecoveryCodes($name);
                     $this->audit->record('user.recovery_codes', 'success', $name, ['count' => count($codes)]);

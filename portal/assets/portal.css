@@ -694,3 +694,12 @@ pre:has(> code) { position: relative; }
   .guide-actions { grid-column: 2; justify-content: flex-start; }
   .guide-meter { display: none; }
 }
+
+/* Self-service set-up page (enrol.php) */
+.auth-steps { counter-reset: step; list-style: none; padding: 0; }
+.auth-steps li { counter-increment: step; }
+.auth-steps li::before { content: counter(step); flex: 0 0 1.6rem; height: 1.6rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: rgba(255, 255, 255, .18); }
+.enrol-steps { margin: 0 0 var(--space-2); padding-left: 1.25rem; display: grid; gap: var(--space-2); }
+.enrol-manual { margin: 0 0 var(--space-4); }
+.enrol-manual summary { cursor: pointer; color: var(--accent); }
+.enrol-manual code { font-size: 1rem; letter-spacing: .04em; word-break: break-all; }

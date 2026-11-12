@@ -9,7 +9,8 @@
   </select>
   <button type="submit" class="button">Search</button>
   <?php if ('' !== $q || '' !== $status): ?><a class="button-link" href="<?= e(route('users')) ?>">Clear</a><?php endif; ?>
-  <?php if ($canCreate): ?><a class="button-primary toolbar-end" href="<?= e(route('user-new')) ?>">+ New user</a><?php endif; ?>
+  <?php if (Portal\Roles::can($me['role'], 'directory.manage')): ?><a class="button toolbar-end" href="<?= e(route('self-service')) ?>">Self-service set-up</a><?php endif; ?>
+  <?php if ($canCreate): ?><a class="button-primary" href="<?= e(route('user-new')) ?>">+ New user</a><?php endif; ?>
 </form>
 
 <p class="table-count"><?= (int) $total ?> user(s)<?= '' !== $q || '' !== $status ? ' matching' : '' ?>.</p>

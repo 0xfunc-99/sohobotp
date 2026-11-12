@@ -19,7 +19,8 @@ defined('PORTAL_ROOT') || exit;
  */
 final class Session
 {
-    public static function start(bool $https): void
+    /** $name: the self-service set-up page (enrol.php) uses its own cookie, never the administrators' one. */
+    public static function start(bool $https, string $name = 'motp_portal'): void
     {
         if (PHP_SESSION_ACTIVE === session_status()) {
             return;
@@ -29,7 +30,7 @@ final class Session
         ini_set('session.use_trans_sid', '0');
         session_cache_limiter(''); // keep our own Cache-Control: no-store
         ini_set('session.gc_maxlifetime', (string) max(Config::idleTimeout(), 1440));
-        session_name($https ? '__Host-motp_portal' : 'motp_portal');
+        session_name($https ? '__Host-' . $name : $name);
         session_set_cookie_params([
             'lifetime' => 0,
             'path'     => '/',

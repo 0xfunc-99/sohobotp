@@ -124,6 +124,7 @@ final class App
             'endpoint-enrol'        => $endpoints->enrol(),
             'agent-download'        => $endpoints->agentDownload(),
             'users'          => $users->index(),
+            'self-service'   => $users->selfService(),
             'user-new'       => $users->create(),
             'user'           => $users->show(),
             'user-action'    => $users->action(),
@@ -694,14 +695,14 @@ final class App
         exit;
     }
 
-    private static function isHttps(): bool
+    public static function isHttps(): bool
     {
         // Proxy headers such as X-Forwarded-Proto are deliberately not trusted
         return (!empty($_SERVER['HTTPS']) && 'off' !== strtolower((string) $_SERVER['HTTPS']))
             || '443' === (string) ($_SERVER['SERVER_PORT'] ?? '');
     }
 
-    private function sendSecurityHeaders(): void
+    public static function sendSecurityHeaders(): void
     {
         header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
         header('X-Content-Type-Options: nosniff');
@@ -715,7 +716,7 @@ final class App
         }
     }
 
-    private static function qrDataUri(string $text): ?string
+    public static function qrDataUri(string $text): ?string
     {
         try {
             MultiotpService::get(); // loads the bundled barcode generator

@@ -293,7 +293,11 @@ final class Users
     }
 
     /** New random TOTP seed; returns the otpauth:// URI to show once as a QR code. */
-    public function enrollSoftwareToken(string $user): string
+    /**
+     * New authenticator. $seedHex: a seed the user already scanned and confirmed (self-service
+     * set-up), $usedStep: the time step of the confirming code, so it cannot be used again.
+     */
+    public function enrollSoftwareToken(string $user, ?string $seedHex = null, ?int $usedStep = null): string
     {
         $e = $this->engine;
         $e->SetUser($user);
@@ -302,11 +306,17 @@ final class Users
         }
         $e->SetUserAlgorithm('totp');
         $e->SetUserTokenAlgoSuite('');
-        $e->SetUserTokenSeed(bin2hex(random_bytes(20)));
+        if (null !== $seedHex && !preg_match('/^[0-9a-f]{40}$/', $seedHex)) {
+            throw new \InvalidArgumentException('Invalid seed.');
+        }
+        $e->SetUserTokenSeed($seedHex ?? bin2hex(random_bytes(20)));
         $e->SetUserTokenNumberOfDigits(6);
         $e->SetUserTokenTimeInterval(30);
         $e->SetUserTokenLastEvent(-1);
         $e->SetUserTokenDeltaTime(0);
+        if (null !== $usedStep) {
+            $e->SetUserTokenLastLogin($usedStep * 30); // TOTP replay protection: this code is used
+        }
         $this->write();
         $uri = (string) $e->GetUserTokenUrlLink($user);
         if ('' === $uri) {

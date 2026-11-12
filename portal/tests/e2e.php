@@ -494,6 +494,71 @@ check('directory page shows last sync', str_contains($admin->body, '1 disabled')
 $admin->get('/portal/index.php?r=dashboard');
 check('dashboard shows directory sync', str_contains($admin->body, 'Directory synchronisation') && str_contains($admin->body, 'manual only'));
 
+// ---------------------------------------------------------------- self-service "Set up my code" (enrol.php)
+$user = new Browser($base);
+$user->get('/portal/enrol.php');
+check('self-service: closed by default, says to ask IT', 200 === $user->status && str_contains($user->body, 'not open at the moment') && !str_contains($user->body, 'name="password"'));
+$admin->get('/portal/index.php?r=self-service');
+check('self-service: settings page, link shown', 200 === $admin->status && str_contains($admin->body, '/portal/enrol.php') && str_contains($admin->body, 'closed'));
+$admin->post('/portal/index.php?r=self-service', ['enabled' => '1', 'days' => '0', 'networks' => '']);
+check('self-service: 0 days refused', 200 === $admin->status && str_contains($admin->body, '1 to 90 days'));
+$admin->get('/portal/index.php?r=self-service');
+$admin->post('/portal/index.php?r=self-service', ['enabled' => '1', 'days' => '7', 'networks' => "10.99.0.0/16"]);
+$user->get('/portal/enrol.php');
+check('self-service: only from listed networks', str_contains($user->body, 'only available from the company network'));
+$admin->get('/portal/index.php?r=self-service');
+$admin->post('/portal/index.php?r=self-service', ['enabled' => '1', 'days' => '7', 'networks' => "127.0.0.0/8\n10.99.0.0/16"]);
+check('self-service: opened (admin action audited)', 303 === $admin->status && str_contains((string) file_get_contents(Portal\Config::auditFile()), 'self_enrol.settings'));
+$user->get('/portal/enrol.php');
+check('self-service: sign-in form for users, own cookie (not the admin session)', str_contains($user->body, 'name="password"') && isset($user->cookies['sohobotp_enrol']) && !isset($user->cookies['motp_portal']));
+$user->post('/portal/enrol.php', ['step' => 'login', 'username' => 'carol', 'password' => 'wrong-password']);
+check('self-service: wrong directory password refused', 400 === $user->status && str_contains($user->body, 'not correct'));
+$user->post('/portal/enrol.php', ['step' => 'login', 'username' => 'nobody-here', 'password' => 'x']);
+check('self-service: unknown user gets the same message (no account probing)', 400 === $user->status && str_contains($user->body, 'not correct'));
+$user->post('/portal/enrol.php', ['step' => 'login', 'username' => 'root', 'password' => (string) $rootTemp]);
+check('self-service: a portal administrator account is not a directory user', 400 === $user->status && str_contains($user->body, 'not correct'));
+$carolBefore = (new Portal\Users())->get('carol');
+$user->post('/portal/enrol.php', ['step' => 'login', 'username' => 'EXAMPLE\\Carol', 'password' => 'carol-test-password']);
+check('self-service: directory password accepted (domain prefix and case ignored)', 303 === $user->status);
+$user->get('/portal/enrol.php');
+preg_match('/<code>([A-Z2-7 ]{20,})<\/code>/', $user->body, $m);
+$carolSeed = base32_decode($m[1] ?? '');
+check('self-service: QR code and key shown, nothing changed yet', str_contains($user->body, 'class="qr"') && 20 === strlen($carolSeed)
+    && (new Portal\Users())->get('carol') == $carolBefore);
+$user->post('/portal/enrol.php', ['step' => 'confirm', 'code' => '000000' === Totp::code($carolSeed, intdiv(time(), 30)) ? '111111' : '000000']);
+check('self-service: wrong first code refused, nothing changed', 400 === $user->status && str_contains($user->body, 'not correct') && (new Portal\Users())->get('carol') == $carolBefore);
+$carolStep = null;
+$carolCode = next_code($carolSeed, $carolStep);
+$user->post('/portal/enrol.php', ['step' => 'confirm', 'code' => $carolCode]);
+check('self-service: right code finishes the set-up', 200 === $user->status && str_contains($user->body, 'Your sign-in code is ready'), substr(strip_tags($user->body), 0, 300));
+Portal\MultiotpService::reset();
+$engine = Portal\MultiotpService::get();
+$engine->SetUser('carol');
+check('self-service: SohobOTP now has the seed the user scanned (TOTP, 6 digits)', strtolower(bin2hex($carolSeed)) === strtolower((string) $engine->GetUserTokenSeed()) && 'totp' === (string) $engine->GetUserAlgorithm());
+check('self-service: the confirming code is marked as used (no replay)', (int) $engine->GetUserTokenLastLogin() >= $carolStep * 30);
+$again = new Browser($base);
+$again->get('/portal/enrol.php');
+$again->post('/portal/enrol.php', ['step' => 'login', 'username' => 'carol', 'password' => 'carol-test-password']);
+check('self-service: a second set-up is refused (stolen password not enough)', str_contains($again->body, 'already set up'));
+$admin->get('/portal/index.php?r=self-service');
+check('self-service: list shows who set up a code', str_contains($admin->body, '>carol</a>') && str_contains($admin->body, '1 by themselves'));
+$admin->get('/portal/index.php?r=user&u=carol');
+check('self-service: user page shows it, with "allow again"', str_contains($admin->body, 'done by the user') && str_contains($admin->body, 'Allow a new self-service set-up'));
+$admin->post('/portal/index.php?r=user-action', ['u' => 'carol', 'op' => 'self-enrol-again']);
+$again = new Browser($base);
+$again->get('/portal/enrol.php');
+$again->post('/portal/enrol.php', ['step' => 'login', 'username' => 'carol', 'password' => 'carol-test-password']);
+check('self-service: allowed again by an administrator (new phone)', 303 === $again->status);
+$again->get('/portal/enrol.php');
+$again->post('/portal/enrol.php', ['step' => 'cancel']);
+$audit = (string) file_get_contents(Portal\Config::auditFile());
+check('self-service: audit has the set-up, never the password or the code', str_contains($audit, 'self_enrol.sign_in') && str_contains($audit, '"via":"self-service"')
+    && !str_contains($audit, 'carol-test-password') && !str_contains($audit, $carolCode));
+$admin->get('/portal/index.php?r=self-service');
+$admin->post('/portal/index.php?r=self-service', ['networks' => '']);
+$user->get('/portal/enrol.php');
+check('self-service: closed again', str_contains($user->body, 'not open at the moment'));
+
 // ---------------------------------------------------------------- helpdesk limits on stage 2 pages
 $help = new Browser($base);
 $help->get('/portal/index.php');

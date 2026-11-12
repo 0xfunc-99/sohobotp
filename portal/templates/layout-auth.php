@@ -21,6 +21,17 @@
       <img src="assets/brand-icon.png" alt="" width="48" height="48">
       <span><span class="auth-brand-name"><?= e(Portal\Config::brandName()) ?></span><span class="auth-brand-by">by <?= e(Portal\Config::companyName()) ?></span></span>
     </p>
+    <?php if (!empty($selfService)): ?>
+    <div class="auth-pitch">
+      <p class="auth-headline">Your sign-in code, in three steps</p>
+      <p>From now on, signing in at work asks for your password and a 6-digit code from your phone.</p>
+      <ol class="auth-points auth-steps">
+        <li><span>Sign in with your usual work user name and password.</span></li>
+        <li><span>Scan the QR code with Google Authenticator or Microsoft Authenticator.</span></li>
+        <li><span>Type the 6-digit code the app shows. Done.</span></li>
+      </ol>
+    </div>
+    <?php else: ?>
     <div class="auth-pitch">
       <p class="auth-headline">Secure sign-in, managed in one place</p>
       <p>Two-factor authentication for VPNs, Wi-Fi, servers and Windows sign-in.</p>
@@ -31,13 +42,14 @@
         <li><?= $icon('audit') ?><span>Every change recorded in a tamper-evident audit trail</span></li>
       </ul>
     </div>
+    <?php endif; ?>
     <p class="powered"><?= $credit ?></p>
   </aside>
   <main class="auth-main">
     <div class="auth-card">
       <p class="card-brand"><img src="assets/brand-icon.png" alt="" width="36" height="36"><span><?= e(Portal\Config::brandName()) ?></span></p>
       <h1><?= e($title ?? '') ?></h1>
-      <p class="auth-product"><?= e(Portal\Config::brandName()) ?> management portal</p>
+      <p class="auth-product"><?= e(Portal\Config::brandName()) ?> <?= empty($selfService) ? 'management portal' : 'sign-in code set-up' ?></p>
       <?php require PORTAL_ROOT . '/templates/partials/flashes.php'; ?>
       <?= $content ?>
     </div>

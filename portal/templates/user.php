@@ -84,12 +84,20 @@
 <section class="panel">
   <h2>Authenticator and token</h2>
   <p class="hint"><?= '' !== $user['token_serial'] ? 'Hardware token ' . e($user['token_serial']) . ' is assigned.' : 'Uses an authenticator app.' ?> <?= (int) $user['recovery_codes'] ?> recovery code(s) left.</p>
+  <?php if ($user['synchronized'] && '' === $user['token_serial']): ?>
+    <p class="hint">Self-service set-up: <?= null !== $selfEnrol['record']
+      ? ('self' === $selfEnrol['record']['via'] ? 'done by the user ' : 'done by an administrator ') . e(format_time($selfEnrol['record']['at']))
+      : (null === $selfEnrol['refusal'] ? 'not done yet' . ($selfEnrol['open'] ? ' (the page is open)' : ' (the page is closed)') : 'not available: already uses a code') ?>.</p>
+  <?php endif; ?>
   <div class="actions">
     <?php if ($perm['enroll'] && '' === $user['token_serial']): ?>
       <?= $action('enroll', 'Enrol new authenticator', 'This replaces the current token: the old app entry stops working. Continue?', 'button-primary') ?>
     <?php endif; ?>
     <?php if ($perm['enroll']): ?>
       <?= $action('recovery-codes', 'New recovery codes', 'Generate 10 new recovery codes? Previous codes stop working.') ?>
+    <?php endif; ?>
+    <?php if ($perm['enroll'] && $user['synchronized'] && '' === $user['token_serial'] && null !== $selfEnrol['refusal']): ?>
+      <?= $action('self-enrol-again', 'Allow a new self-service set-up', 'Let ' . $user['user'] . ' set up a new authenticator on the self-service page (new phone)? Their current code keeps working until they finish.') ?>
     <?php endif; ?>
     <?php if ($perm['tokens'] && '' !== $user['token_serial']): ?>
       <?= $action('remove-token', 'Remove hardware token', 'Remove token ' . $user['token_serial'] . ' from ' . $user['user'] . '?') ?>
