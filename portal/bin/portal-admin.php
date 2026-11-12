@@ -15,6 +15,9 @@
  *   php portal/bin/portal-admin.php engine-key   (encrypt token secrets with a private key; status: --state=status)
  *   php portal/bin/portal-admin.php agent-release-add --file=sohobotp-agent-linux-amd64 --manifest=manifest.json
  *   php portal/bin/portal-admin.php agent-release-list
+ *   php portal/bin/portal-admin.php agent-program-add --file=sohobotp-agent-linux-amd64 --os=linux --arch=amd64
+ *       agent program for the "Download agent" page (os: linux|windows, arch: amd64|arm64); a signed
+ *       release for the same platform is preferred when there is one
  *       signed agent releases for self-update (sign them OFFLINE: sohobotp-agent release sign)
  *   php portal/bin/portal-admin.php anonymous-stats [--state=on|off|status] [--once]
  *       multiOTP's weekly anonymous statistics (sent during a login, off by default in SohobOTP);
@@ -72,7 +75,7 @@ $command = $argv[1] ?? 'help';
 // --name=value options after the command (getopt() would stop at the command word)
 $options = [];
 foreach (array_slice($argv, 2) as $arg) {
-    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest)=(.*)$/s', $arg, $m)) {
+    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest|os|arch)=(.*)$/s', $arg, $m)) {
         $options[$m[1]] = $m[2];
     } elseif ('--once' === $arg) {
         $options['once'] = true;
@@ -221,6 +224,12 @@ try {
             $m = Portal\AgentReleases::add((string) ($options['file'] ?? ''), $manifest);
             $audit->record('agent.release_add', 'success', "{$m['os']}/{$m['arch']} {$m['version']}", ['sha256' => $m['sha256'], 'size' => $m['size']]);
             out("Added agent {$m['version']} for {$m['os']}/{$m['arch']}. Choose it as the target version of an endpoint group to roll it out.");
+            break;
+
+        case 'agent-program-add':
+            $added = Portal\AgentBundle::addProgram((string) ($options['file'] ?? ''), (string) ($options['os'] ?? ''), (string) ($options['arch'] ?? ''));
+            $audit->record('agent.program_add', 'success', ($options['os'] ?? '') . '/' . ($options['arch'] ?? ''), ['sha256' => $added['sha256'], 'size' => $added['size']]);
+            out('Agent program stored for the Download agent page (' . $added['size'] . ' bytes, SHA-256 ' . $added['sha256'] . ').');
             break;
 
         case 'agent-release-list':

@@ -122,6 +122,7 @@ final class App
             'endpoint-group-delete' => $endpoints->groupDelete(),
             'endpoint-rules'        => $endpoints->rules(),
             'endpoint-enrol'        => $endpoints->enrol(),
+            'agent-download'        => $endpoints->agentDownload(),
             'users'          => $users->index(),
             'user-new'       => $users->create(),
             'user'           => $users->show(),

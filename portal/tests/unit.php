@@ -567,5 +567,39 @@ $radius->saveVip(['address_1' => '', 'secret_1' => '']);
 check('VIP: no server: proxy file without realm', !str_contains($radius->renderVip(), 'realm') && !$radius->vipActive());
 putenv('MULTIOTP_PORTAL_RADIUS_ROUTE');
 
+// --- Download agent: settings block appended to the agent program (read by agent/internal/bundle)
+use Portal\AgentBundle;
+$caVector = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUTEST\n-----END CERTIFICATE-----\n";
+$trailer = AgentBundle::trailer('https://otp.example.test:8443', 'sohobenrol_0123456789abcdef', str_repeat('ab', 32), $caVector);
+check('agent download: settings block equals the vector the agent tests read', $trailer === file_get_contents(PORTAL_ROOT . '/../agent/internal/bundle/testdata/portal-trailer.bin'));
+$noCa = AgentBundle::trailer('https://otp.example.test', 'tok', 'pin', '');
+check('agent download: no CA entry for a publicly trusted portal', !str_contains($noCa, 'ca_pem') && str_ends_with($noCa, AgentBundle::MAGIC));
+$len = unpack('N', substr($noCa, -20, 4))[1];
+check('agent download: length and SHA-256 of the settings in the footer', substr($noCa, 0, $len) === '{"v":1,"portal":"https://otp.example.test","token":"tok","pin":"pin"}' && hash('sha256', substr($noCa, 0, $len), true) === substr($noCa, $len, 32));
+check('agent download: portal address normalised', 'https://otp.example.com:8443' === AgentBundle::validatePortal(' https://OTP.example.com:8443/ ') && 'https://[fd00::5]' === AgentBundle::validatePortal('https://[fd00::5]'));
+foreach (['http://otp.example.com', 'https://otp.example.com/portal', 'https://otp.example.com?x=1', "https://otp.example.com\nx", 'otp.example.com', 'https://a b'] as $badUrl) {
+    check('agent download: portal address refused: ' . json_encode($badUrl), throws(static fn () => AgentBundle::validatePortal($badUrl), ValidationException::class));
+}
+check('agent download: empty CA allowed', '' === AgentBundle::validateCa("  \r\n"));
+check('agent download: private key in the CA field refused', throws(static fn () => AgentBundle::validateCa($caVector . "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"), ValidationException::class));
+check('agent download: text that is not a certificate refused', throws(static fn () => AgentBundle::validateCa('hello'), ValidationException::class));
+$realCa = '';
+if (function_exists('openssl_pkey_new')) {
+    $caKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+    openssl_x509_export(openssl_csr_sign(openssl_csr_new(['commonName' => 'unit CA'], $caKey), null, $caKey, 1), $realCa);
+    check('agent download: real certificate accepted, Windows line ends normalised', AgentBundle::validateCa(str_replace("\n", "\r\n", $realCa)) === trim($realCa) . "\n");
+    check('agent download: unreadable certificate refused', throws(static fn () => AgentBundle::validateCa($caVector), ValidationException::class));
+}
+$programFile = sys_get_temp_dir() . '/unit-agent-program';
+file_put_contents($programFile, "\x7fELF" . str_repeat("\0", 1_100_000));
+check('agent download: Linux program accepted', null === AgentBundle::programError($programFile, 'linux'));
+check('agent download: Linux program refused as Windows', null !== AgentBundle::programError($programFile, 'windows'));
+file_put_contents($programFile, $noCa, FILE_APPEND);
+check('agent download: a downloaded agent (with settings) refused as program', str_contains((string) AgentBundle::programError($programFile, 'linux'), 'settings built in'));
+file_put_contents($programFile, 'MZ' . str_repeat("\0", 500));
+check('agent download: tiny file refused', null !== AgentBundle::programError($programFile, 'windows'));
+check('agent download: unknown platform has no program', null === AgentBundle::program('darwin/arm64'));
+unlink($programFile);
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

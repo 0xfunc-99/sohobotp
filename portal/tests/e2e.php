@@ -1182,5 +1182,58 @@ check('stored seeds cannot be decrypted with the public default key', '' !== $se
 check('engine-key is idempotent', false === Portal\EngineKey::protect()['changed']);
 check('legacy admin password is not the default', !Portal\MultiotpService::get()->CheckAdminPassword(_MULTIOTP_DEFAULT_PASSWORD_));
 
+// ---------------------------------------------------------------- Download agent: enrolment settings built into the program
+$helper->get('/portal/index.php?r=agent-download');
+check('download agent: not for the help desk role (no page, no permission)', !str_contains($helper->body, 'name="platform"') && !Portal\Roles::can('helpdesk', 'endpoints.manage'), (string) $helper->status);
+$anonymous = (new Browser($base))->get('/portal/index.php?r=agent-download');
+check('download agent: not without signing in', !str_contains($anonymous->body, 'name="platform"') && !str_contains($anonymous->body, Portal\AgentBundle::MAGIC));
+$admin->get('/portal/index.php?r=agent-download');
+check('download agent: page served, Linux available, Windows not (no program)', 200 === $admin->status
+    && 1 === preg_match('/value="linux\/amd64" class="button-primary">/', $admin->body) && 1 === preg_match('/value="windows\/amd64" class="button-primary" disabled>/', $admin->body), (string) $admin->status);
+check('download agent: in the sidebar', str_contains($admin->body, 'r=agent-download'));
+$downloadForm = ['group_id' => $endpointGroupId, 'label' => 'e2e <b>download</b>', 'hours' => '2', 'max_uses' => '1', 'approval' => 'none', 'portal' => 'https://otp.example.test', 'ca_pem' => ''];
+$admin->post('/portal/index.php?r=agent-download', $downloadForm + ['platform' => 'windows/amd64']);
+check('download agent: platform without a program refused', 400 === $admin->status && str_contains($admin->body, 'no agent program'));
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', ['portal' => 'http://otp.example.test'] + $downloadForm + ['platform' => 'linux/amd64']);
+check('download agent: plain http portal address refused', 400 === $admin->status && str_contains($admin->body, 'must look like https://'));
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', ['ca_pem' => 'not a certificate'] + $downloadForm + ['platform' => 'linux/amd64']);
+check('download agent: bad CA certificate refused', 400 === $admin->status && str_contains($admin->body, 'PEM format'));
+$tokensBefore = count((new Portal\Endpoints())->tokens());
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', $downloadForm + ['platform' => 'linux/amd64'], [], false);
+check('download agent: refused without the CSRF token', 400 === $admin->status && $tokensBefore === count((new Portal\Endpoints())->tokens()));
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', $downloadForm + ['platform' => 'linux/amd64']);
+$download = $admin->body;
+$plainProgram = (string) file_get_contents(Portal\AgentBundle::programsDir() . '/sohobotp-agent-linux-amd64');
+check('download agent: a file download, not cached', 200 === $admin->status && str_contains($admin->headers['content-disposition'][0] ?? '', 'attachment; filename="sohobotp-agent-')
+    && 'no-store' === ($admin->headers['cache-control'][0] ?? '') && (int) ($admin->headers['content-length'][0] ?? 0) === strlen($download), $admin->status . ' ' . json_encode($admin->headers));
+check('download agent: the agent program, unchanged, then the settings', str_starts_with($download, $plainProgram) && str_ends_with($download, Portal\AgentBundle::MAGIC));
+$settingsLength = unpack('N', substr($download, -20, 4))[1];
+$settingsRaw = substr($download, strlen($plainProgram), $settingsLength);
+$built = json_decode($settingsRaw, true);
+check('download agent: settings checksum, portal address and pin', hash('sha256', $settingsRaw, true) === substr($download, -52, 32)
+    && 'https://otp.example.test' === ($built['portal'] ?? '') && $pinShown === ($built['pin'] ?? '') && !isset($built['ca_pem']) && 1 === ($built['v'] ?? 0), $settingsRaw);
+$builtToken = (string) ($built['token'] ?? '');
+$agentHttp->bind = '127.0.0.9';
+$downloaded = new AgentSim();
+$downloaded->id = $agentCall('enroll', $downloaded->enrollRequest($builtToken, ['hostname' => 'from-download', 'os' => 'linux']))['endpoint_id'] ?? null;
+check('download agent: the built-in token enrols a machine', null !== $downloaded->id, $agentHttp->body);
+$reply = $agentCall('enroll', (new AgentSim())->enrollRequest($builtToken, ['hostname' => 'second', 'os' => 'linux']));
+check('download agent: and only as many machines as chosen (1)', 'bad_token' === ($reply['error'] ?? ''));
+$admin->get('/portal/index.php?r=endpoint-enrol');
+check('download agent: its token is in the token list (label escaped), where it can be revoked', str_contains($admin->body, 'e2e &lt;b&gt;download&lt;/b&gt;') && !str_contains($admin->body, $builtToken));
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('download agent: audit trail has the download, never the token', str_contains($auditText, 'endpoint.agent_download') && '' !== $builtToken && !str_contains($auditText, $builtToken));
+$ownCa = '';
+$caKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+openssl_x509_export(openssl_csr_sign(openssl_csr_new(['commonName' => 'e2e CA'], $caKey), null, $caKey, 1), $ownCa);
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', ['ca_pem' => $ownCa] + $downloadForm + ['platform' => 'linux/amd64']);
+$withCa = json_decode(substr($admin->body, strlen($plainProgram), unpack('N', substr($admin->body, -20, 4))[1]), true);
+check('download agent: CA certificate built in, and a different token each time', trim($ownCa) . "\n" === ($withCa['ca_pem'] ?? '') && '' !== ($withCa['token'] ?? '') && $builtToken !== $withCa['token']);
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -64,6 +64,10 @@ docker run --rm --network "$RUN" -v "$REPO":/src:ro multiotp-portal-php sh -euc 
 
   echo "== end-to-end checks"
   rm -rf /tmp/portal/* /tmp/etc/users/* && mkdir -p /tmp/portal
+  # a stand-in agent program for the Download agent page (the real ones: agent/tests)
+  { printf "\177ELF"; head -c 1100000 /dev/zero; } > /tmp/fake-agent
+  php portal/bin/portal-admin.php agent-program-add --file=/tmp/fake-agent --os=linux --arch=amd64 | grep -q "Agent program stored" && echo "ok   CLI: agent program added"
+  if php portal/bin/portal-admin.php agent-program-add --file=/tmp/fake-agent --os=windows --arch=amd64 >/dev/null 2>&1; then echo "FAIL CLI stored a Linux program as Windows"; exit 1; else echo "ok   CLI: Linux program refused as Windows"; fi
   TEMP=$(php portal/bin/portal-admin.php create --username=root --role=superadmin | sed -n "s/^Temporary password.*: //p")
   MULTIOTP_PORTAL_ALLOW_HTTP=1 php -d display_errors=stderr -S 127.0.0.1:8080 -t /app >/tmp/server.log 2>&1 &
   php portal/bin/worker.php --loop >/tmp/worker.log 2>&1 &

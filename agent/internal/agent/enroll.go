@@ -22,6 +22,7 @@ type Enrolment struct {
 	Token  string
 	Pin    string
 	CAFile string
+	CAPEM  string // CA certificate itself (settings built into a downloaded agent); CAFile wins
 }
 
 // ErrNoBootstrap means no enrolment values were found for an automatic enrolment.
@@ -50,6 +51,15 @@ func Enroll(e Enrolment) (*state.State, error) {
 		dst := filepath.Join(state.Dir(), "portal-ca.pem")
 		if err := copyPlain(e.CAFile, dst); err != nil {
 			return nil, fmt.Errorf("cannot copy the CA file: %w", err)
+		}
+		st.CAFile = dst
+	} else if e.CAPEM != "" {
+		if err := os.MkdirAll(state.Dir(), 0o700); err != nil {
+			return nil, err
+		}
+		dst := filepath.Join(state.Dir(), "portal-ca.pem")
+		if err := os.WriteFile(dst, []byte(e.CAPEM), 0o644); err != nil {
+			return nil, fmt.Errorf("cannot write the CA certificate: %w", err)
 		}
 		st.CAFile = dst
 	}

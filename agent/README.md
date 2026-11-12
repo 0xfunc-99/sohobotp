@@ -8,7 +8,12 @@ endpoint group, and reports inventory and the result. Protocol:
 
 ## Install
 
-Create an enrolment token on the portal's **Enrol endpoints** page; it shows the commands.
+Simplest: the portal's **Download agent** page gives an agent with the portal address, a new
+enrolment token, the pin and the CA certificate built in. Run it on the machine: `install`
+with no options (Windows: double-click). The settings sit at the end of the downloaded file
+(`internal/bundle`); the installed copy is the plain program, without the token.
+
+Or create an enrolment token on the portal's **Enrol endpoints** page; it shows the commands.
 
 ```sh
 # Linux, as root

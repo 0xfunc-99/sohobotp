@@ -74,6 +74,15 @@ switch ($argv[1] ?? '') {
         [, $token] = (new Endpoints())->createToken(group()['id'], 'agent e2e', 1, 1, 'agent-e2e');
         echo $token, "\n";
         break;
+    case 'download':
+        // what the portal's "Download agent" page sends: the agent program (argument 2) followed
+        // by the settings block with a new token, the pin and the CA certificate (argument 3)
+        $endpoints = new Endpoints();
+        [, $plain] = $endpoints->createToken(group()['id'], 'agent e2e download', 1, 1, 'agent-e2e');
+        readfile($argv[2]);
+        echo Portal\AgentBundle::trailer(Portal\AgentBundle::validatePortal('https://portal.test'), $plain, $endpoints->pin(),
+            Portal\AgentBundle::validateCa((string) file_get_contents($argv[3])));
+        break;
     case 'radius-applied':
         // the last FreeRADIUS apply finished successfully and nothing is pending
         $job = Portal\Jobs::latest('radius.apply');

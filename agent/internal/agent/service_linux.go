@@ -4,11 +4,11 @@ package agent
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 
+	"multiotp-portal/agent/internal/bundle"
 	"multiotp-portal/agent/internal/linuxapply"
 	"multiotp-portal/agent/internal/protocol"
 )
@@ -101,17 +101,13 @@ func RunService() error {
 }
 
 func copyFile(from, to string, mode os.FileMode) error {
-	in, err := os.Open(from)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
 	tmp := to + ".new"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	// without enrolment settings built into a downloaded agent (they hold the token)
+	if err := bundle.CopyProgram(out, from); err != nil {
 		out.Close()
 		return err
 	}

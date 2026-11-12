@@ -4,7 +4,6 @@ package agent
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,6 +11,8 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"multiotp-portal/agent/internal/bundle"
 )
 
 const serviceName = "SohobOTPAgent"
@@ -161,16 +162,12 @@ func sameFile(a, b string) bool {
 }
 
 func copyFile(from, to string) error {
-	in, err := os.Open(from)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
 	out, err := os.Create(to)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	// without enrolment settings built into a downloaded agent (they hold the token)
+	if err := bundle.CopyProgram(out, from); err != nil {
 		out.Close()
 		return err
 	}

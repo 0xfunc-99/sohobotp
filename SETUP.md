@@ -142,6 +142,21 @@ Then, in the portal:
    **token** (only once — copy it) and the **pin**, and the ready install commands. The pin is
    also always at the bottom of the *Enrol endpoints* page.
 
+   **Simpler: Download agent.** The portal page **Download agent** makes the agent for one
+   machine type with everything built in: the portal address, a new token, the pin and the
+   portal's CA certificate. Choose the group and limits, check the portal address (the one the
+   machines will use), press *Download for Windows* or *Download for Linux*, and run the file on
+   the machine: Windows, double-click and allow administrator rights (or `…exe install` from an
+   administrator prompt); Linux, `chmod +x sohobotp-agent-… && sudo ./sohobotp-agent-… install`.
+   No options, no `ca.pem` to copy. The file contains the token: give it only to whoever
+   installs it and delete it afterwards (the installed agent does not keep the token; a lost
+   file is stopped by revoking its token under *Enrol endpoints*). If a button is greyed out,
+   the portal has no agent program for that system yet: on the portal server,
+   `portal-admin.php agent-program-add --file=sohobotp-agent-linux-amd64 --os=linux --arch=amd64`
+   (the files of this kit's `agent/` folder; a Docker image built after
+   `sh agent/tests/run-in-docker.sh` already contains them). Steps 6 and 7 describe the
+   classic way with commands; SohobOTP Sign-in (step 5) is still installed separately.
+
 ## Step 5 — Windows: SohobOTP Sign-in installer (ready-built)
 
 The kit contains **`windows-signin\SohobOTPSignIn.msi`**, ready to install (step 6). It was

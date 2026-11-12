@@ -155,5 +155,21 @@ client disabled
 
 echo "== uninstall"
 check "uninstall removes the agent state and binary" "docker exec $CLI sh -c '/usr/local/sbin/sohobotp-agent uninstall >/dev/null 2>&1; ! test -e /etc/sohobotp-agent && ! test -e /usr/local/sbin/sohobotp-agent'"
+echo "== agent downloaded from the portal: enrolment settings built in, nothing typed"
+docker cp "$BIN" "$APP:/tmp/agent-plain" && docker exec "$APP" chmod 0644 /tmp/agent-plain
+portal download /tmp/agent-plain /tmp/ca.pem > "$TMP/agent-download"
+PLAIN_SUM=$(shasum -a 256 "$BIN" | cut -d" " -f1)
+check "the download is the agent program plus its settings" "[ \$(wc -c < '$TMP/agent-download') -gt \$(wc -c < '$BIN') ] && tail -c 16 '$TMP/agent-download' | grep -q SOHOBOTP-BUNDLE1"
+docker exec "$CLI" sh -c 'cp /e2e/agent-download /root/sohobotp-agent-download && chmod 0755 /root/sohobotp-agent-download'
+# no systemd in the test container: the enrolment and the copy of the program are checked, the service step fails after them
+OUT=$(docker exec "$CLI" /root/sohobotp-agent-download install 2>&1 || true)
+check "install without options enrols with the built-in settings" "echo \"\$OUT\" | grep -q 'Enrolment settings built into this agent: portal https://portal.test' && echo \"\$OUT\" | grep -q 'Enrolled as endpoint'"
+check "the built-in CA certificate is used for the portal connection" "docker exec $CLI cmp -s /etc/sohobotp-agent/portal-ca.pem /e2e/ca.pem && agent status | grep -q 'Portal: *https://portal.test'"
+check "the installed agent is the plain program: the enrolment token is not kept" "[ \"\$(docker exec $CLI sha256sum /usr/local/sbin/sohobotp-agent | cut -d' ' -f1)\" = '$PLAIN_SUM' ] && [ \"\$(docker exec $CLI tail -c 16 /usr/local/sbin/sohobotp-agent)\" != SOHOBOTP-BUNDLE1 ]"
+check "the installed agent checks in" "agent run --once | grep -q 'version [0-9]*, applied'"
+check "the same download cannot enrol a second machine (token for 1)" "docker exec $CLI sh -c 'rm -rf /etc/sohobotp-agent && ! /root/sohobotp-agent-download install --no-service >/dev/null 2>&1'"
+docker exec "$CLI" sh -c 'printf x | dd of=/root/sohobotp-agent-download bs=1 seek=$(( $(wc -c < /root/sohobotp-agent-download) - 60 )) conv=notrunc 2>/dev/null'
+check "a damaged download is refused with a clear message" "docker exec $CLI /root/sohobotp-agent-download install 2>&1 | grep -q 'settings built into this program are damaged'"
+
 [ "$STATUS" = 0 ] && echo "All Linux agent end-to-end checks passed ($DISTRO)." || echo "Some Linux agent end-to-end checks FAILED ($DISTRO)."
 exit $STATUS

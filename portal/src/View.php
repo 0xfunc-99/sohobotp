@@ -39,6 +39,7 @@ final class View
             ['route' => 'directory', 'label' => 'Directory (AD/LDAP)', 'permission' => ['settings.view', 'sync.view', 'directory.manage']],
             ['route' => 'radius', 'label' => 'RADIUS servers', 'permission' => ['radius.view']],
             ['route' => 'endpoints', 'label' => 'Endpoints', 'permission' => ['endpoints.view']],
+            ['route' => 'agent-download', 'label' => 'Download agent', 'permission' => ['endpoints.manage']],
             ['route' => 'admins', 'label' => 'Administrators', 'permission' => ['admins.manage']],
             ['route' => 'api-keys', 'label' => 'API keys', 'permission' => ['api.manage']],
             ['route' => 'database', 'label' => 'Database', 'permission' => ['database.manage']],

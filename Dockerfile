@@ -111,6 +111,9 @@ COPY raspberry/boot-part/multiotp-tree /boot/multiotp-tree/
 # Management portal (served at https://<host>/portal/), kept once in the source tree
 COPY portal /boot/multiotp-tree/usr/local/bin/multiotp/portal/
 COPY LICENSES.md COPYING COPYING.LESSER /boot/multiotp-tree/usr/local/bin/multiotp/
+# SohobOTP: agent programs for the portal's "Download agent" page, when they were built before
+# the image (sh agent/tests/run-in-docker.sh writes agent/dist/); none: the page says how to add them
+COPY LICENSES.md agent/dis[t]/sohobotp-agent-* /usr/local/share/sohobotp/agent-programs/
 
 
 ############################################################

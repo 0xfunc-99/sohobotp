@@ -207,6 +207,21 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
 - **Enrolment tokens** (Enrol endpoints page) are per group, expire (1-720 h), have a use limit,
   are shown once and stored as SHA-256 hashes. The page shows the install command and the
   **portal key pin**: agents refuse any portal whose signing key does not match it.
+- **Download agent** page (`AgentBundle`, permission `endpoints.manage`): the agent program
+  with its enrolment settings built in, so a machine enrols by running the download.
+  - The portal creates a new token (same limits and approval as above) and appends a settings
+    block to the agent program: portal address, token, pin, and the CA certificate when the
+    portal is not publicly trusted (filled in from the portal's self-signed certificate or
+    `<data>/agent-ca.pem`, editable). Nothing is compiled; layout and checksum in
+    `agent/internal/bundle`, one shared test vector on both sides.
+  - The download is built per request and never stored; the audit trail records
+    `endpoint.agent_download` without the token; the installed agent is the plain program
+    (the token is not kept on the machine); a damaged block is refused by the agent.
+  - Agent programs: the newest signed release for the platform, else
+    `<data>/agent-programs` (`portal-admin.php agent-program-add`), else the folder shipped
+    in the image (`/usr/local/share/sohobotp/agent-programs`, `MULTIOTP_PORTAL_AGENT_DIR`).
+  - Limit: a code-signed Windows agent would lose its signature when settings are appended;
+    with a signing certificate, the download becomes a per-token MSI.
 - **Agent API** `portal/agent.php?a=enroll|checkin` (the second public PHP file):
   - no session or cookies;
   - every check-in is signed with the machine's own Ed25519 key, refused when more than

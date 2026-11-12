@@ -17,6 +17,7 @@ return static function (string $name, string $class = 'nav-icon'): string {
         'api-keys' => '<circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20.5 2.5M17 6l3 3M14.5 8.5l2 2"/>',
         'database' => '<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
         'ha' => '<path d="M20 12a8 8 0 0 1-14.3 4.9M4 12a8 8 0 0 1 14.3-4.9"/><path d="M18.5 3v4.5H14M5.5 21v-4.5H10"/>',
+        'agent-download' => '<path d="M12 3v11M7.5 10l4.5 4.5 4.5-4.5"/><path d="M4 16.5v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
         'audit' => '<rect x="4.5" y="4" width="15" height="17.5" rx="2"/><path d="M9 2.5h6v3H9zM8.5 11h7M8.5 15h7"/>',
         'account' => '<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="10" r="3"/><path d="M6.5 18.5c1.2-2.2 3.2-3.3 5.5-3.3s4.3 1.1 5.5 3.3"/>',
         'activity' => '<path d="M3 12h4l3-8 4 16 3-8h4"/>',

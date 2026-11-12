@@ -13,3 +13,8 @@ func clearBootstrapToken() {}
 func SaveBootstrapToken(string) error {
 	return errors.New("save-token is used by the Windows installer only")
 }
+
+// PauseIfOwnConsole and RelaunchElevated matter on Windows only (a double-clicked agent).
+func PauseIfOwnConsole() {}
+
+func RelaunchElevated() bool { return false }

@@ -6,7 +6,7 @@
   // Sidebar sections. Entries the role cannot use are already left out of $nav; unknown entries go to "More".
   $sectionOf = [
       'dashboard' => '', 'users' => 'Identity', 'tokens' => 'Identity', 'directory' => 'Identity',
-      'radius' => 'Access', 'endpoints' => 'Access', 'api-keys' => 'Access',
+      'radius' => 'Access', 'endpoints' => 'Access', 'agent-download' => 'Access', 'api-keys' => 'Access',
       'admins' => 'System', 'database' => 'System', 'ha' => 'System', 'audit' => 'System',
       'account' => 'You',
   ];
@@ -54,6 +54,7 @@
       'directory' => 'Connect Active Directory or LDAP so users are created, updated and disabled automatically.',
       'radius' => 'VPNs, firewalls and other devices that check logins with SohobOTP over RADIUS.',
       'endpoints' => 'Windows and Linux machines running the SohobOTP agent.',
+      'agent-download' => 'The agent for a Windows or Linux machine, ready to enrol: the portal address, a new enrolment token, the pin and the certificate are built into the download.',
       'admins' => 'People who can sign in to this portal, and what each role may do.',
       'api-keys' => 'Keys for scripts and other applications that use the SohobOTP REST API.',
       'database' => 'Where SohobOTP stores users, tokens and RADIUS data.',

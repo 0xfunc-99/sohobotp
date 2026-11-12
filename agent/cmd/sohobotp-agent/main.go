@@ -1,6 +1,8 @@
 // sohobotp-agent: the SohobOTP endpoint agent for Linux and Windows.
 //
 //	sohobotp-agent install --portal URL --token TOKEN --pin HEX [--ca-file PEM] [--no-service]
+//	sohobotp-agent install          (an agent downloaded from the portal's "Download agent" page:
+//	                                 portal, token, pin and CA certificate are built into it)
 //	sohobotp-agent run [--once]
 //	sohobotp-agent status
 //	sohobotp-agent apply --dry-run --config FILE   (Linux: {"policy": {...}, "secret": "..."})
@@ -24,6 +26,7 @@ import (
 	"time"
 
 	"multiotp-portal/agent/internal/agent"
+	"multiotp-portal/agent/internal/bundle"
 	"multiotp-portal/agent/internal/inventory"
 	"multiotp-portal/agent/internal/protocol"
 	"multiotp-portal/agent/internal/release"
@@ -32,8 +35,23 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		// an agent downloaded from the portal with its enrolment settings: just run it
+		if s, _ := builtIn(); s == nil {
+			usage()
+			os.Exit(2)
+		}
+		if agent.RelaunchElevated() { // Windows, double-clicked: ask for administrator rights
+			return
+		}
+		err := install(nil)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "sohobotp-agent:", err)
+		}
+		agent.PauseIfOwnConsole()
+		if err != nil {
+			os.Exit(1)
+		}
+		return
 	}
 	var err error
 	switch os.Args[1] {
@@ -81,6 +99,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `SohobOTP agent `+inventory.Version+`
   install --portal https://portal.example.com --token TOKEN --pin PIN [--ca-file ca.pem] [--no-service]
+  install            with an agent downloaded from the portal's "Download agent" page (settings built in)
   run [--once]       check in with the portal (the service runs this)
   status             enrolment, last check-in, applied configuration
   apply --dry-run --config FILE   show what a Linux policy would change
@@ -101,17 +120,33 @@ func install(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	caPEM := ""
+	fromDownload := false
+	if *portal == "" && *token == "" && *pin == "" {
+		// settings built into an agent downloaded from the portal (options, when given, win)
+		s, err := builtIn()
+		if err != nil {
+			return err
+		}
+		if s != nil {
+			*portal, *token, *pin, caPEM, fromDownload = s.Portal, s.Token, s.Pin, s.CAPEM, true
+			fmt.Printf("Enrolment settings built into this agent: portal %s\n", s.Portal)
+		}
+	}
 	if *portal == "" || *token == "" || *pin == "" {
-		return errors.New("--portal, --token and --pin are required")
+		return errors.New("--portal, --token and --pin are required (or download the agent from the portal's Download agent page: it has them built in)")
 	}
 	if err := agent.RequireAdmin(); err != nil {
 		return err
 	}
-	st, err := agent.Enroll(agent.Enrolment{Portal: *portal, Token: *token, Pin: *pin, CAFile: *caFile})
+	st, err := agent.Enroll(agent.Enrolment{Portal: *portal, Token: *token, Pin: *pin, CAFile: *caFile, CAPEM: caPEM})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Enrolled as endpoint %s.\n", st.EndpointID)
+	if fromDownload {
+		defer fmt.Println("Delete the downloaded file: it contains the enrolment token (the installed agent does not).")
+	}
 	a, err := agent.Load()
 	if err != nil {
 		return err
@@ -128,6 +163,16 @@ func install(args []string) error {
 	}
 	fmt.Println("Service installed and started.")
 	return nil
+}
+
+// builtIn returns the enrolment settings built into this program, if any.
+func builtIn() (*bundle.Settings, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, nil
+	}
+	s, _, err := bundle.Read(exe)
+	return s, err
 }
 
 func run(args []string) error {

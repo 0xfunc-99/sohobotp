@@ -282,6 +282,83 @@ final class EndpointsController extends Controller
         ]);
     }
 
+    /**
+     * Download agent: a new enrolment token built into the agent program, with the portal
+     * address, the pin and the CA certificate (AgentBundle). The token exists only in the
+     * download; the audit trail records who downloaded what, never the token.
+     */
+    public function agentDownload(): void
+    {
+        $this->requirePermission('endpoints.manage');
+        $endpoints = new Endpoints();
+        $groups = $endpoints->groups();
+        if ([] === $groups) {
+            Session::flash('info', 'Create an endpoint group first: every endpoint joins one when it enrols.');
+            $this->redirect('endpoint-group');
+        }
+        $programs = [];
+        foreach (AgentBundle::PLATFORMS as $platform => $label) {
+            $programs[$platform] = AgentBundle::program($platform);
+        }
+        $values = [
+            'platform' => '', 'group_id' => $groups[0]['id'], 'label' => '', 'hours' => '24', 'max_uses' => '1', 'approval' => 'directory',
+            'portal' => 'https://' . self::host(), 'ca_pem' => AgentBundle::detectCa(),
+        ];
+        $error = null;
+        if ($this->isPost()) {
+            foreach (['platform' => 32, 'group_id' => 32, 'label' => 100, 'hours' => 4, 'max_uses' => 6, 'approval' => 16, 'portal' => 300] as $key => $max) {
+                $values[$key] = $this->post($key, $max);
+            }
+            $values['ca_pem'] = mb_substr((string) ($_POST['ca_pem'] ?? ''), 0, 70000);
+            try {
+                $program = $programs[$values['platform']] ?? null;
+                if (null === $program) {
+                    throw new ValidationException('Choose Windows or Linux. A greyed-out choice means the portal has no agent program for it yet.');
+                }
+                $portal = AgentBundle::validatePortal($values['portal']);
+                $caPem = AgentBundle::validateCa($values['ca_pem']);
+                [$token, $plain] = $endpoints->createToken(
+                    $values['group_id'],
+                    '' !== $values['label'] ? $values['label'] : 'Downloaded agent, ' . AgentBundle::PLATFORMS[$values['platform']],
+                    (int) $values['hours'],
+                    (int) $values['max_uses'],
+                    $this->admin['username'],
+                    $values['approval'] ?: 'none'
+                );
+                $trailer = AgentBundle::trailer($portal, $plain, $endpoints->pin(), $caPem);
+                $this->audit->record('endpoint.agent_download', 'success', $token['label'], [
+                    'token' => $token['id'], 'group' => $token['group_id'], 'platform' => $values['platform'], 'portal' => $portal,
+                    'agent' => $program['source'] . ('' !== $program['version'] ? ' ' . $program['version'] : ''), 'with_ca' => '' !== $caPem,
+                    'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
+                ]);
+                [$os] = explode('/', $values['platform']);
+                $name = 'sohobotp-agent-' . $token['id'] . ('windows' === $os ? '.exe' : '');
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
+                header('Content-Type: application/octet-stream');
+                header('Content-Disposition: attachment; filename="' . $name . '"');
+                header('Content-Length: ' . ($program['size'] + strlen($trailer)));
+                header('Cache-Control: no-store');
+                header('X-Content-Type-Options: nosniff');
+                readfile($program['file']);
+                echo $trailer;
+                exit;
+            } catch (ValidationException $invalid) {
+                $error = $invalid->getMessage();
+                http_response_code(400);
+            }
+        }
+        $this->view->render('agent-download', [
+            'title' => 'Download agent',
+            'groups' => $groups,
+            'programs' => $programs,
+            'values' => $values,
+            'pin' => $endpoints->pin(),
+            'error' => $error,
+        ]);
+    }
+
     /** Reason an endpoint needs the administrator's attention, or null. */
     private static function attention(array $endpoint): ?string
     {
