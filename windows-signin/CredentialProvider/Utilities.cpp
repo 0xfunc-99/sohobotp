@@ -344,6 +344,11 @@ HRESULT Utilities::SetScenario(
 	__in ICredentialProviderCredentialEvents* pCPCE,
 	__in SCENARIO scenario)
 {
+	if (!pCredential || !pCPCE)
+	{
+		return E_INVALIDARG;
+	}
+
 	//DebugPrint(__FUNCTION__);
 	HRESULT hr = S_OK;
 	wstring label = L"";
@@ -361,15 +366,14 @@ HRESULT Utilities::SetScenario(
 	case SCENARIO::SECOND_STEP:
 		DebugPrint("SetScenario: SECOND_STEP");
 		// Set the submit button next to the OTP field for the second step
-		_config->provider.pCredProvCredentialEvents->SetFieldSubmitButton(_config->provider.pCredProvCredential,FID_SUBMIT_BUTTON, FID_OTP);
-		_config->provider.pCredProvCredentialEvents->SetFieldString(pCredential, FID_OTP, L"");
+		pCPCE->SetFieldSubmitButton(pCredential, FID_SUBMIT_BUTTON, FID_OTP);
+		pCPCE->SetFieldString(pCredential, FID_OTP, L"");
 		hr = SetFieldStatePairBatch(pCredential, pCPCE, s_rgScenarioSecondStepOTP);
 		break;
 	case SCENARIO::CHANGE_PASSWORD:
 		DebugPrint("SetScenario: CHANGE_PASSWORD");
 		// Set the submit button next to the repeat pw field
-		_config->provider.pCredProvCredentialEvents->SetFieldSubmitButton(_config->provider.pCredProvCredential,
-			FID_SUBMIT_BUTTON, FID_NEW_PASS_2);
+		pCPCE->SetFieldSubmitButton(pCredential, FID_SUBMIT_BUTTON, FID_NEW_PASS_2);
 		hr = SetFieldStatePairBatch(pCredential, pCPCE, s_rgScenarioPasswordChange);
 		break;
 	case SCENARIO::UNLOCK_TWO_STEP:
@@ -855,6 +859,12 @@ HRESULT Utilities::ResetScenario(
 	// 2 step progress is reset aswell, therefore put the submit button next to the password field again
 	_config->isSecondStep = false;	
 
+	// LogonUI can deselect a tile after releasing its event callbacks.
+	if (!pSelf || !pCredProvCredentialEvents)
+	{
+		return S_OK;
+	}
+
 	if (_config->provider.cpu == CPUS_UNLOCK_WORKSTATION)
 	{
 		if (_config->twoStepHideOTP)
@@ -877,7 +887,7 @@ HRESULT Utilities::ResetScenario(
 		else
 		{
 			SetScenario(pSelf, pCredProvCredentialEvents, SCENARIO::LOGON_BASE);
-			_config->provider.pCredProvCredentialEvents->SetFieldSubmitButton(_config->provider.pCredProvCredential, FID_SUBMIT_BUTTON, FID_LDAP_PASS);
+			pCredProvCredentialEvents->SetFieldSubmitButton(pSelf, FID_SUBMIT_BUTTON, FID_LDAP_PASS);
 		}
 	}
 
