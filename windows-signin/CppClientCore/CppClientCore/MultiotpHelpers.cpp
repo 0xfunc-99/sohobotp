@@ -1354,16 +1354,21 @@ HRESULT multiotp_request(_In_ std::wstring username,
         if (DEVELOP_MODE) PrintLn(L"with options ", options);
         
         // As argc 0 is the full filename itself, we use the lpCommandLine only 
-        if (::CreateProcessW(NULL, appname, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, path, &si, &pi)) {
+        // SohobOTP trace (release_log=1): the helper program start and result, never its arguments
+        const BOOL sohobotpStarted = ::CreateProcessW(NULL, appname, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, path, &si, &pi);
+        ReleaseDebugPrint(sohobotpStarted ? std::string("SohobOTP trace: multiotp.exe started") : "SohobOTP trace: multiotp.exe could NOT be started, Windows error " + std::to_string(GetLastError()));
+        if (sohobotpStarted) {
 
             DWORD result = WaitForSingleObject(pi.hProcess, (timeout * 1000));
 
             if (DEVELOP_MODE) PrintLn("WaitForSingleObject result: %d", result);
+            if (result != WAIT_OBJECT_0) ReleaseDebugPrint("SohobOTP trace: multiotp.exe did not finish in time (wait result " + std::to_string(result) + ")");
 
             if (result == WAIT_OBJECT_0) {
                 GetExitCodeProcess(pi.hProcess, &exitCode);
 
                 if (DEVELOP_MODE) PrintLn("multiotp.exe Exit Code: %d", exitCode);
+                ReleaseDebugPrint("SohobOTP trace: multiotp.exe exit code " + std::to_string(exitCode));
 
                 // hr = exitCode;
                 CloseHandle(pi.hProcess);
@@ -1395,6 +1400,9 @@ HRESULT multiotp_request(_In_ std::wstring username,
             }
         }
         CoTaskMemFree(path);
+    }
+    else {
+        ReleaseDebugPrint("SohobOTP trace: multiOTPPath not set, the helper is not called");
     }
     return hr;
 }
@@ -1862,16 +1870,21 @@ HRESULT multiotp_request_command(_In_ std::wstring command, _In_ std::wstring pa
         if (DEVELOP_MODE) PrintLn(L"with options ", options);
 
         // As argc 0 is the full filename itself, we use the lpCommandLine only 
-        if (::CreateProcessW(NULL, appname, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, path, &si, &pi)) {
+        // SohobOTP trace (release_log=1): the helper program start and result, never its arguments
+        const BOOL sohobotpStarted = ::CreateProcessW(NULL, appname, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, path, &si, &pi);
+        ReleaseDebugPrint(sohobotpStarted ? std::string("SohobOTP trace: multiotp.exe started") : "SohobOTP trace: multiotp.exe could NOT be started, Windows error " + std::to_string(GetLastError()));
+        if (sohobotpStarted) {
 
             DWORD result = WaitForSingleObject(pi.hProcess, (timeout * 1000));
 
             if (DEVELOP_MODE) PrintLn("WaitForSingleObject result: %d", result);
+            if (result != WAIT_OBJECT_0) ReleaseDebugPrint("SohobOTP trace: multiotp.exe did not finish in time (wait result " + std::to_string(result) + ")");
 
             if (result == WAIT_OBJECT_0) {
                 GetExitCodeProcess(pi.hProcess, &exitCode);
 
                 if (DEVELOP_MODE) PrintLn("multiotp.exe Exit Code: %d", exitCode);
+                ReleaseDebugPrint("SohobOTP trace: multiotp.exe exit code " + std::to_string(exitCode));
 
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
@@ -1902,6 +1915,9 @@ HRESULT multiotp_request_command(_In_ std::wstring command, _In_ std::wstring pa
             }
         }
         CoTaskMemFree(path);
+    }
+    else {
+        ReleaseDebugPrint("SohobOTP trace: multiOTPPath not set, the helper is not called");
     }
     return hr;
 }

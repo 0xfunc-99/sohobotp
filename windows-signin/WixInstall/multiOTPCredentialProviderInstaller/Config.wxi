@@ -7,7 +7,7 @@
 <Include>
 
 
-  <?define Version="1.0.0.0" ?>
+  <?define Version="1.0.1.0" ?>
   <?define Manufacturer = "Sohobcom" ?>
   <?define BaseProductName = "SohobOTP Sign-in" ?>
 

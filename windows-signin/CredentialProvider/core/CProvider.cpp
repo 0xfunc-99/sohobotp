@@ -94,6 +94,7 @@ HRESULT CProvider::SetUsageScenario(
 
 	_config->provider.credPackFlags = dwFlags;
 	_config->provider.cpu = cpus;
+	ReleaseDebugPrint("SohobOTP trace: usage scenario " + std::to_string((int)cpus));
 
 	// Decide which scenarios to support here. Returning E_NOTIMPL simply tells the caller
 	// that we're not designed for that scenario.

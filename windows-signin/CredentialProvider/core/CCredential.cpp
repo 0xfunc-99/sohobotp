@@ -214,6 +214,7 @@ HRESULT CCredential::UnAdvise()
 HRESULT CCredential::SetSelected(__out BOOL* pbAutoLogon)
 {
 	DebugPrint(__FUNCTION__);
+	ReleaseDebugPrint("SohobOTP trace: tile selected");
 	*pbAutoLogon = false;
 	HRESULT hr = S_OK;
 
@@ -687,6 +688,7 @@ HRESULT CCredential::GetSerialization(
 
 	_config->provider.pcpcs = pcpcs;
 	_config->provider.pcpgsr = pcpgsr;
+	ReleaseDebugPrint("SohobOTP trace: GetSerialization, status " + std::to_string((long)_piStatus));
 
 	_config->provider.status_icon = pcpsiOptionalStatusIcon;
 	_config->provider.status_text = ppwszOptionalStatusText;
@@ -943,6 +945,7 @@ void CCredential::PushAuthenticationCallback(bool success)
 HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 {
 	DebugPrint(__FUNCTION__);
+	ReleaseDebugPrint("SohobOTP trace: Connect (submit received)");
 	
 	UNREFERENCED_PARAMETER(pqcws);
 
@@ -950,6 +953,14 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	_config->provider.pCredProvCredentialEvents = _pCredProvCredentialEvents;
 	_config->provider.field_strings = _rgFieldStrings;
 	_util.ReadFieldValues();
+	// SohobOTP trace: which fields are filled (lengths and yes/no only, never the values)
+	ReleaseDebugPrint("SohobOTP trace: scenario " + std::to_string((int)_config->provider.cpu)
+		+ ", second step " + std::to_string((int)_config->isSecondStep)
+		+ ", two-step " + std::to_string((int)_config->twoStepHideOTP)
+		+ ", user given " + std::to_string((int)!_config->credential.username.empty())
+		+ ", domain given " + std::to_string((int)!_config->credential.domain.empty())
+		+ ", password given " + std::to_string((int)(_config->credential.password.length() > 0))
+		+ ", code length " + std::to_string(_config->credential.otp.length()));
 
 	const bool isRemote = Shared::IsCurrentSessionRemote();
 
@@ -957,7 +968,8 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	if (isRemote) {
 		PWSTR tempStr = L"";
 		readKeyValueInMultiOTPRegistry(HKEY_CLASSES_ROOT, L"", L"cpus_logon", &tempStr, L"");
-		if (wcscmp(tempStr, L"2e") == 0 || wcscmp(tempStr, L"2d") == 0) {// Compar? des chaines ou il y a un pointeur
+		if (wcscmp(tempStr, L"2e") == 0 || wcscmp(tempStr, L"2d") == 0) {
+			ReleaseDebugPrint("SohobOTP trace: remote session without a code (policy)");// Compar? des chaines ou il y a un pointeur
 			_piStatus = PI_AUTH_SUCCESS;
 			return S_OK;
 		}
@@ -990,7 +1002,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 		}
 
 		if (PrivacyIDEA::toUpperCase(toCompare) == PrivacyIDEA::toUpperCase(_config->excludedAccount)) {
-			DebugPrint("Login data matches excluded account, skipping 2FA...");
+			ReleaseDebugPrint("SohobOTP trace: excluded account, no code");
 			// Simulate 2FA success so the logic in GetSerialization can stay the same
 			_piStatus = PI_AUTH_SUCCESS;
 			storeLastConnectedUserIfNeeded();
@@ -1030,7 +1042,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 								toCompare = strNetBiosDomainName;
 								toCompare = toCompare.append(L"\\").append(pszUsername);
 								if (PrivacyIDEA::toUpperCase(toCompare) == PrivacyIDEA::toUpperCase(_config->excludedAccount)) {
-									DebugPrint("Login data matches excluded account, skipping 2FA...");
+									ReleaseDebugPrint("SohobOTP trace: excluded account, no code");
 									// Simulate 2FA success so the logic in GetSerialization can stay the same
 									_piStatus = PI_AUTH_SUCCESS;
 									// clean up
@@ -1044,7 +1056,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 								toCompare = pszDomain;
 								toCompare = toCompare.append(L"\\").append(pszUsername);
 								if (PrivacyIDEA::toUpperCase(toCompare) == PrivacyIDEA::toUpperCase(_config->excludedAccount)) {
-									DebugPrint("Login data matches excluded account, skipping 2FA...");
+									ReleaseDebugPrint("SohobOTP trace: excluded account, no code");
 									// Simulate 2FA success so the logic in GetSerialization can stay the same
 									_piStatus = PI_AUTH_SUCCESS;
 									// clean up
@@ -1064,7 +1076,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 					toCompare = infoBuf;												
 					toCompare = toCompare.append(L"\\").append(_config->credential.username);
 					if (PrivacyIDEA::toUpperCase(toCompare) == PrivacyIDEA::toUpperCase(_config->excludedAccount)) {
-						DebugPrint("Login data matches excluded account, skipping 2FA...");
+						ReleaseDebugPrint("SohobOTP trace: excluded account, no code");
 						// Simulate 2FA success so the logic in GetSerialization can stay the same
 						_piStatus = PI_AUTH_SUCCESS;
 						// clean up
@@ -1083,7 +1095,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	
 	if (_config->bypassPrivacyIDEA)
 	{
-		DebugPrint("Bypassing privacyIDEA...");
+		ReleaseDebugPrint("SohobOTP trace: bypass flag set, no check");
 		_config->bypassPrivacyIDEA = false;
 
 		return S_OK;
@@ -1189,7 +1201,9 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	}
 
 	// The user is without2fa no need to go further
+	ReleaseDebugPrint(std::string("SohobOTP trace: asking for the user's token type, SID found ") + (userSID != NULL ? "yes" : "no"));
 	HRESULT tokenType = _privacyIDEA.userTokenType(_config->credential.username, _config->credential.domain, (std::wstring)userSID);
+	ReleaseDebugPrint("SohobOTP trace: token type " + std::to_string((long)tokenType));
 
 	if (_config->multiOTPWithout2FA && tokenType == MULTIOTP_IS_WITHOUT2FA)
 	{
@@ -1282,6 +1296,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 			_config->credential.domain,
 			SecureWString(_config->credential.otp.c_str()),
 			"", error_code, (std::wstring)userSID);
+		ReleaseDebugPrint("SohobOTP trace: code checked, status " + std::to_string((long)_piStatus) + ", error " + std::to_string((long)error_code));
 		PWSTR tempStr = L"";
 		if (_piStatus == PI_AUTH_SUCCESS)
 		{
@@ -1307,6 +1322,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 			_config->credential.domain,
 			SecureWString(_config->credential.otp.c_str()),
 			"", error_code, (std::wstring)userSID);
+		ReleaseDebugPrint("SohobOTP trace: code checked, status " + std::to_string((long)_piStatus) + ", error " + std::to_string((long)error_code));
 		PWSTR tempStr = L"";
 		if (_piStatus == PI_AUTH_SUCCESS) {
 			if (readKeyValueInMultiOTPRegistry(HKEY_CLASSES_ROOT, L"", L"currentOfflineUser", &tempStr, L"") > 1) {
@@ -1319,6 +1335,7 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 		}
 	}
 	DebugPrint("Connect - END");
+	ReleaseDebugPrint("SohobOTP trace: Connect end, status " + std::to_string((long)_piStatus));
 	return S_OK; // always S_OK
 }
 
@@ -1338,6 +1355,7 @@ HRESULT CCredential::ReportResult(
 	__out CREDENTIAL_PROVIDER_STATUS_ICON* pcpsiOptionalStatusIcon
 )
 {
+	ReleaseDebugPrint("SohobOTP trace: Windows result " + std::to_string((long)ntsStatus) + "/" + std::to_string((long)ntsSubstatus));
 #ifdef _DEBUG
 	DebugPrint(__FUNCTION__);
 	// only print interesting statuses
