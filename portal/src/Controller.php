@@ -47,6 +47,9 @@ abstract class Controller
 
     protected function redirect(string $route, array $params = []): never
     {
+        while (ob_get_level() > 0) {
+            ob_end_clean(); // engine warnings printed before a redirect must not block it
+        }
         header('Location: ' . route($route, $params), true, 303);
         exit;
     }

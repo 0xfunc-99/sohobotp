@@ -36,7 +36,21 @@ type Inventory struct {
 	IPs          []string  `json:"ips"`
 	AgentVersion string    `json:"agent_version"`
 	Component    Component `json:"component"`
+	Accounts     []Account `json:"accounts,omitempty"`
 }
+
+// Account is a user account that can sign in on the machine: local accounts with a login
+// (Linux: a real shell; Windows: enabled local accounts) and, on Windows, directory users with
+// a profile on the machine. The portal shows them on the machine's page, where the
+// administrator chooses who needs a code.
+type Account struct {
+	Name  string `json:"name"`  // Linux: user; Windows: user (local) or DOMAIN\user
+	Kind  string `json:"kind"`  // local | domain
+	Admin bool   `json:"admin"` // uid 0 / sudo or wheel group; Windows: administrator
+}
+
+// MaxAccounts bounds the list sent at each check-in.
+const MaxAccounts = 300
 
 // Component is the login component the agent manages (pam_radius, multiotp-cp).
 type Component struct {
@@ -135,23 +149,24 @@ type RadiusServer struct {
 
 // WindowsPolicy is the policy for os=windows (SohobOTP Sign-in).
 type WindowsPolicy struct {
-	ServerURL           string `json:"server_url"`
-	ServerTimeout       int    `json:"server_timeout"`
-	CpusLogon           string `json:"cpus_logon"`
-	CpusUnlock          string `json:"cpus_unlock"`
-	CpusCredui          string `json:"cpus_credui"`
-	ExcludedAccount     string `json:"excluded_account"`
-	CacheEnabled        bool   `json:"cache_enabled"`
-	UPNFormat           bool   `json:"upn_format"`
-	DefaultPrefix       string `json:"default_prefix"`
-	TimeoutUnlock       int    `json:"timeout_unlock"`
-	TimeoutReconnect    int    `json:"timeout_reconnect"` // minutes; 0 when an older portal leaves it out
-	EnrolAtSignIn       bool   `json:"enrol_at_signin"`   // QR code on the sign-in screen for users without an authenticator
-	Without2FA          bool   `json:"without2fa"`
-	TwoStepHideOTP      bool   `json:"two_step_hide_otp"`
-	TwoStepSendPassword bool   `json:"two_step_send_password"`
-	LoginText           string `json:"login_text"`
-	OTPText             string `json:"otp_text"`
+	ServerURL           string   `json:"server_url"`
+	ServerTimeout       int      `json:"server_timeout"`
+	CpusLogon           string   `json:"cpus_logon"`
+	CpusUnlock          string   `json:"cpus_unlock"`
+	CpusCredui          string   `json:"cpus_credui"`
+	ExcludedAccount     string   `json:"excluded_account"`
+	CacheEnabled        bool     `json:"cache_enabled"`
+	UPNFormat           bool     `json:"upn_format"`
+	DefaultPrefix       string   `json:"default_prefix"`
+	TimeoutUnlock       int      `json:"timeout_unlock"`
+	TimeoutReconnect    int      `json:"timeout_reconnect"` // minutes; 0 when an older portal leaves it out
+	EnrolAtSignIn       bool     `json:"enrol_at_signin"`   // QR code on the sign-in screen for users without an authenticator
+	CodeExempt          []string `json:"code_exempt"`       // accounts that sign in on this machine with their password only
+	Without2FA          bool     `json:"without2fa"`
+	TwoStepHideOTP      bool     `json:"two_step_hide_otp"`
+	TwoStepSendPassword bool     `json:"two_step_send_password"`
+	LoginText           string   `json:"login_text"`
+	OTPText             string   `json:"otp_text"`
 }
 
 // EnrollMessage is the exact byte string signed by the enrolment proof.

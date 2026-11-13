@@ -32,6 +32,7 @@ final class App
 
     public function run(): void
     {
+        ob_start(); // held until the end: a warning printed by the engine cannot break a redirect
         $this->sendSecurityHeaders();
         $https = self::isHttps();
         if (!$https && !Config::allowHttp()) {
@@ -691,6 +692,9 @@ final class App
 
     private function redirect(string $route, array $params = []): never
     {
+        while (ob_get_level() > 0) {
+            ob_end_clean(); // engine warnings printed before a redirect must not block it
+        }
         header('Location: ' . route($route, $params), true, 303);
         exit;
     }

@@ -87,6 +87,7 @@ Check "multiOTPServerTimeout kept as DWORD" ($k.GetValueKind("multiOTPServerTime
 Check "multiOTPCacheEnabled kept as its existing type, value 1" ($cp.multiOTPCacheEnabled -eq 1 -or $cp.multiOTPCacheEnabled -eq "1")
 Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
 Check "multiOTPTimeoutReconnect written (15)" ($cp.multiOTPTimeoutReconnect -eq 15)
+Check "accounts without a code written for SohobOTP Sign-in (svc-print)" ($cp.sohobotpCodeExempt -eq "svc-print")
 
 if ($SignInMsi -ne "") {
   Write-Host "== SohobOTP Sign-in pinned to the portal certificate"
@@ -131,6 +132,8 @@ $status = & $exe status 2>&1 | Out-String
 Check "status shows the applied configuration" ($status -match "version 1, applied") $status
 $inv = (Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json).inventory
 Check "inventory reports Windows" ($inv.os -eq "windows" -and $inv.os_name -ne "") "$($inv.os_name)"
+$names = @($inv.accounts | ForEach-Object { $_.name })
+Check "inventory reports the local accounts, the administrator flagged" ($names.Count -ge 1 -and @($inv.accounts | Where-Object { $_.admin }).Count -ge 1) "$($names -join ', ')"
 
 Write-Host "== service recovery"
 $qf = (& sc.exe qfailure SohobOTPAgent) -join " "

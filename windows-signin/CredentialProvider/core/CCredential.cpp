@@ -849,6 +849,52 @@ HRESULT CCredential::GetSerialization(
 	return retVal;
 }
 
+// SohobOTP: is user (typed name, and the domain it signs in to) in the list "user;DOMAIN\\user"?
+static bool SohobotpIsCodeExempt(const std::wstring& list, std::wstring user, std::wstring domain)
+{
+	auto lower = [](std::wstring s) { for (auto& c : s) { c = towlower(c); } return s; };
+	user = lower(user);
+	domain = lower(domain);
+	size_t slash = user.find(L'\\');
+	if (slash != std::wstring::npos) {
+		domain = user.substr(0, slash);
+		user = user.substr(slash + 1);
+	}
+	size_t at = user.find(L'@');
+	if (at != std::wstring::npos) {
+		domain = user.substr(at + 1);
+		user = user.substr(0, at);
+	}
+	size_t dot = domain.find(L'.');
+	const std::wstring netbios = dot == std::wstring::npos ? domain : domain.substr(0, dot);
+	wchar_t computerName[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
+	DWORD size = ARRAYSIZE(computerName);
+	GetComputerNameW(computerName, &size);
+	const bool local = domain.empty() || domain == L"." || domain == lower(computerName);
+	size_t start = 0;
+	while (start <= list.size()) {
+		size_t end = list.find(L';', start);
+		std::wstring entry = lower(list.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start));
+		start = end == std::wstring::npos ? list.size() + 1 : end + 1;
+		if (entry.empty()) {
+			continue;
+		}
+		size_t entrySlash = entry.find(L'\\');
+		if (entrySlash == std::wstring::npos) {
+			if (local && entry == user) {
+				return true;
+			}
+		}
+		else if (entry.substr(entrySlash + 1) == user) {
+			const std::wstring entryDomain = entry.substr(0, entrySlash);
+			if (entryDomain == domain || entryDomain == netbios || (local && entryDomain == lower(computerName))) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 // SohobOTP: the set-up step: QR code as the tile image, instructions, the code field only
 void CCredential::ShowEnrolScreen()
 {
@@ -1045,6 +1091,17 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 
 	// Get user SID
 	LPTSTR userSID = getSidFromUsername(_config->provider.field_strings[FID_USERNAME]);
+
+	// SohobOTP: accounts the administrator unticked on this computer's page sign in with their
+	// password only (the list comes from the agent, in the machine-wide registry). A bare name is
+	// a local account: it matches only a local sign-in, never a domain user with the same name.
+	if (!_config->sohobotpCodeExempt.empty() && SohobotpIsCodeExempt(_config->sohobotpCodeExempt, _config->credential.username, _config->credential.domain))
+	{
+		ReleaseDebugPrint("SohobOTP: account signs in without a code on this computer");
+		_piStatus = PI_AUTH_SUCCESS;
+		storeLastConnectedUserIfNeeded();
+		return S_OK;
+	}
 
 	// Grace periods, counted from the last sign-in WITH a code (a grace sign-in does not extend them):
 	// - unlock: the user's session is still active on this computer (multiOTP);

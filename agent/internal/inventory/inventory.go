@@ -24,6 +24,7 @@ func Collect() protocol.Inventory {
 		AgentVersion: Version,
 	}
 	platform(&inv)
+	inv.Accounts = accounts()
 	return inv
 }
 

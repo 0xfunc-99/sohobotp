@@ -90,6 +90,25 @@ final class EndpointsController extends Controller
                         $this->audit->record('endpoint.enable', 'success', $name, ['endpoint' => $endpoint['id']]);
                         Session::flash('success', 'Endpoint enabled. It receives new secrets at its next check-in.');
                         break;
+                    case 'accounts':
+                        $exempt = $endpoints->setCodeExempt($endpoint['id'], array_map('strval', (array) ($_POST['needs_code'] ?? [])));
+                        $this->audit->record('endpoint.code_exempt', 'success', $name, ['endpoint' => $endpoint['id'], 'password_only' => implode(', ', $exempt)]);
+                        Session::flash('success', 'Saved. The computer applies it at its next check-in (within a minute or two).');
+                        break;
+                    case 'create-user':
+                        $this->requirePermission('users.manage');
+                        $account = $this->post('account', 120);
+                        $username = mb_strtolower((string) preg_replace('/^[^\\\\]*\\\\/', '', $account));
+                        $users = new Users();
+                        if (null !== ($invalid = Users::validateName($username))) {
+                            throw new ValidationException($invalid);
+                        }
+                        if (!$users->exists($username)) {
+                            $users->create(['user' => $username, 'display_name' => $username . ' on ' . $name, 'token_serial' => '']);
+                            $this->audit->record('user.create', 'success', $username, ['via' => 'computer account', 'endpoint' => $endpoint['id']]);
+                        }
+                        Session::flash('success', 'SohobOTP user ' . $username . ' created. Scan its QR code now (Enrol new authenticator), then tick it on the computer.');
+                        $this->redirect('user', ['u' => $username]);
                     case 'delete':
                         $endpoints->deleteEndpoint($endpoint['id']);
                         $this->audit->record('endpoint.delete', 'success', $name, ['endpoint' => $endpoint['id']]);
@@ -111,7 +130,9 @@ final class EndpointsController extends Controller
             'group' => $endpoints->group($endpoint['group_id']),
             'groups' => $groups,
             'radiusClient' => $radiusClient,
+            'accounts' => $endpoints->accountsView($endpoint),
             'canManage' => $this->can('endpoints.manage'),
+            'canCreateUsers' => $this->can('users.manage'),
         ]);
     }
 

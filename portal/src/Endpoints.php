@@ -1140,7 +1140,7 @@ final class Endpoints
                 'radius_servers' => $servers,
                 'timeout' => $l['timeout'],
                 'services' => array_values($l['services']),
-                'excluded_users' => array_values(array_unique(array_merge(['root'], $split($l['excluded_users'])))),
+                'excluded_users' => array_values(array_unique(array_merge(['root'], $split($l['excluded_users']), $endpoint['code_exempt'] ?? []))),
                 'excluded_groups' => $split($l['excluded_groups']),
                 'ssh_keys_need_code' => $l['ssh_keys_need_code'],
             ], ['radius_secret' => $secret], ''];
@@ -1159,6 +1159,7 @@ final class Endpoints
             'timeout_unlock' => $w['timeout_unlock'],
             'timeout_reconnect' => (int) ($w['timeout_reconnect'] ?? 0),
             'enrol_at_signin' => (bool) ($w['enrol_at_signin'] ?? false),
+            'code_exempt' => array_values($endpoint['code_exempt'] ?? []),
             'without2fa' => $w['without2fa'],
             'two_step_hide_otp' => $w['two_step_hide_otp'],
             'two_step_send_password' => $w['two_step_send_password'],
@@ -1272,6 +1273,13 @@ final class Endpoints
             }
         }
         $component = is_array($raw['component'] ?? null) ? $raw['component'] : [];
+        $accounts = [];
+        foreach (is_array($raw['accounts'] ?? null) ? array_slice($raw['accounts'], 0, 300) : [] as $a) {
+            $name = is_array($a) && is_string($a['name'] ?? null) ? trim($a['name']) : '';
+            if (null === self::accountNameError($name)) {
+                $accounts[mb_strtolower($name)] = ['name' => $name, 'kind' => 'domain' === ($a['kind'] ?? '') ? 'domain' : 'local', 'admin' => true === ($a['admin'] ?? false)];
+            }
+        }
         return [
             'hostname' => $text($raw, 'hostname'),
             'os' => array_key_exists($text($raw, 'os'), self::OS) ? $text($raw, 'os') : '',
@@ -1283,7 +1291,79 @@ final class Endpoints
             'ips' => $ips,
             'agent_version' => $text($raw, 'agent_version'),
             'component' => ['name' => $text($component, 'name'), 'version' => $text($component, 'version')],
+            'accounts' => array_values($accounts),
         ];
+    }
+
+    /** Account names as agents report them: user, or DOMAIN\user on Windows. */
+    public static function accountNameError(string $name): ?string
+    {
+        return preg_match('/^(?:[A-Za-z0-9][A-Za-z0-9.-]{0,62}\\\\)?[A-Za-z0-9._@$][A-Za-z0-9._@$ -]{0,103}$/', $name) && !str_ends_with($name, ' ')
+            ? null : 'Invalid account name.';
+    }
+
+    /**
+     * The machine's accounts and who needs a code there (the tick on the machine's page).
+     * Everyone needs a code unless the administrator unticked them here (code_exempt) or the
+     * group always lets them in without one (Linux: root and excluded users; Windows: the
+     * break-glass account). has_user: a SohobOTP user exists for the account, without one it
+     * cannot sign in while it needs a code.
+     * @return list<array{name: string, kind: string, admin: bool, needs_code: bool, fixed: ?string, has_user: bool, user: string}>
+     */
+    public function accountsView(array $endpoint): array
+    {
+        $exempt = array_flip($endpoint['code_exempt'] ?? []);
+        $group = $this->group($endpoint['group_id']);
+        $policy = self::effectivePolicy($group['policy'] ?? []);
+        $alwaysFree = [];
+        if ('linux' === $endpoint['os']) {
+            $alwaysFree['root'] = 'root never needs a code (break-glass)';
+            foreach (preg_split('/[\s,;]+/', $policy['linux']['excluded_users'], -1, PREG_SPLIT_NO_EMPTY) ?: [] as $u) {
+                $alwaysFree[mb_strtolower($u)] = 'excluded in the computer policy';
+            }
+        } else {
+            $breakGlass = mb_strtolower($policy['windows']['excluded_account']);
+            if ('' !== $breakGlass) {
+                $alwaysFree[$breakGlass] = 'break-glass account of the computer policy';
+                $alwaysFree[mb_strtolower(preg_replace('/^[^\\\\]*\\\\/', '', $breakGlass))] = 'break-glass account of the computer policy';
+            }
+        }
+        $users = new Users();
+        $out = [];
+        foreach ($endpoint['inventory']['accounts'] ?? [] as $a) {
+            $key = mb_strtolower($a['name']);
+            $user = mb_strtolower((string) preg_replace('/^[^\\\\]*\\\\/', '', $a['name']));
+            $fixed = $alwaysFree[$key] ?? $alwaysFree[$user] ?? null;
+            $out[] = $a + [
+                'needs_code' => null === $fixed && !isset($exempt[$key]),
+                'fixed' => $fixed,
+                'has_user' => null === Users::validateName($user) && $users->exists($user),
+                'user' => $user,
+            ];
+        }
+        return $out;
+    }
+
+    /** Store who needs a code on this machine: every reported account not in $needsCode is exempt. */
+    public function setCodeExempt(string $id, array $needsCode): array
+    {
+        $endpoint = self::endpointStore($id)->read();
+        if ([] === $endpoint) {
+            throw new ValidationException('This endpoint does not exist.');
+        }
+        $ticked = array_flip(array_map(static fn ($n): string => mb_strtolower((string) $n), $needsCode));
+        $exempt = [];
+        foreach ($this->accountsView($endpoint) as $a) {
+            $key = mb_strtolower($a['name']);
+            if (null === $a['fixed'] && !isset($ticked[$key])) { // root, break-glass: never ask anyway
+                $exempt[] = $key;
+            }
+        }
+        sort($exempt);
+        self::endpointStore($id)->update(static function (array &$data) use ($exempt): void {
+            $data['code_exempt'] = $exempt;
+        });
+        return $exempt;
     }
 
     private static function public(array $record): array

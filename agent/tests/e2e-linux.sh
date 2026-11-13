@@ -91,6 +91,7 @@ check "first configuration applied" "agent status | grep -q 'version 1, applied'
 ENDPOINT="$(portal endpoint)"
 echo "$ENDPOINT" | python3 -c 'import json,sys; e=json.load(sys.stdin); print("   portal: config", e.get("config"), "applied", e.get("applied"), "radius", e.get("radius_client_id"), e.get("radius_error"))'
 check "portal sees the inventory and the applied version" "echo '$ENDPOINT' | python3 -c 'import json,sys; e=json.load(sys.stdin); sys.exit(0 if e[\"inventory\"][\"os_name\"].split()[0] in (\"Debian\", \"Rocky\") and e[\"applied\"][\"version\"]==1 and e[\"applied\"][\"status\"]==\"applied\" and e[\"radius_client_id\"] else 1)'"
+check "the agent reports the machine's login accounts (root, no system accounts)" "portal endpoint | python3 -c 'import json,sys; a=[x[\"name\"] for x in json.load(sys.stdin)[\"inventory\"][\"accounts\"]]; sys.exit(0 if \"root\" in a and \"daemon\" not in a and \"nobody\" not in a else 1)'"
 printf 'Waiting for FreeRADIUS to apply the endpoint client'
 for i in $(seq 1 60); do
   [ "$(portal radius-applied)" = yes ] && { echo " ok"; break; }

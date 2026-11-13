@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"multiotp-portal/agent/internal/protocol"
 )
@@ -59,6 +60,9 @@ type Setting struct {
 
 var modeRe = regexp.MustCompile(`^[0-3][ed]$`)
 
+// accountRe: user or DOMAIN\user, without ";" (the separator of sohobotpCodeExempt).
+var accountRe = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9.-]{0,62}\\)?[A-Za-z0-9._@$][A-Za-z0-9._@$ -]{0,103}$`)
+
 func boolNum(b bool) uint32 {
 	if b {
 		return 1
@@ -82,6 +86,14 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 	if p.ServerTimeout < 1 || p.ServerTimeout > 60 || p.TimeoutUnlock < 0 || p.TimeoutUnlock > 1440 || p.TimeoutReconnect < 0 || p.TimeoutReconnect > 480 {
 		return nil, errors.New("timeouts out of range")
 	}
+	if len(p.CodeExempt) > protocol.MaxAccounts {
+		return nil, errors.New("too many accounts without a code")
+	}
+	for _, a := range p.CodeExempt {
+		if !accountRe.MatchString(a) {
+			return nil, fmt.Errorf("invalid account name %q", a)
+		}
+	}
 	num := func(name string, v uint32) Setting { return Setting{Name: name, Number: v, Numeric: true} }
 	txt := func(name, v string) Setting { return Setting{Name: name, Text: v} }
 	return []Setting{
@@ -97,6 +109,7 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 		num("multiOTPTimeoutUnlock", uint32(p.TimeoutUnlock)),
 		num("multiOTPTimeoutReconnect", uint32(p.TimeoutReconnect)),
 		num("sohobotpEnrolAtSignIn", boolNum(p.EnrolAtSignIn)),
+		txt("sohobotpCodeExempt", strings.Join(p.CodeExempt, ";")),
 		num("multiOTPWithout2FA", boolNum(p.Without2FA)),
 		num("two_step_hide_otp", boolNum(p.TwoStepHideOTP)),
 		num("two_step_send_password", boolNum(p.TwoStepSendPassword)),

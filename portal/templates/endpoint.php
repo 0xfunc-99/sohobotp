@@ -31,6 +31,58 @@
   </dl>
 </section>
 <section class="panel">
+  <h2>Users on this computer</h2>
+  <?php if ([] === $accounts): ?>
+    <p class="muted">The agent has not reported the accounts yet (needs agent from this release; it reports them at each check-in).</p>
+  <?php else: ?>
+    <p class="hint">Ticked: signs in with password <strong>and a code</strong>. Unticked: password only, for example a script or service account. <?= 'linux' === $endpoint['os'] ? 'Applies to SSH and sudo.' : 'Applies to the Windows sign-in and unlock (needs SohobOTP Sign-in from this release).' ?></p>
+    <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>">
+      <?= csrf_field() ?><input type="hidden" name="op" value="accounts">
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Needs a code</th><th>Account</th><th>Type</th><th>SohobOTP user</th></tr></thead>
+          <tbody>
+            <?php foreach ($accounts as $a): ?>
+              <tr>
+                <td>
+                  <?php if (null !== $a['fixed']): ?>
+                    <span class="status">never</span> <span class="muted"><?= e($a['fixed']) ?></span>
+                  <?php else: ?>
+                    <label class="choice"><input type="checkbox" name="needs_code[]" value="<?= e($a['name']) ?>"<?= $a['needs_code'] ? ' checked' : '' ?><?= $canManage ? '' : ' disabled' ?>><span class="sr-only">Needs a code: <?= e($a['name']) ?></span></label>
+                  <?php endif; ?>
+                </td>
+                <td><strong><?= e($a['name']) ?></strong><?= $a['admin'] ? ' <span class="status status-info">admin</span>' : '' ?></td>
+                <td><?= 'domain' === $a['kind'] ? 'Active Directory' : 'local' ?></td>
+                <td>
+                  <?php if ($a['has_user']): ?>
+                    <a href="<?= e(route('user', ['u' => $a['user']])) ?>"><?= e($a['user']) ?></a>
+                  <?php elseif (null === $a['fixed'] && $a['needs_code']): ?>
+                    <span class="status status-failure">none</span> <span class="muted">cannot sign in while it needs a code</span>
+                  <?php else: ?>
+                    <span class="muted">none</span>
+                  <?php endif; ?>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php if ($canManage): ?><div class="actions"><button type="submit" class="button-primary">Save</button></div><?php endif; ?>
+    </form>
+    <?php if ($canManage && $canCreateUsers): ?>
+      <?php foreach ($accounts as $a): ?>
+        <?php if (!$a['has_user'] && null === $a['fixed'] && 'local' === $a['kind']): ?>
+          <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>" class="inline">
+            <?= csrf_field() ?><input type="hidden" name="op" value="create-user"><input type="hidden" name="account" value="<?= e($a['name']) ?>">
+            <button type="submit" class="button-small">Create a SohobOTP user for <?= e($a['name']) ?></button>
+          </form>
+        <?php endif; ?>
+      <?php endforeach; ?>
+    <?php endif; ?>
+  <?php endif; ?>
+</section>
+
+<section class="panel">
   <h2>Management</h2>
   <dl class="details">
     <dt>State</dt><dd><?= e($healthLabel[$endpoint['health']]) ?></dd>

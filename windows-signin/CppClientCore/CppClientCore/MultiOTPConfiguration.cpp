@@ -119,6 +119,7 @@ MultiOTPConfiguration::MultiOTPConfiguration() : Configuration()
 	multiOTPTimeoutUnlock = rr.getRegistryDWORD(L"multiOTPTimeoutUnlock");
 	multiOTPTimeoutReconnect = rr.getRegistryDWORD(L"multiOTPTimeoutReconnect");
 	sohobotpEnrolAtSignIn = rr.getBoolRegistryDWORD(L"sohobotpEnrolAtSignIn");
+	sohobotpCodeExempt = rr.getRegistry(L"sohobotpCodeExempt");
 	multiOTPDisplayLastUser = rr.getBoolRegistryDWORD(L"multiOTPDisplayLastUser");
 	multiOTPWithout2FA = rr.getBoolRegistryDWORD(L"multiOTPWithout2FA");
 	numlockOn = rr.getBoolRegistryDWORD(L"numlockOn");
