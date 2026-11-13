@@ -110,6 +110,12 @@ final class AgentBundle
             throw new \RuntimeException('Cannot store the agent program.');
         }
         @chmod($target, 0600);
+        // portal-admin.php usually runs as root (docker exec): give the folder and the file to the
+        // owner of the data folder (the web server user), or the Download agent page cannot read them
+        if (function_exists('posix_geteuid') && 0 === posix_geteuid() && false !== ($owner = @fileowner(Config::dataDir()))) {
+            @chown($dir, $owner);
+            @chown($target, $owner);
+        }
         return ['file' => $target, 'sha256' => (string) hash_file('sha256', $target), 'size' => (int) filesize($target)];
     }
 

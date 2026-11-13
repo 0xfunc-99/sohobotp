@@ -599,6 +599,17 @@ check('agent download: a downloaded agent (with settings) refused as program', s
 file_put_contents($programFile, 'MZ' . str_repeat("\0", 500));
 check('agent download: tiny file refused', null !== AgentBundle::programError($programFile, 'windows'));
 check('agent download: unknown platform has no program', null === AgentBundle::program('darwin/arm64'));
+if (function_exists('posix_geteuid') && 0 === posix_geteuid()) {
+    // portal-admin.php runs as root (docker exec): the stored program must belong to the data folder's owner
+    file_put_contents($programFile, "\x7fELF" . str_repeat("\0", 1_100_000));
+    $dataOwner = fileowner(Portal\Config::dataDir());
+    @chown(Portal\Config::dataDir(), 33); // www-data
+    $stored = AgentBundle::addProgram($programFile, 'linux', 'amd64');
+    check('agent download: program added as root belongs to the web user', 33 === fileowner($stored['file']) && 33 === fileowner(dirname($stored['file'])), (string) fileowner($stored['file']));
+    unlink($stored['file']);
+    @rmdir(dirname($stored['file']));
+    @chown(Portal\Config::dataDir(), $dataOwner);
+}
 unlink($programFile);
 
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
