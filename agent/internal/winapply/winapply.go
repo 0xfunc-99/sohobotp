@@ -96,6 +96,7 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 		txt("multiOTPDefaultPrefix", p.DefaultPrefix),
 		num("multiOTPTimeoutUnlock", uint32(p.TimeoutUnlock)),
 		num("multiOTPTimeoutReconnect", uint32(p.TimeoutReconnect)),
+		num("sohobotpEnrolAtSignIn", boolNum(p.EnrolAtSignIn)),
 		num("multiOTPWithout2FA", boolNum(p.Without2FA)),
 		num("two_step_hide_otp", boolNum(p.TwoStepHideOTP)),
 		num("two_step_send_password", boolNum(p.TwoStepSendPassword)),

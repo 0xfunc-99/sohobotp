@@ -52,6 +52,7 @@ final class Endpoints
             'default_prefix'   => '',
             'timeout_unlock'   => 0,
             'timeout_reconnect' => 0, // minutes: Remote Desktop reconnect from the same client without a new code
+            'enrol_at_signin'  => false, // users without an authenticator set it up on the sign-in screen (CpEnrol)
             'without2fa'       => false,
             'two_step_hide_otp'      => false,
             'two_step_send_password' => false,
@@ -73,13 +74,13 @@ final class Endpoints
         ],
         'workstation' => [
             'label' => 'Desktops',
-            'description' => 'Code at sign-in and unlock. Remote Desktop to other machines asks for their own code, not here.',
-            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => false]],
+            'description' => 'Code at sign-in and unlock; users without a code set it up on the sign-in screen. Remote Desktop to other machines asks for their own code, not here.',
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => false, 'enrol_at_signin' => true]],
         ],
         'laptop' => [
             'label' => 'Laptops',
             'description' => 'Like desktops, plus the offline cache so users can sign in away from the network.',
-            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => true, 'cache_days' => 7]],
+            'policy' => ['windows' => ['cpus_logon' => '0e', 'cpus_unlock' => '0e', 'cpus_credui' => '3e', 'cache_enabled' => true, 'cache_days' => 7, 'enrol_at_signin' => true]],
         ],
         'admin' => [
             'label' => 'Admin workstations (strict)',
@@ -290,6 +291,7 @@ final class Endpoints
                 'default_prefix'   => $text('win_default_prefix', 64),
                 'timeout_unlock'   => $int('win_timeout_unlock', 0, 1440, 'Unlock grace period'),
                 'timeout_reconnect' => array_key_exists('win_timeout_reconnect', $input) ? $int('win_timeout_reconnect', 0, 480, 'Remote Desktop reconnect grace period') : 0,
+                'enrol_at_signin'  => $flag('win_enrol_at_signin'),
                 'without2fa'       => $flag('win_without2fa'),
                 'two_step_hide_otp'      => $flag('win_two_step_hide_otp'),
                 'two_step_send_password' => $flag('win_two_step_send_password'),
@@ -1156,6 +1158,7 @@ final class Endpoints
             'default_prefix' => $w['default_prefix'],
             'timeout_unlock' => $w['timeout_unlock'],
             'timeout_reconnect' => (int) ($w['timeout_reconnect'] ?? 0),
+            'enrol_at_signin' => (bool) ($w['enrol_at_signin'] ?? false),
             'without2fa' => $w['without2fa'],
             'two_step_hide_otp' => $w['two_step_hide_otp'],
             'two_step_send_password' => $w['two_step_send_password'],

@@ -130,6 +130,14 @@ private:
 
 	void PushAuthenticationCallback(bool success);
 
+	// SohobOTP: set-up of the user's authenticator on the sign-in screen (SohobotpEnrol)
+	void ShowEnrolScreen();
+	bool									_enrolPending = false;	// QR code shown, waiting for the first code
+	bool									_enrolShow = false;		// GetSerialization shows the QR code step
+	std::wstring							_enrolSecret;
+	std::wstring							_enrolMessage;
+	HBITMAP									_enrolQr = nullptr;
+
 	LONG									_cRef;
 
 	CREDENTIAL_PROVIDER_FIELD_DESCRIPTOR	_rgCredProvFieldDescriptors[FID_NUM_FIELDS];	// An array holding the type and 

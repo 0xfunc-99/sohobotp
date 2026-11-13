@@ -45,6 +45,11 @@ final class CpGateway
             }
             self::refuse(403, 'Unknown or inactive endpoint.');
         }
+        if ('enrol' === ($_GET['a'] ?? '')) {
+            // set-up of a user's authenticator on the sign-in screen (sealed with the endpoint's secret)
+            $endpoints->touchCp($id, $ip);
+            CpEnrol::handle($endpoint, Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows'], $endpoints->cpSecret($id), $ip);
+        }
         $data = (string) ($_POST['data'] ?? '');
         if ('' === $data || strlen($data) > 65536 || !str_contains($data, '<multiOTP')) {
             self::refuse(400, 'Not a multiOTP client request.');

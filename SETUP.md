@@ -157,6 +157,24 @@ Then, in the portal:
    `sh agent/tests/run-in-docker.sh` already contains them). Steps 6 and 7 describe the
    classic way with commands; SohobOTP Sign-in (step 5) is still installed separately.
 
+## Optional — Users set up their own code (before you push the agents)
+
+Two ways, both only for users from Active Directory who have no authenticator yet, and only
+once (a stolen password is not enough to replace someone's code; for a new phone, open the
+user in the portal and press **Allow a new self-service set-up**):
+
+- **Web page:** portal → **Users → Self-service set-up** → open it for some days (optionally
+  only from your office/VPN networks) and send the link (`https://PORTAL_IP/portal/enrol.php`).
+  Users sign in with their work password, scan the QR code, type the first code. The page
+  lists who has finished.
+- **On the Windows sign-in screen:** computer policy → **Let users set up their code at
+  sign-in** (on in the Desktops and Laptops templates). A user without an authenticator who
+  types the right Windows password sees a QR code on the sign-in screen, scans it, types the
+  code and is signed in. Needs SohobOTP Sign-in from this release.
+
+Order for a rollout: sync Active Directory → open the web page and send the link → push the
+agent and SohobOTP Sign-in → whoever did not do it sets it up at their next Windows sign-in.
+
 ## Step 5 — Windows: SohobOTP Sign-in installer (ready-built)
 
 The kit contains **`windows-signin\SohobOTPSignIn.msi`**, ready to install (step 6). It was

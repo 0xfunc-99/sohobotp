@@ -81,6 +81,8 @@
     <label>Unlock grace period (minutes) <input name="win_timeout_unlock" value="<?= (int) $input['win_timeout_unlock'] ?>" inputmode="numeric"><small>0: always ask on unlock.</small></label>
     <label>Remote Desktop reconnect grace period (minutes) <input name="win_timeout_reconnect" value="<?= (int) $input['win_timeout_reconnect'] ?>" inputmode="numeric">
       <small>After a sign-in with a code, the same user can reconnect to their own Remote Desktop session on this machine without a new code, from the same client address, for this many minutes (for example after a dropped connection). A new session or another computer always asks. 0: always ask. Up to 480. Needs SohobOTP Sign-in from this release.</small></label>
+    <label class="choice"><input type="checkbox" name="win_enrol_at_signin" value="1"<?= $on('win_enrol_at_signin') ?>>
+      <span><strong>Let users set up their code at sign-in</strong>: a user from Active Directory who has no authenticator yet sees a QR code on the Windows sign-in screen after typing the right password, scans it and types the first code. Only once per user (like the self-service page); an administrator can allow it again. Needs SohobOTP Sign-in from this release.</span></label>
     <label>Server timeout (seconds) <input name="win_server_timeout" value="<?= (int) $input['win_server_timeout'] ?>" inputmode="numeric"></label>
     <label class="choice"><input type="checkbox" name="win_upn_format" value="1"<?= $on('win_upn_format') ?>><span>Send user names as user@domain (UPN)</span></label>
     <label>Default domain prefix <input name="win_default_prefix" value="<?= e($input['win_default_prefix']) ?>" maxlength="64"></label>

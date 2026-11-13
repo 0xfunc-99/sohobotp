@@ -887,6 +887,51 @@ check('CP gateway: with offline cache, the laptop stores the user after a login'
 preg_match('/^autolock_time=(\d+)/m', $cached, $m);
 check('cached copy expires within the group lifetime (3 days)', isset($m[1]) && (int) $m[1] <= time() + 3 * 86400 + 60 && (int) $m[1] > time(), $m[1] ?? 'no autolock_time');
 
+// ---------------------------------------------------------------- set-up of the code on the Windows sign-in screen (cp.php?a=enrol)
+$cpEnrol = static function (string $secret, array $req, ?string $sealed = null) use ($base, $windows): array {
+    $req += ['v' => 1, 't' => time(), 'n' => bin2hex(random_bytes(16))];
+    $key = Portal\CpEnrol::key($secret);
+    $sealed ??= Portal\CpEnrol::seal((string) json_encode($req), $key, (string) $windows->id);
+    $b = (new Browser($base))->raw('POST', '/portal/cp.php?e=' . $windows->id . '&a=enrol', $sealed, ['Content-Type' => 'text/plain']);
+    $plain = 200 === $b->status ? Portal\CpEnrol::open(trim($b->body), $key, $windows->id . '|' . $req['n']) : null;
+    return [$b->status, null === $plain ? null : json_decode($plain, true), $sealed, $b->body];
+};
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'bob', 'password' => 'bob-test-password']);
+check('sign-in set-up: off unless the group allows it', 200 === $st && 'off' === ($ans['status'] ?? ''), "$st " . json_encode($ans));
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+$admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, ['win_cache_enabled' => '1', 'win_cache_days' => '3', 'win_enrol_at_signin' => '1'] + $groupForm);
+check('sign-in set-up: group setting saved', 303 === $admin->status);
+$winPolicy = Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows'];
+check('sign-in set-up: in the policy sent to the agent', true === $winPolicy['enrol_at_signin']);
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'bob', 'password' => 'wrong-password']);
+check('sign-in set-up: wrong directory password gives no QR code (Windows refuses the password itself)', 'not_needed' === ($ans['status'] ?? ''));
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'cp.tester', 'password' => 'x']);
+check('sign-in set-up: a user not from the directory gets no QR code', 'not_needed' === ($ans['status'] ?? ''));
+[$st, , $sealedStart] = $cpEnrol('another-secret-0123456789abcdef', ['step' => 'start', 'user' => 'bob', 'password' => 'bob-test-password']);
+check('sign-in set-up: request sealed with another secret refused', 400 === $st);
+[$st, $ans, $sealedStart] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'EXAMPLE\\bob', 'password' => 'bob-test-password']);
+$rows = (array) ($ans['qr'] ?? []);
+check('sign-in set-up: right password gives the QR code (square module matrix) and the key', 'scan' === ($ans['status'] ?? '') && count($rows) >= 21
+    && [] === array_filter($rows, static fn ($r): bool => !is_string($r) || strlen($r) !== count($rows) || !preg_match('/^[01]+$/', $r)), json_encode($ans));
+$bobSeed = base32_decode((string) ($ans['secret'] ?? ''));
+[$st] = $cpEnrol($cpSecret, ['step' => 'start'], $sealedStart);
+check('sign-in set-up: a replayed request is refused', 409 === $st);
+[$st] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'bob', 'password' => 'bob-test-password', 't' => time() - 900]);
+check('sign-in set-up: an old request is refused', 400 === $st);
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'confirm', 'user' => 'bob', 'code' => '000000' === Totp::code($bobSeed, intdiv(time(), 30)) ? '111111' : '000000']);
+check('sign-in set-up: wrong first code refused', 'wrong_code' === ($ans['status'] ?? ''));
+$bobStep = null;
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'confirm', 'user' => 'bob', 'code' => next_code($bobSeed, $bobStep)]);
+check('sign-in set-up: right first code: done', 'done' === ($ans['status'] ?? ''), json_encode($ans));
+Portal\MultiotpService::reset();
+$engine = Portal\MultiotpService::get();
+$engine->SetUser('bob');
+check('sign-in set-up: SohobOTP now has the seed shown on the screen', strtolower(bin2hex($bobSeed)) === strtolower((string) $engine->GetUserTokenSeed()));
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'bob', 'password' => 'bob-test-password']);
+check('sign-in set-up: only once (a stolen password gets no new QR code)', 'not_needed' === ($ans['status'] ?? ''));
+$audit = (string) file_get_contents(Portal\Config::auditFile());
+check('sign-in set-up: audited, without the password', str_contains($audit, '"via":"sign-in screen"') && !str_contains($audit, 'bob-test-password'));
+
 $endpointRecord = (new Portal\Endpoints())->endpoint((string) $windows->id);
 check('endpoint page data: last Credential Provider request recorded', null !== ($endpointRecord['cp_last_seen'] ?? null));
 $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);

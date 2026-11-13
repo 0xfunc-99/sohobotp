@@ -61,6 +61,7 @@
 #include "sddl.h" // multiOTP/yj
 #include "credentialprovider.h" // multiOTP/yj
 #include "wtsapi32.h" // multiOTP/yj pour utiliser WTSEnumerateSessions
+#include "SohobotpEnrol.h" // SohobOTP: set-up of the authenticator on the sign-in screen
 #include "Shared.h"
 
 using namespace std;
@@ -82,6 +83,10 @@ CCredential::CCredential(std::shared_ptr<MultiOTPConfiguration> c) :
 
 CCredential::~CCredential()
 {
+	if (_enrolQr != nullptr) {
+		DeleteObject(_enrolQr);
+		_enrolQr = nullptr;
+	}
 	_util.Clear(_rgFieldStrings, _rgCredProvFieldDescriptors, this, NULL, CLEAR_FIELDS_ALL_DESTROY);
 	DllRelease();
 }
@@ -721,8 +726,16 @@ HRESULT CCredential::GetSerialization(
 			SHStrDupW(L"Logon cancelled", _config->provider.status_text);
 			return S_FALSE;
 		}
+		if (_enrolShow)
+		{
+			// SohobOTP: QR code and first code (set-up of the authenticator)
+			_enrolShow = false;
+			ShowEnrolScreen();
+			*pcpgsr = CPGSR_NO_CREDENTIAL_NOT_FINISHED;
+			_config->clearFields = false;
+		}
 		// Check if we are pre 2nd step or failure
-		if (_piStatus != PI_AUTH_SUCCESS && _config->pushAuthenticationSuccessful == false)
+		else if (_piStatus != PI_AUTH_SUCCESS && _config->pushAuthenticationSuccessful == false)
 		{
 			if (_config->isSecondStep == false && _config->twoStepHideOTP)
 			{
@@ -834,6 +847,27 @@ HRESULT CCredential::GetSerialization(
 	DebugPrint("CCredential::GetSerialization - END");
 #endif //_DEBUG
 	return retVal;
+}
+
+// SohobOTP: the set-up step: QR code as the tile image, instructions, the code field only
+void CCredential::ShowEnrolScreen()
+{
+	_util.SetScenario(_config->provider.pCredProvCredential, _config->provider.pCredProvCredentialEvents, SCENARIO::SECOND_STEP);
+	if (_pCredProvCredentialEvents != nullptr)
+	{
+		_pCredProvCredentialEvents->SetFieldString(this, FID_LARGE_TEXT, L"Set up your sign-in code");
+		const std::wstring help = L"Scan the QR code with Google Authenticator or Microsoft Authenticator, then type the 6-digit code it shows. Key: " + _enrolSecret;
+		_pCredProvCredentialEvents->SetFieldString(this, FID_SMALL_TEXT, help.c_str());
+		_pCredProvCredentialEvents->SetFieldState(this, FID_SMALL_TEXT, CPFS_DISPLAY_IN_SELECTED_TILE);
+		if (_enrolQr != nullptr)
+		{
+			_pCredProvCredentialEvents->SetFieldBitmap(this, FID_LOGO, _enrolQr);
+		}
+	}
+	if (!_enrolMessage.empty())
+	{
+		ShowErrorMessage(_enrolMessage, 0);
+	}
 }
 
 // if code == 0, the code won't be displayed
@@ -1035,6 +1069,62 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 			ReleaseDebugPrint("Reconnect grace: recent sign-in, existing session reconnected from the same client address");
 			_piStatus = PI_AUTH_SUCCESS; // do not store the time: it would extend the grace period
 			return S_OK;
+		}
+	}
+
+	// SohobOTP: a user from Active Directory without an authenticator sets it up here (endpoint
+	// group "Let users set up their code at sign-in"). The portal checks the directory password
+	// and its "only once" rules; anything else (portal unreachable, not needed) continues as usual.
+	if (graceScreen && _config->sohobotpEnrolAtSignIn)
+	{
+		SohobotpEnrolAnswer answer;
+		if (_enrolPending)
+		{
+			if (SohobotpEnrol::Request("confirm", _config->credential.username, L"", _config->credential.otp, answer))
+			{
+				if (answer.status == "done")
+				{
+					_enrolPending = false;
+					_enrolMessage.clear();
+					_enrolSecret.clear();
+					ReleaseDebugPrint("SohobOTP: authenticator set up on the sign-in screen");
+					_piStatus = PI_AUTH_SUCCESS; // the portal checked the first code
+					storeLastConnectedUserIfNeeded();
+					return S_OK;
+				}
+				if (answer.status == "wrong_code")
+				{
+					_enrolMessage = answer.message.empty() ? L"This code is not correct. Type the code the app shows now." : answer.message;
+					_enrolShow = true;
+					_piStatus = PI_STATUS_NOT_SET;
+					return S_OK;
+				}
+			}
+			// expired, too many wrong codes, portal unreachable: back to the first screen
+			_enrolPending = false;
+			_enrolMessage.clear();
+			_piStatus = PI_AUTH_FAILURE;
+			return S_OK;
+		}
+		if (!_config->isSecondStep
+			&& SohobotpEnrol::Request("start", _config->credential.username, std::wstring(_config->credential.password.c_str()), L"", answer)
+			&& answer.status == "scan")
+		{
+			HBITMAP qr = SohobotpEnrol::QrBitmap(answer.qr, 200);
+			if (qr != nullptr)
+			{
+				if (_enrolQr != nullptr) {
+					DeleteObject(_enrolQr);
+				}
+				_enrolQr = qr;
+				_enrolSecret = answer.secret;
+				_enrolMessage.clear();
+				_enrolPending = true;
+				_enrolShow = true;
+				_piStatus = PI_STATUS_NOT_SET;
+				ReleaseDebugPrint("SohobOTP: user has no authenticator yet, showing the set-up QR code");
+				return S_OK;
+			}
 		}
 	}
 
