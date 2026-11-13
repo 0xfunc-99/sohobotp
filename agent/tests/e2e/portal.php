@@ -113,6 +113,19 @@ switch ($argv[1] ?? '') {
         (new Endpoints())->saveGroup($g['id'], form($over));
         echo "policy saved\n";
         break;
+    case 'exempt':
+        // what the computer's page does: "exempt admin bob" = bob needs a code at sign-in, not for sudo/su
+        $endpoints = new Endpoints();
+        $g = group();
+        $e = array_values(array_filter($endpoints->endpoints(), static fn (array $x): bool => $x['group_id'] === $g['id'] && null !== $x['last_seen']))[0] ?? throw new RuntimeException('no Linux endpoint');
+        $e = $endpoints->endpoint($e['id']);
+        $all = array_column($e['inventory']['accounts'] ?? [], 'name');
+        $who = $argv[3] ?? '';
+        $signin = 'signin' === ($argv[2] ?? '') ? array_values(array_diff($all, [$who])) : $all;
+        $admin = 'admin' === ($argv[2] ?? '') ? array_values(array_diff($all, [$who])) : $all;
+        $endpoints->setCodeExempt($e['id'], $signin, $admin);
+        echo "saved\n";
+        break;
     case 'endpoint':
         $g = group();
         foreach ((new Endpoints())->endpoints() as $e) {

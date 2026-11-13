@@ -86,10 +86,10 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 	if p.ServerTimeout < 1 || p.ServerTimeout > 60 || p.TimeoutUnlock < 0 || p.TimeoutUnlock > 1440 || p.TimeoutReconnect < 0 || p.TimeoutReconnect > 480 {
 		return nil, errors.New("timeouts out of range")
 	}
-	if len(p.CodeExempt) > protocol.MaxAccounts {
+	if len(p.CodeExempt) > protocol.MaxAccounts || len(p.CodeExemptAdmin) > protocol.MaxAccounts {
 		return nil, errors.New("too many accounts without a code")
 	}
-	for _, a := range p.CodeExempt {
+	for _, a := range append(append([]string{}, p.CodeExempt...), p.CodeExemptAdmin...) {
 		if !accountRe.MatchString(a) {
 			return nil, fmt.Errorf("invalid account name %q", a)
 		}
@@ -110,6 +110,7 @@ func Settings(p *protocol.WindowsPolicy, secret string) ([]Setting, error) {
 		num("multiOTPTimeoutReconnect", uint32(p.TimeoutReconnect)),
 		num("sohobotpEnrolAtSignIn", boolNum(p.EnrolAtSignIn)),
 		txt("sohobotpCodeExempt", strings.Join(p.CodeExempt, ";")),
+		txt("sohobotpCodeExemptAdmin", strings.Join(p.CodeExemptAdmin, ";")),
 		num("multiOTPWithout2FA", boolNum(p.Without2FA)),
 		num("two_step_hide_otp", boolNum(p.TwoStepHideOTP)),
 		num("two_step_send_password", boolNum(p.TwoStepSendPassword)),

@@ -941,15 +941,18 @@ $agentCall('checkin', ['inventory' => ['accounts' => $linuxAccounts, 'hostname' 
 $linuxRecord = (new Portal\Endpoints())->endpoint((string) $waiting->id);
 check('computer users: accounts reported by the agent, bad names dropped', ['root', 'alice', 'deploy'] === array_column($linuxRecord['inventory']['accounts'] ?? [], 'name'));
 $admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);
-check('computer users: listed on the computer page, root never needs a code, everyone else ticked', str_contains($admin->body, 'Users on this computer')
-    && str_contains($admin->body, 'root never needs a code') && 2 === substr_count($admin->body, 'name="needs_code[]"') && 2 === substr_count($admin->body, ' checked>'));
-check('computer users: deploy has no SohobOTP user (warned), alice links to hers', str_contains($admin->body, 'cannot sign in while it needs a code') && str_contains($admin->body, 'Create a SohobOTP user for deploy'));
-$admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'accounts', 'needs_code' => ['alice']]);
+check('computer users: listed with a search box, two columns, root never needs a code, everyone else ticked', str_contains($admin->body, 'Users on this computer')
+    && str_contains($admin->body, 'data-filter-table="accounts-table"') && str_contains($admin->body, 'Tick all at sign-in')
+    && str_contains($admin->body, 'root never needs a code') && 2 === substr_count($admin->body, 'type="checkbox" name="needs_code[]"') && 2 === substr_count($admin->body, 'type="checkbox" name="needs_code_admin[]"')
+    && 4 === preg_match_all('/name="needs_code(?:_admin)?\\[\\]" value="(?:alice|deploy)" checked>/', $admin->body));
+check('computer users: deploy has no SohobOTP user (warned), alice links to hers', str_contains($admin->body, 'cannot sign in where it needs a code') && str_contains($admin->body, 'Create a SohobOTP user for deploy'));
+$admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'accounts', 'needs_code' => ['alice'], 'needs_code_admin' => ['alice', 'deploy']]);
 check('computer users: deploy unticked (password only)', ['deploy'] === ((new Portal\Endpoints())->endpoint((string) $waiting->id)['code_exempt'] ?? null));
 $reply = $agentCall('checkin', ['inventory' => ['accounts' => $linuxAccounts, 'hostname' => 'new-laptop', 'os' => 'linux'], 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $waiting);
 $pushed = $waiting->openConfig($reply['config'] ?? [], $portalKeyHttp, 0, 'linux');
-check('computer users: Linux config lets deploy in without a code (SSH, sudo), alice still needs one',
-    in_array('deploy', $pushed['policy']['excluded_users'] ?? [], true) && !in_array('alice', $pushed['policy']['excluded_users'] ?? [], true));
+check('computer users: Linux config lets deploy sign in (SSH, console) without a code, sudo still asks',
+    ['deploy'] === ($pushed['policy']['excluded_users_by_service']['sshd'] ?? null) && ['deploy'] === ($pushed['policy']['excluded_users_by_service']['login'] ?? null)
+    && !isset($pushed['policy']['excluded_users_by_service']['sudo']) && !in_array('deploy', $pushed['policy']['excluded_users'] ?? [], true), json_encode($pushed['policy']['excluded_users_by_service'] ?? null));
 $help->get('/portal/index.php?r=endpoint&id=' . $waiting->id);
 $help->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'accounts', 'needs_code' => []]);
 check('computer users: the help desk cannot change who needs a code', ['deploy'] === ((new Portal\Endpoints())->endpoint((string) $waiting->id)['code_exempt'] ?? null));
@@ -957,17 +960,27 @@ $admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);
 $admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'create-user', 'account' => 'deploy']);
 check('computer users: a SohobOTP user created for a local account, then its page to scan the QR code', 303 === $admin->status && str_contains($admin->location(), 'r=user') && (new Portal\Users())->exists('deploy'),
     $admin->status . ' ' . $admin->location() . ' ' . substr(strip_tags($admin->body), 0, 200));
+$admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);
+$admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'accounts', 'needs_code' => ['alice', 'deploy'], 'needs_code_admin' => ['deploy']]);
+$reply = $agentCall('checkin', ['inventory' => ['accounts' => $linuxAccounts, 'hostname' => 'new-laptop', 'os' => 'linux'], 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $waiting);
+$pushed = $waiting->openConfig($reply['config'] ?? [], $portalKeyHttp, 0, 'linux');
+check('computer users: alice needs a code at sign-in but not for sudo and su', ['alice'] === ($pushed['policy']['excluded_users_by_service']['sudo'] ?? null)
+    && ['alice'] === ($pushed['policy']['excluded_users_by_service']['su'] ?? null) && !isset($pushed['policy']['excluded_users_by_service']['sshd']), json_encode($pushed['policy']['excluded_users_by_service'] ?? null));
 $winAccounts = [['name' => 'Administrator', 'kind' => 'local', 'admin' => true], ['name' => 'svc-print', 'kind' => 'local'], ['name' => 'EXAMPLE\\carol', 'kind' => 'domain']];
 $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
 $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
 check('computer users: Windows accounts listed, Active Directory user shown as such', str_contains($admin->body, 'EXAMPLE\\carol') && str_contains($admin->body, 'Active Directory'));
-$admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'accounts', 'needs_code' => ['Administrator', 'EXAMPLE\\carol']]);
+$admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'accounts', 'needs_code' => ['Administrator', 'EXAMPLE\\carol'], 'needs_code_admin' => ['Administrator']]);
 $winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
 $winPushed = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows');
-check('computer users: Windows config lists svc-print for SohobOTP Sign-in', ['svc-print'] === ($winPushed['policy']['code_exempt'] ?? null), json_encode($winPushed['policy']['code_exempt'] ?? null));
+check('computer users: Windows config: svc-print without a code at sign-in; carol and svc-print without one in admin prompts',
+    ['svc-print'] === ($winPushed['policy']['code_exempt'] ?? null) && ['example\\carol', 'svc-print'] === ($winPushed['policy']['code_exempt_admin'] ?? null), json_encode([$winPushed['policy']['code_exempt'] ?? null, $winPushed['policy']['code_exempt_admin'] ?? null]));
+$winPage = (string) $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id)->body;
+check('computer users: no reminder while the policy asks for a code in admin prompts', str_contains($winPage, 'Code for admin actions') && !str_contains($winPage, 'Credential prompts on this machine</strong> turned off'));
 $admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);
-$admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'accounts', 'needs_code' => ['alice', 'deploy']]);
-check('computer users: ticked again, nobody without a code', [] === ((new Portal\Endpoints())->endpoint((string) $waiting->id)['code_exempt'] ?? null));
+$admin->post('/portal/index.php?r=endpoint&id=' . $waiting->id, ['op' => 'accounts', 'needs_code' => ['alice', 'deploy'], 'needs_code_admin' => ['alice', 'deploy']]);
+$waitingRecord = (new Portal\Endpoints())->endpoint((string) $waiting->id);
+check('computer users: ticked again, nobody without a code', [] === ($waitingRecord['code_exempt'] ?? null) && [] === ($waitingRecord['code_exempt_admin'] ?? null));
 check('computer users: change audited', str_contains((string) file_get_contents(Portal\Config::auditFile()), 'endpoint.code_exempt'));
 $agentHttp->bind = $previousBind;
 

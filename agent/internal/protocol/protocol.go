@@ -132,13 +132,16 @@ type Config struct {
 
 // LinuxPolicy is the policy for os=linux.
 type LinuxPolicy struct {
-	Enabled         bool           `json:"enabled"`
-	RadiusServers   []RadiusServer `json:"radius_servers"`
-	Timeout         int            `json:"timeout"`
-	Services        []string       `json:"services"`
-	ExcludedUsers   []string       `json:"excluded_users"`
-	ExcludedGroups  []string       `json:"excluded_groups"`
-	SSHKeysNeedCode bool           `json:"ssh_keys_need_code"`
+	Enabled        bool           `json:"enabled"`
+	RadiusServers  []RadiusServer `json:"radius_servers"`
+	Timeout        int            `json:"timeout"`
+	Services       []string       `json:"services"`
+	ExcludedUsers  []string       `json:"excluded_users"`
+	ExcludedGroups []string       `json:"excluded_groups"`
+	// Per computer, per service: users who skip the code only there (e.g. sudo, not SSH).
+	// Set from the computer's page in the portal ("Users on this computer").
+	ExcludedUsersByService map[string][]string `json:"excluded_users_by_service,omitempty"`
+	SSHKeysNeedCode        bool                `json:"ssh_keys_need_code"`
 }
 
 // RadiusServer is one FreeRADIUS server, in failover order.
@@ -162,6 +165,7 @@ type WindowsPolicy struct {
 	TimeoutReconnect    int      `json:"timeout_reconnect"` // minutes; 0 when an older portal leaves it out
 	EnrolAtSignIn       bool     `json:"enrol_at_signin"`   // QR code on the sign-in screen for users without an authenticator
 	CodeExempt          []string `json:"code_exempt"`       // accounts that sign in on this machine with their password only
+	CodeExemptAdmin     []string `json:"code_exempt_admin"` // ... and in credential prompts (UAC, Run as)
 	Without2FA          bool     `json:"without2fa"`
 	TwoStepHideOTP      bool     `json:"two_step_hide_otp"`
 	TwoStepSendPassword bool     `json:"two_step_send_password"`

@@ -48,7 +48,7 @@ func policy() *protocol.WindowsPolicy {
 	return &protocol.WindowsPolicy{
 		ServerURL: "https://portal.example.test/portal/cp.php?e=e8f2c1a9b4d7e6f5a3c2", ServerTimeout: 5,
 		CpusLogon: "0e", CpusUnlock: "0e", CpusCredui: "1d", ExcludedAccount: `PC01\breakglass`,
-		CacheEnabled: true, LoginText: "SohobOTP", TimeoutUnlock: 10, TimeoutReconnect: 15, EnrolAtSignIn: true, CodeExempt: []string{"svc-backup", `EXAMPLE\deploy`},
+		CacheEnabled: true, LoginText: "SohobOTP", TimeoutUnlock: 10, TimeoutReconnect: 15, EnrolAtSignIn: true, CodeExempt: []string{"svc-backup", `EXAMPLE\deploy`}, CodeExemptAdmin: []string{"alina"},
 	}
 }
 
@@ -95,6 +95,9 @@ func TestApplyKeepsExistingTypes(t *testing.T) {
 	}
 	if _, ok := reg.values["multiOTPSharedSecret"]; ok {
 		t.Fatal("the secret must be removed from the Sign-in key (readable by every user)")
+	}
+	if reg.values["sohobotpCodeExemptAdmin"] != (value{kind: String, s: "alina"}) {
+		t.Fatalf("admin-prompt list not written: %+v", reg.values["sohobotpCodeExemptAdmin"])
 	}
 	if reg.values["sohobotpCodeExempt"] != (value{kind: String, s: `svc-backup;EXAMPLE\deploy`}) {
 		t.Fatalf("accounts without a code not written: %+v", reg.values["sohobotpCodeExempt"])
@@ -166,6 +169,7 @@ func TestRefusals(t *testing.T) {
 		"reconnect 9 h":      func(p *protocol.WindowsPolicy) { p.TimeoutReconnect = 540 },
 		"reconnect negative": func(p *protocol.WindowsPolicy) { p.TimeoutReconnect = -1 },
 		"exempt injection":   func(p *protocol.WindowsPolicy) { p.CodeExempt = []string{"alice;bob"} },
+		"admin injection":    func(p *protocol.WindowsPolicy) { p.CodeExemptAdmin = []string{"a;b"} },
 	}
 	for name, mutate := range bad {
 		p := policy()

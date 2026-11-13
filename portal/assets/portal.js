@@ -165,6 +165,28 @@
       window.setTimeout(poll, 2000);
     });
 
+    // Tick or untick one column for the rows the search shows:
+    // <button data-tick-visible="table-id" data-tick-name="field[]" data-tick-state="1|0">
+    document.querySelectorAll('button[data-tick-visible]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const table = document.getElementById(button.dataset.tickVisible);
+        if (!table) {
+          return;
+        }
+        const on = '1' === button.dataset.tickState;
+        table.querySelectorAll('tbody tr').forEach((row) => {
+          if (row.hidden) {
+            return;
+          }
+          row.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+            if (box.name === button.dataset.tickName && !box.disabled) {
+              box.checked = on;
+            }
+          });
+        });
+      });
+    });
+
     // Instant filtering of table rows: <input data-filter-table="table-id">
     document.querySelectorAll('input[data-filter-table]').forEach((input) => {
       const table = document.getElementById(input.dataset.filterTable);

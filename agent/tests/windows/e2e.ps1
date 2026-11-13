@@ -88,6 +88,7 @@ Check "multiOTPCacheEnabled kept as its existing type, value 1" ($cp.multiOTPCac
 Check "multiOTPTimeoutUnlock written (10)" ($cp.multiOTPTimeoutUnlock -eq 10)
 Check "multiOTPTimeoutReconnect written (15)" ($cp.multiOTPTimeoutReconnect -eq 15)
 Check "accounts without a code written for SohobOTP Sign-in (svc-print)" ($cp.sohobotpCodeExempt -eq "svc-print")
+Check "accounts without a code in admin prompts written (svc-print;helpdesk)" ($cp.sohobotpCodeExemptAdmin -eq "svc-print;helpdesk")
 
 if ($SignInMsi -ne "") {
   Write-Host "== SohobOTP Sign-in pinned to the portal certificate"

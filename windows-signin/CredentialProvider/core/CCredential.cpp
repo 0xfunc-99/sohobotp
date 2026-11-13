@@ -1095,7 +1095,10 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 	// SohobOTP: accounts the administrator unticked on this computer's page sign in with their
 	// password only (the list comes from the agent, in the machine-wide registry). A bare name is
 	// a local account: it matches only a local sign-in, never a domain user with the same name.
-	if (!_config->sohobotpCodeExempt.empty() && SohobotpIsCodeExempt(_config->sohobotpCodeExempt, _config->credential.username, _config->credential.domain))
+	// Two lists: sign-in and unlock (sohobotpCodeExempt), credential prompts such as UAC and Run as
+	// (sohobotpCodeExemptAdmin): the administrator chooses each per account.
+	const std::wstring& exemptList = _config->provider.cpu == CPUS_CREDUI ? _config->sohobotpCodeExemptAdmin : _config->sohobotpCodeExempt;
+	if (!exemptList.empty() && SohobotpIsCodeExempt(exemptList, _config->credential.username, _config->credential.domain))
 	{
 		ReleaseDebugPrint("SohobOTP: account signs in without a code on this computer");
 		_piStatus = PI_AUTH_SUCCESS;

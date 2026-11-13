@@ -35,6 +35,7 @@ class MultiOTPConfiguration : public Configuration
 		int multiOTPTimeoutUnlock = 0;
 		int multiOTPTimeoutReconnect = 0; // SohobOTP: Remote Desktop reconnect grace (minutes)
 		bool sohobotpEnrolAtSignIn = false; // SohobOTP: users without an authenticator set it up on the sign-in screen
+		std::wstring sohobotpCodeExemptAdmin = L""; // SohobOTP: same, in credential prompts (UAC, Run as)
 		std::wstring sohobotpCodeExempt = L""; // SohobOTP: accounts that sign in with their password only here (user;DOMAIN\\user)
 		bool numlockOn = false;
 		bool multiOTPDisplayLockedUser = false;

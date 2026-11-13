@@ -113,9 +113,17 @@ docker exec "$APP" sh -c '/etc/init.d/freeradius start >/dev/null 2>&1 || freera
 sleep 2
 client radius-back
 
+echo "== per computer, per user: code at sign-in but not for sudo"
+check "the agent reported bob among the machine's accounts" "portal endpoint | grep -q '\"name\": *\"bob\"'"
+check "portal: bob unticked for admin actions on this computer" "portal exempt admin bob | grep -q saved"
+check "agent applies it" "agent run --once | grep -q 'version [0-9]*, applied'"
+client per-user
+check "portal: bob ticked again" "portal exempt none | grep -q saved"
+check "agent applies it" "agent run --once | grep -q 'version [0-9]*, applied'"
+
 echo "== policy change from the portal: SSH only"
 check "portal policy changed to SSH only" "portal policy ssh-only | grep -q 'policy saved'"
-check "agent picks up version 2" "agent run --once | grep -q 'version 2, applied'"
+check "agent picks up the new version" "agent run --once | grep -q 'version [0-9]*, applied'"
 client sudo-removed
 
 echo "== self-update with signed releases"

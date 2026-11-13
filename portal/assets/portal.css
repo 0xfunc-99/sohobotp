@@ -703,3 +703,7 @@ pre:has(> code) { position: relative; }
 .enrol-manual { margin: 0 0 var(--space-4); }
 .enrol-manual summary { cursor: pointer; color: var(--accent); }
 .enrol-manual code { font-size: 1rem; letter-spacing: .04em; word-break: break-all; }
+
+/* Users on this computer: tick or untick a column for the users the search shows */
+.tick-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+#accounts-table td:nth-child(2), #accounts-table td:nth-child(3), #accounts-table th:nth-child(2), #accounts-table th:nth-child(3) { text-align: center; }

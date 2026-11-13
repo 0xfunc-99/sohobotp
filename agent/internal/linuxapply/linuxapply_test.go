@@ -159,6 +159,25 @@ auth required pam_radius_auth.so conf=/etc/pam_radius_auth.conf prompt=code forc
 	}
 }
 
+func TestModuleFilePerServiceExclusions(t *testing.T) {
+	p := policy()
+	p.ExcludedUsersByService = map[string][]string{"sudo": {"alina"}, "sshd": {"backup", "svc"}, "login": {"backup", "svc"}}
+	got := ModuleFile(p, "/etc/pam_radius_auth.conf")
+	want := managedHeader + `
+# Asks for the SohobOTP code after the normal password. Excluded users and groups
+# skip only the code line: they still need their normal password.
+auth [success=5 default=ignore] pam_succeed_if.so quiet user in root:deploy
+auth [success=4 default=ignore] pam_succeed_if.so quiet user ingroup mfa-breakglass
+auth [success=3 default=ignore] pam_succeed_if.so quiet user in backup:svc service in sshd
+auth [success=2 default=ignore] pam_succeed_if.so quiet user in alina service in sudo
+auth [success=1 default=ignore] pam_succeed_if.so quiet user in backup:svc service in login
+auth required pam_radius_auth.so conf=/etc/pam_radius_auth.conf prompt=code force_prompt
+`
+	if got != want {
+		t.Fatalf("module file:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestRadiusConf(t *testing.T) {
 	p := policy()
 	p.RadiusServers = append(p.RadiusServers, protocol.RadiusServer{Host: "2001:db8::5", Port: 1812})
@@ -284,6 +303,10 @@ func TestRefusesWithoutTouchingFiles(t *testing.T) {
 
 func TestValidateRefusesUnsafePolicies(t *testing.T) {
 	bad := map[string]func(p *protocol.LinuxPolicy){
+		"per-service unknown": func(p *protocol.LinuxPolicy) { p.ExcludedUsersByService = map[string][]string{"telnet": {"a"}} },
+		"per-service injection": func(p *protocol.LinuxPolicy) {
+			p.ExcludedUsersByService = map[string][]string{"sudo": {"a service in sshd"}}
+		},
 		"user name with shell characters": func(p *protocol.LinuxPolicy) { p.ExcludedUsers = []string{"a;rm -rf /"} },
 		"group with spaces":               func(p *protocol.LinuxPolicy) { p.ExcludedGroups = []string{"domain users"} },
 		"host with spaces":                func(p *protocol.LinuxPolicy) { p.RadiusServers[0].Host = "a b" },

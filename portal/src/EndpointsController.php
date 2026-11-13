@@ -91,8 +91,9 @@ final class EndpointsController extends Controller
                         Session::flash('success', 'Endpoint enabled. It receives new secrets at its next check-in.');
                         break;
                     case 'accounts':
-                        $exempt = $endpoints->setCodeExempt($endpoint['id'], array_map('strval', (array) ($_POST['needs_code'] ?? [])));
-                        $this->audit->record('endpoint.code_exempt', 'success', $name, ['endpoint' => $endpoint['id'], 'password_only' => implode(', ', $exempt)]);
+                        $exempt = $endpoints->setCodeExempt($endpoint['id'], array_map('strval', (array) ($_POST['needs_code'] ?? [])), array_map('strval', (array) ($_POST['needs_code_admin'] ?? [])));
+                        $this->audit->record('endpoint.code_exempt', 'success', $name, ['endpoint' => $endpoint['id'],
+                            'no_code_at_signin' => implode(', ', $exempt['signin']), 'no_code_for_admin' => implode(', ', $exempt['admin'])]);
                         Session::flash('success', 'Saved. The computer applies it at its next check-in (within a minute or two).');
                         break;
                     case 'create-user':
@@ -131,6 +132,7 @@ final class EndpointsController extends Controller
             'groups' => $groups,
             'radiusClient' => $radiusClient,
             'accounts' => $endpoints->accountsView($endpoint),
+            'promptsOn' => '3' !== substr((string) (Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows']['cpus_credui'] ?? '3e'), 0, 1),
             'canManage' => $this->can('endpoints.manage'),
             'canCreateUsers' => $this->can('users.manage'),
         ]);

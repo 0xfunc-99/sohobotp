@@ -109,6 +109,13 @@ def main():
     elif phase == "radius-back":
         ok, out = pam("sshd", "alice", pw("alice"), code(seeds, "alice"))
         check("RADIUS back: password + code accepted again", ok, out)
+    elif phase == "per-user":
+        ok, out = pam("sudo", "bob", pw("bob"))
+        check("per user: bob uses sudo with his password only (unticked for admin actions)", ok, out)
+        ok, out = pam("sshd", "bob", pw("bob"))
+        check("per user: bob still needs the code for SSH (ticked at sign-in)", not ok, out)
+        ok, out = pam("sudo", "alice", pw("alice"))
+        check("per user: other users still need the code for sudo", not ok, out)
     elif phase == "sudo-removed":
         same = open("/etc/pam.d/sudo").read() == open("/etc/pam.d.orig/sudo").read()
         check("policy change: sudo restored byte for byte", same)

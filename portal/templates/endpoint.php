@@ -33,31 +33,50 @@
 <section class="panel">
   <h2>Users on this computer</h2>
   <?php if ([] === $accounts): ?>
-    <p class="muted">The agent has not reported the accounts yet (needs agent from this release; it reports them at each check-in).</p>
+    <p class="muted">The agent has not reported the accounts yet (needs the agent from this release; it reports them at each check-in).</p>
   <?php else: ?>
-    <p class="hint">Ticked: signs in with password <strong>and a code</strong>. Unticked: password only, for example a script or service account. <?= 'linux' === $endpoint['os'] ? 'Applies to SSH and sudo.' : 'Applies to the Windows sign-in and unlock (needs SohobOTP Sign-in from this release).' ?></p>
+    <?php $linux = 'linux' === $endpoint['os']; ?>
+    <p class="hint">For each account, choose when it needs a code. Ticked: password <strong>and</strong> code. Unticked: password only (for example a script or service account).</p>
+    <ul class="hint">
+      <li><strong>At sign-in</strong>: <?= $linux ? 'SSH and the console login.' : 'the Windows sign-in screen, unlock and Remote Desktop into this computer.' ?></li>
+      <li><strong>For admin actions</strong>: <?= $linux ? 'sudo and su.' : 'the "Enter your credentials" windows on this computer: UAC elevation ("Run as administrator") and Run as.' ?></li>
+    </ul>
+    <?php if (!$linux && !$promptsOn): ?>
+      <div class="alert alert-info" role="status">Admin actions on this computer do not ask for a code at all right now: the computer policy has <strong>Credential prompts on this machine</strong> turned off. Turn it on in the <a href="<?= e(route('endpoint-group', ['id' => $endpoint['group_id']])) ?>">computer policy</a> for this column to apply.</div>
+    <?php endif; ?>
     <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>">
       <?= csrf_field() ?><input type="hidden" name="op" value="accounts">
+      <div class="toolbar">
+        <input type="search" class="search" id="accounts-search" placeholder="Search users on this computer" aria-label="Search users on this computer" data-filter-table="accounts-table">
+        <?php if ($canManage): ?>
+          <span class="toolbar-end tick-tools" aria-label="For the users shown">
+            <span class="muted">For the users shown:</span>
+            <button type="button" class="button-small" data-tick-visible="accounts-table" data-tick-name="needs_code[]" data-tick-state="1">Tick all at sign-in</button>
+            <button type="button" class="button-small" data-tick-visible="accounts-table" data-tick-name="needs_code[]" data-tick-state="0">Untick all at sign-in</button>
+            <button type="button" class="button-small" data-tick-visible="accounts-table" data-tick-name="needs_code_admin[]" data-tick-state="1">Tick all for admin</button>
+            <button type="button" class="button-small" data-tick-visible="accounts-table" data-tick-name="needs_code_admin[]" data-tick-state="0">Untick all for admin</button>
+          </span>
+        <?php endif; ?>
+      </div>
       <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>Needs a code</th><th>Account</th><th>Type</th><th>SohobOTP user</th></tr></thead>
+        <table class="table" id="accounts-table">
+          <thead><tr><th>Account</th><th>Code at sign-in</th><th>Code for admin actions</th><th>Type</th><th>SohobOTP user</th></tr></thead>
           <tbody>
             <?php foreach ($accounts as $a): ?>
               <tr>
-                <td>
-                  <?php if (null !== $a['fixed']): ?>
-                    <span class="status">never</span> <span class="muted"><?= e($a['fixed']) ?></span>
-                  <?php else: ?>
-                    <label class="choice"><input type="checkbox" name="needs_code[]" value="<?= e($a['name']) ?>"<?= $a['needs_code'] ? ' checked' : '' ?><?= $canManage ? '' : ' disabled' ?>><span class="sr-only">Needs a code: <?= e($a['name']) ?></span></label>
-                  <?php endif; ?>
-                </td>
                 <td><strong><?= e($a['name']) ?></strong><?= $a['admin'] ? ' <span class="status status-info">admin</span>' : '' ?></td>
+                <?php if (null !== $a['fixed']): ?>
+                  <td colspan="2"><span class="status">never</span> <span class="muted"><?= e($a['fixed']) ?></span></td>
+                <?php else: ?>
+                  <td><label class="choice"><input type="checkbox" name="needs_code[]" value="<?= e($a['name']) ?>"<?= $a['needs_code'] ? ' checked' : '' ?><?= $canManage ? '' : ' disabled' ?>><span class="sr-only">Code at sign-in: <?= e($a['name']) ?></span></label></td>
+                  <td><label class="choice"><input type="checkbox" name="needs_code_admin[]" value="<?= e($a['name']) ?>"<?= $a['needs_code_admin'] ? ' checked' : '' ?><?= $canManage ? '' : ' disabled' ?>><span class="sr-only">Code for admin actions: <?= e($a['name']) ?></span></label></td>
+                <?php endif; ?>
                 <td><?= 'domain' === $a['kind'] ? 'Active Directory' : 'local' ?></td>
                 <td>
                   <?php if ($a['has_user']): ?>
                     <a href="<?= e(route('user', ['u' => $a['user']])) ?>"><?= e($a['user']) ?></a>
-                  <?php elseif (null === $a['fixed'] && $a['needs_code']): ?>
-                    <span class="status status-failure">none</span> <span class="muted">cannot sign in while it needs a code</span>
+                  <?php elseif (null === $a['fixed'] && ($a['needs_code'] || $a['needs_code_admin'])): ?>
+                    <span class="status status-failure">none</span> <span class="muted">cannot sign in where it needs a code</span>
                   <?php else: ?>
                     <span class="muted">none</span>
                   <?php endif; ?>
@@ -67,7 +86,7 @@
           </tbody>
         </table>
       </div>
-      <?php if ($canManage): ?><div class="actions"><button type="submit" class="button-primary">Save</button></div><?php endif; ?>
+      <?php if ($canManage): ?><div class="actions"><button type="submit" class="button-primary">Save</button><span class="muted">The computer applies it at its next check-in (about a minute).</span></div><?php endif; ?>
     </form>
     <?php if ($canManage && $canCreateUsers): ?>
       <?php foreach ($accounts as $a): ?>

@@ -1140,7 +1140,12 @@ final class Endpoints
                 'radius_servers' => $servers,
                 'timeout' => $l['timeout'],
                 'services' => array_values($l['services']),
-                'excluded_users' => array_values(array_unique(array_merge(['root'], $split($l['excluded_users']), $endpoint['code_exempt'] ?? []))),
+                'excluded_users' => array_values(array_unique(array_merge(['root'], $split($l['excluded_users'])))),
+                // chosen per account on the computer's page: sign-in (SSH, console) and admin (sudo, su)
+                'excluded_users_by_service' => (object) array_filter([
+                    'sshd' => array_values($endpoint['code_exempt'] ?? []), 'login' => array_values($endpoint['code_exempt'] ?? []),
+                    'sudo' => array_values($endpoint['code_exempt_admin'] ?? []), 'su' => array_values($endpoint['code_exempt_admin'] ?? []),
+                ]),
                 'excluded_groups' => $split($l['excluded_groups']),
                 'ssh_keys_need_code' => $l['ssh_keys_need_code'],
             ], ['radius_secret' => $secret], ''];
@@ -1160,6 +1165,7 @@ final class Endpoints
             'timeout_reconnect' => (int) ($w['timeout_reconnect'] ?? 0),
             'enrol_at_signin' => (bool) ($w['enrol_at_signin'] ?? false),
             'code_exempt' => array_values($endpoint['code_exempt'] ?? []),
+            'code_exempt_admin' => array_values($endpoint['code_exempt_admin'] ?? []),
             'without2fa' => $w['without2fa'],
             'two_step_hide_otp' => $w['two_step_hide_otp'],
             'two_step_send_password' => $w['two_step_send_password'],
@@ -1308,11 +1314,14 @@ final class Endpoints
      * group always lets them in without one (Linux: root and excluded users; Windows: the
      * break-glass account). has_user: a SohobOTP user exists for the account, without one it
      * cannot sign in while it needs a code.
-     * @return list<array{name: string, kind: string, admin: bool, needs_code: bool, fixed: ?string, has_user: bool, user: string}>
+     * needs_code: at sign-in (Linux SSH and console; Windows sign-in, unlock, Remote Desktop);
+     * needs_code_admin: for admin actions (Linux sudo and su; Windows UAC and Run as prompts).
+     * @return list<array{name: string, kind: string, admin: bool, needs_code: bool, needs_code_admin: bool, fixed: ?string, has_user: bool, user: string}>
      */
     public function accountsView(array $endpoint): array
     {
         $exempt = array_flip($endpoint['code_exempt'] ?? []);
+        $exemptAdmin = array_flip($endpoint['code_exempt_admin'] ?? []);
         $group = $this->group($endpoint['group_id']);
         $policy = self::effectivePolicy($group['policy'] ?? []);
         $alwaysFree = [];
@@ -1336,6 +1345,7 @@ final class Endpoints
             $fixed = $alwaysFree[$key] ?? $alwaysFree[$user] ?? null;
             $out[] = $a + [
                 'needs_code' => null === $fixed && !isset($exempt[$key]),
+                'needs_code_admin' => null === $fixed && !isset($exemptAdmin[$key]),
                 'fixed' => $fixed,
                 'has_user' => null === Users::validateName($user) && $users->exists($user),
                 'user' => $user,
@@ -1344,24 +1354,38 @@ final class Endpoints
         return $out;
     }
 
-    /** Store who needs a code on this machine: every reported account not in $needsCode is exempt. */
-    public function setCodeExempt(string $id, array $needsCode): array
+    /**
+     * Store who needs a code on this machine, at sign-in and for admin actions: every reported
+     * account not ticked in a column skips the code there (root and break-glass: never asked).
+     * @return array{signin: list<string>, admin: list<string>} the accounts without a code
+     */
+    public function setCodeExempt(string $id, array $needsCode, array $needsCodeAdmin): array
     {
         $endpoint = self::endpointStore($id)->read();
         if ([] === $endpoint) {
             throw new ValidationException('This endpoint does not exist.');
         }
-        $ticked = array_flip(array_map(static fn ($n): string => mb_strtolower((string) $n), $needsCode));
-        $exempt = [];
+        $flip = static fn (array $names): array => array_flip(array_map(static fn ($n): string => mb_strtolower((string) $n), $names));
+        $ticked = $flip($needsCode);
+        $tickedAdmin = $flip($needsCodeAdmin);
+        $exempt = ['signin' => [], 'admin' => []];
         foreach ($this->accountsView($endpoint) as $a) {
             $key = mb_strtolower($a['name']);
-            if (null === $a['fixed'] && !isset($ticked[$key])) { // root, break-glass: never ask anyway
-                $exempt[] = $key;
+            if (null !== $a['fixed']) {
+                continue; // root, break-glass: never asked anyway
+            }
+            if (!isset($ticked[$key])) {
+                $exempt['signin'][] = $key;
+            }
+            if (!isset($tickedAdmin[$key])) {
+                $exempt['admin'][] = $key;
             }
         }
-        sort($exempt);
+        sort($exempt['signin']);
+        sort($exempt['admin']);
         self::endpointStore($id)->update(static function (array &$data) use ($exempt): void {
-            $data['code_exempt'] = $exempt;
+            $data['code_exempt'] = $exempt['signin'];
+            $data['code_exempt_admin'] = $exempt['admin'];
         });
         return $exempt;
     }

@@ -121,6 +121,19 @@ func Validate(p *protocol.LinuxPolicy, secret string) error {
 			return fmt.Errorf("invalid user or group name %q", n)
 		}
 	}
+	for svc, users := range p.ExcludedUsersByService {
+		if !known[svc] {
+			return fmt.Errorf("unknown PAM service %q", svc)
+		}
+		if len(users) > protocol.MaxAccounts {
+			return fmt.Errorf("too many users without a code for %s", svc)
+		}
+		for _, u := range users {
+			if !nameRe.MatchString(u) {
+				return fmt.Errorf("invalid user name %q", u)
+			}
+		}
+	}
 	return nil
 }
 
@@ -136,6 +149,12 @@ func ModuleFile(p *protocol.LinuxPolicy, radiusFile string) string {
 	skip = append(skip, "user in "+strings.Join(users, ":"))
 	for _, g := range p.ExcludedGroups {
 		skip = append(skip, "user ingroup "+g)
+	}
+	// users who skip the code only for some services (pam_succeed_if: all conditions must hold)
+	for _, svc := range Services {
+		if users := p.ExcludedUsersByService[svc]; len(users) > 0 {
+			skip = append(skip, "user in "+strings.Join(users, ":")+" service in "+svc)
+		}
 	}
 	var b strings.Builder
 	b.WriteString(managedHeader + "\n")
