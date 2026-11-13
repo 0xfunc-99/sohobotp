@@ -12,9 +12,16 @@
   <?define BaseProductName = "SohobOTP Sign-in" ?>
 
   <?if $(var.Platform) = x64 ?>
-    <?define ProductName = "$(var.BaseProductName) $(var.Version) (64 bit)" ?>
+    <!-- BinArch=ARM64 (msbuild /p:DefineConstants=BinArch=ARM64): the same 64-bit package with the
+         ARM64 sign-in DLLs, for Windows on ARM (x64 packages install into the native System32 there) -->
+    <?ifdef BinArch ?>
+      <?define ProductName = "$(var.BaseProductName) $(var.Version) (ARM64)" ?>
+      <?define BinFolder = "$(var.BinArch)" ?>
+    <?else ?>
+      <?define ProductName = "$(var.BaseProductName) $(var.Version) (64 bit)" ?>
+      <?define BinFolder = "x64" ?>
+    <?endif ?>
     <?define Win64 = "yes" ?>
-    <?define BinFolder = "x64" ?>
     <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
     <?define PlatformSystemFolder = "System64Folder" ?>
   <?else ?>
