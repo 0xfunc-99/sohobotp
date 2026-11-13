@@ -32,6 +32,7 @@ In this guide, replace **`PORTAL_IP`** with the IP address (or DNS name) of your
 | `agent/windows/sohobotp-agent.msi` | Windows agent installer (setup window, or silent for Group Policy) |
 | `agent/windows/sohobotp-agent.exe` | Windows agent without installer |
 | `windows-signin/SohobOTPSignIn.msi` | SohobOTP Sign-in installer (the code field on the Windows sign-in screen) |
+| `windows-signin/arm64/SohobOTPSignIn_arm64.msi` | the same for Windows on ARM (Windows in Parallels/UTM on a Mac with Apple chip, Snapdragon laptops) |
 | `source/` | full source: portal, agent, SohobOTP Sign-in (`source/windows-signin`) |
 | `SHA256SUMS` | checksums (`shasum -a 256 -c SHA256SUMS`, or `Get-FileHash` on Windows) |
 
@@ -309,6 +310,33 @@ not know at all are forwarded.
   second one: **High availability** → *Join as secondary* → paste the code. Add the second
   appliance as another RADIUS server on your VPNs. If the first one fails: on the second
   one, *Promote to primary now* (or set automatic promotion after some minutes).
+
+## Optional — Test on a Mac (Windows on ARM)
+
+A Mac with an Apple chip runs only the ARM version of Windows, whose sign-in screen cannot
+load the normal (x64) SohobOTP Sign-in. Use the ARM64 installer instead; everything else is
+the same. Real offices with Intel/AMD PCs use `SohobOTPSignIn.msi`: test it once on such a PC
+before rolling out.
+
+1. **Windows 11 ARM virtual machine**: Parallels Desktop (Windows is offered in its first
+   window; paid, free trial) or UTM (free, with the Windows 11 ARM image from Microsoft).
+   Take a **snapshot** before installing SohobOTP, and create the break-glass account
+   (step 6).
+2. **Portal on the same Mac** (steps 1-4 with Docker Desktop). The virtual machine reaches the
+   Mac at its host address: Parallels usually `10.211.55.2`, UTM usually `192.168.64.1`
+   (on Windows: `ipconfig`, the *Default Gateway*; check with `curl.exe -k https://ADDRESS/portal/`).
+   Use that address as `PORTAL_IP` for the certificate (step 3) and as the portal address in
+   **Add a computer**.
+3. In Windows: install **Visual C++ Redistributable x64** (the x64 one; Windows on ARM runs it),
+   then `windows-signin\arm64\SohobOTPSignIn_arm64.msi`, then the agent (**Add a computer** →
+   *Download for Windows*: the normal agent, Windows on ARM runs it unchanged).
+4. Test as in step 8 and on the computer's page (**Users on this computer**: search, *Code at
+   sign-in*, *Code for admin actions*). Lock, sign out and sign in again in the virtual
+   machine's window; Remote Desktop from the Mac works with the *Windows App*.
+
+If the sign-in screen shows no code field: `status` of the agent says "applied"? Is the
+ARM64 installer installed (Settings → Apps lists *SohobOTP Sign-in … (ARM64)*)? Restore the
+snapshot if you are locked out.
 
 ## Step 8 — Test checklist
 
