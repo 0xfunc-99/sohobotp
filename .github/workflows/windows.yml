@@ -56,7 +56,12 @@ jobs:
       - name: Build SohobOTP Sign-in (Release x64)
         run: msbuild windows-signin\SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=x64
       - name: Build SohobOTP Sign-in (Release ARM64, for Windows on ARM)
-        run: msbuild windows-signin\SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=ARM64
+        # Windows SDK 10.0.26100's winnt.h uses an ARM64 intrinsic the v142 compiler lacks
+        # (_CountOneBits64): build ARM64 against SDK 10.0.22621
+        run: |
+          dir "${env:ProgramFiles(x86)}\Windows Kits\10\Include"
+          msbuild windows-signin\SohobOTPSignIn.sln /m /p:Configuration=Release /p:Platform=ARM64 /p:WindowsTargetPlatformVersion=10.0.22621.0
+        shell: pwsh
       - name: ARM64 installer (the 64-bit package with the ARM64 DLLs)
         working-directory: windows-signin\WixInstall\multiOTPCredentialProviderInstaller
         run: msbuild multiOTPCredentialProviderInstaller.wixproj /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:DefineConstants=BinArch=ARM64 /p:OutputName=SohobOTPSignIn_arm64 /p:OutputPath=bin\arm64\Release\ /p:IntermediateOutputPath=obj\arm64\Release\
