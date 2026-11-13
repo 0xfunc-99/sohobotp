@@ -318,13 +318,19 @@ load the normal (x64) SohobOTP Sign-in. Use the ARM64 installer instead; everyth
 the same. Real offices with Intel/AMD PCs use `SohobOTPSignIn.msi`: test it once on such a PC
 before rolling out.
 
-1. **Windows 11 ARM virtual machine**: Parallels Desktop (Windows is offered in its first
-   window; paid, free trial) or UTM (free, with the Windows 11 ARM image from Microsoft).
+1. **Windows 11 ARM virtual machine**: VMware Fusion (free for personal use; *File → New →
+   Get Windows from Microsoft*, then install *VMware Tools* from the *Virtual Machine* menu),
+   Parallels Desktop (Windows is offered in its first window; paid, free trial) or UTM (free,
+   with the Windows 11 ARM image from Microsoft).
    Take a **snapshot** before installing SohobOTP, and create the break-glass account
    (step 6).
 2. **Portal on the same Mac** (steps 1-4 with Docker Desktop). The virtual machine reaches the
    Mac at its host address: Parallels usually `10.211.55.2`, UTM usually `192.168.64.1`
-   (on Windows: `ipconfig`, the *Default Gateway*; check with `curl.exe -k https://ADDRESS/portal/`).
+   (on Windows: `ipconfig`, the *Default Gateway*). VMware Fusion (network *Share with my
+   Mac*): **not** the gateway (that is VMware's own router, ending in `.2`) but the Mac's
+   address on that network, ending in `.1`: on the Mac, with the virtual machine running,
+   `ifconfig vmnet8 | grep inet`. Check from Windows with `curl.exe -k https://ADDRESS/portal/`;
+   if macOS asks whether Docker may accept incoming connections, allow it.
    Use that address as `PORTAL_IP` for the certificate (step 3) and as the portal address in
    **Add a computer**.
 3. In Windows: install **Visual C++ Redistributable x64** (the x64 one; Windows on ARM runs it),
