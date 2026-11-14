@@ -1178,8 +1178,11 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 			_piStatus = PI_AUTH_FAILURE;
 			return S_OK;
 		}
+		// a local account: this computer checks its Windows password and sends only "verified"
+		const bool localVerified = !_config->isSecondStep
+			&& SohobotpEnrol::CheckLocalPassword(_config->credential.username, _config->credential.domain, std::wstring(_config->credential.password.c_str()));
 		if (!_config->isSecondStep
-			&& SohobotpEnrol::Request("start", _config->credential.username, std::wstring(_config->credential.password.c_str()), L"", answer)
+			&& SohobotpEnrol::Request("start", _config->credential.username, std::wstring(_config->credential.password.c_str()), L"", answer, localVerified)
 			&& answer.status == "scan")
 		{
 			HBITMAP qr = SohobotpEnrol::QrBitmap(answer.qr, 200);

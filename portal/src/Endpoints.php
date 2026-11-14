@@ -54,6 +54,7 @@ final class Endpoints
             'timeout_reconnect' => 0, // minutes: Remote Desktop reconnect from the same client without a new code
             'enrol_at_signin'  => false, // users without an authenticator set it up on the sign-in screen (CpEnrol)
             'signin_auto'      => false, // the agent installs and updates SohobOTP Sign-in (SigninPackages)
+            'enrol_local'      => false, // also local Windows accounts set up their code at sign-in (CpEnrol, user created)
             'without2fa'       => false,
             'two_step_hide_otp'      => false,
             'two_step_send_password' => false,
@@ -294,6 +295,7 @@ final class Endpoints
                 'timeout_reconnect' => array_key_exists('win_timeout_reconnect', $input) ? $int('win_timeout_reconnect', 0, 480, 'Remote Desktop reconnect grace period') : 0,
                 'enrol_at_signin'  => $flag('win_enrol_at_signin'),
                 'signin_auto'      => $flag('win_signin_auto'),
+                'enrol_local'      => $flag('win_enrol_local'),
                 'without2fa'       => $flag('win_without2fa'),
                 'two_step_hide_otp'      => $flag('win_two_step_hide_otp'),
                 'two_step_send_password' => $flag('win_two_step_send_password'),

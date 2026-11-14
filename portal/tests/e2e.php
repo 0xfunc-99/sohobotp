@@ -1048,6 +1048,44 @@ $admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
 $admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, $groupInput($endpointGroupId, false));
 check('sign-in packages: switched off again', false === Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows']['signin_auto']);
 
+// Local Windows accounts set up their code at sign-in: the computer checks the Windows password,
+// the portal creates the SohobOTP user after the first right code
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'svc-print', 'password' => '', 'local' => true]);
+check('local sign-in set-up: off unless the policy allows local accounts', 'not_needed' === ($ans['status'] ?? ''), json_encode($ans));
+$localForm = $groupInput($endpointGroupId, false) + ['win_enrol_local' => '1'];
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+check('local sign-in set-up: the switch is on the computer policy page', str_contains($admin->body, 'name="win_enrol_local"'));
+$admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, $localForm);
+check('local sign-in set-up: "also local Windows accounts" saved', 303 === $admin->status
+    && true === Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows']['enrol_local']);
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'ghost', 'password' => '', 'local' => true]);
+check('local sign-in set-up: an account the computer did not report gets nothing (no user created)', 'not_needed' === ($ans['status'] ?? '') && !(new Portal\Users())->exists('ghost'));
+$agentCall('checkin', ['inventory' => ['accounts' => array_merge($winAccounts, [['name' => 'carol', 'kind' => 'local']])] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'carol', 'password' => '', 'local' => true]);
+check('local sign-in set-up: never for a name that is a directory user (local carol, AD carol)', 'not_needed' === ($ans['status'] ?? ''));
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'OTPTEST\\svc-print', 'password' => '', 'local' => true]);
+$svcSeed = base32_decode((string) ($ans['secret'] ?? ''));
+check('local sign-in set-up: reported local account without a code gets its QR code, no password sent, no user yet', 'scan' === ($ans['status'] ?? '')
+    && count((array) ($ans['qr'] ?? [])) >= 21 && 20 === strlen($svcSeed) && !(new Portal\Users())->exists('svc-print'), json_encode($ans));
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'confirm', 'user' => 'svc-print', 'code' => '000000' === Totp::code($svcSeed, intdiv(time(), 30)) ? '111111' : '000000']);
+check('local sign-in set-up: wrong first code refused, still no user', 'wrong_code' === ($ans['status'] ?? '') && !(new Portal\Users())->exists('svc-print'));
+$svcStep = null;
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'confirm', 'user' => 'svc-print', 'code' => next_code($svcSeed, $svcStep)]);
+Portal\MultiotpService::reset();
+$svcUser = (new Portal\Users())->exists('svc-print') ? (new Portal\Users())->get('svc-print') : null;
+$engine = Portal\MultiotpService::get();
+$engine->SetUser('svc-print');
+check('local sign-in set-up: right first code: SohobOTP user created with the seed shown on the screen', 'done' === ($ans['status'] ?? '') && null !== $svcUser
+    && str_starts_with((string) $svcUser['display_name'], 'svc-print on ') && strtolower(bin2hex($svcSeed)) === strtolower((string) $engine->GetUserTokenSeed()), json_encode($ans));
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'svc-print', 'password' => '', 'local' => true]);
+check('local sign-in set-up: only once (no new QR code afterwards)', 'not_needed' === ($ans['status'] ?? ''));
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('local sign-in set-up: audited (user created via the sign-in screen)', str_contains($auditText, 'sign-in screen (local account)') && str_contains($auditText, 'local (password checked by the computer)'));
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+$admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, array_diff_key($groupInput($endpointGroupId, false), ['win_enrol_local' => 1]));
+$agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+check('local sign-in set-up: switched off again', false === Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows']['enrol_local']);
+
 $winPage = (string) $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id)->body;
 check('computer users: no reminder while the policy asks for a code in admin prompts', str_contains($winPage, 'Code for admin actions') && !str_contains($winPage, 'Credential prompts on this machine</strong> turned off'));
 $admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);

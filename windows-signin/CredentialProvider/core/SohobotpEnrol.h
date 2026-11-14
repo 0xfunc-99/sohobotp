@@ -22,8 +22,14 @@ namespace SohobotpEnrol
 {
 	// step: "start" (password) or "confirm" (code). false: no answer (portal unreachable,
 	// not configured, or an answer that does not open with the secret).
+	// localVerified: a local Windows account whose password this computer checked itself
+	// (LogonUser); the password is then NOT sent, the portal relies on this computer's check.
 	bool Request(const std::string& step, const std::wstring& user, const std::wstring& password,
-		const std::wstring& code, SohobotpEnrolAnswer& answer);
+		const std::wstring& code, SohobotpEnrolAnswer& answer, bool localVerified = false);
+
+	// true: user is a local account of this computer (".", the computer name, or no domain on a
+	// computer that is not in a domain) and password is its correct Windows password.
+	bool CheckLocalPassword(const std::wstring& user, const std::wstring& domain, const std::wstring& password);
 
 	// White background, black modules, quiet zone of 4 modules, about targetPixels wide.
 	HBITMAP QrBitmap(const std::vector<std::string>& rows, int targetPixels);

@@ -9,6 +9,7 @@
 #endif
 #include "SohobotpEnrol.h"
 #include <bcrypt.h>
+#include <lm.h> // NetGetJoinInformation (is this computer in a domain)
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <ctime>
@@ -206,8 +207,38 @@ namespace
 
 namespace SohobotpEnrol
 {
+	bool CheckLocalPassword(const std::wstring& user, const std::wstring& domain, const std::wstring& password)
+	{
+		if (user.empty() || password.empty()) {
+			return false;
+		}
+		WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1] = {};
+		DWORD size = ARRAYSIZE(computer);
+		GetComputerNameW(computer, &size);
+		bool local = domain == L"." || (!domain.empty() && _wcsicmp(domain.c_str(), computer) == 0);
+		if (domain.empty()) {
+			// a bare name is a local account only on a computer that is not in a domain
+			LPWSTR joined = nullptr;
+			NETSETUP_JOIN_STATUS status = NetSetupUnknownStatus;
+			if (NetGetJoinInformation(nullptr, &joined, &status) == NERR_Success) {
+				local = status != NetSetupDomainName;
+				NetApiBufferFree(joined);
+			}
+		}
+		if (!local) {
+			return false;
+		}
+		HANDLE token = nullptr;
+		// network logon: checks the password without needing the right to sign in at the console
+		if (!LogonUserW(user.c_str(), L".", password.c_str(), LOGON32_LOGON_NETWORK, LOGON32_PROVIDER_DEFAULT, &token)) {
+			return false;
+		}
+		CloseHandle(token);
+		return true;
+	}
+
 	bool Request(const std::string& step, const std::wstring& user, const std::wstring& password,
-		const std::wstring& code, SohobotpEnrolAnswer& answer)
+		const std::wstring& code, SohobotpEnrolAnswer& answer, bool localVerified)
 	{
 		// the portal's address for this computer: https://host/portal/cp.php?e=<endpoint id>
 		std::wstring url = RegistryString(L"multiOTPServers");
@@ -231,7 +262,8 @@ namespace SohobotpEnrol
 		const std::string nonce = Hex(nonceBytes, 16);
 		nlohmann::json request = {
 			{ "v", 1 }, { "t", (long long)time(nullptr) }, { "n", nonce }, { "step", step },
-			{ "user", ToUtf8(user) }, { "password", ToUtf8(password) }, { "code", ToUtf8(code) }
+			{ "user", ToUtf8(user) }, { "password", localVerified ? std::string() : ToUtf8(password) }, { "code", ToUtf8(code) },
+			{ "local", localVerified }
 		};
 		std::string plain = request.dump();
 		std::string sealed;

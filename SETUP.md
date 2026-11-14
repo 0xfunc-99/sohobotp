@@ -172,6 +172,11 @@ user in the portal and press **Allow a new self-service set-up**):
   sign-in** (on in the Desktops and Laptops templates). A user without an authenticator who
   types the right Windows password sees a QR code on the sign-in screen, scans it, types the
   code and is signed in. Needs SohobOTP Sign-in from this release.
+- **Local Windows accounts too** (no Active Directory, e.g. a small office): also tick **Also
+  local Windows accounts** in the computer policy. The computer checks the Windows password
+  itself (it is not sent to the portal); after the first right code the portal creates the
+  SohobOTP user (same name). Only for accounts the computer reported to the portal, with no code
+  yet, and never for a name that is a directory user. Needs SohobOTP Sign-in 1.0.3 or later.
 
 Order for a rollout: sync Active Directory → open the web page and send the link → push the
 agent and SohobOTP Sign-in → whoever did not do it sets it up at their next Windows sign-in.

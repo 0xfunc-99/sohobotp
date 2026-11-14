@@ -14,6 +14,10 @@ defined('PORTAL_ROOT') || exit;
  *           then the same rules as the self-service page (SelfEnrol::refusal: only users with no
  *           authenticator in use, only once). Answer: scan + the QR code as a module matrix (the
  *           sign-in screen only draws it) + the key; or not_needed / refused.
+ *   start   {user, local: true} (policy "Also local Windows accounts"): a local account whose
+ *           Windows password the computer checked itself (the password is not sent). Only an
+ *           account this computer reported, with no code yet, and no directory user of that
+ *           name; its SohobOTP user is created at confirm, after the first right code.
  *   confirm {user, code}: the first code from the app. done: the seed is written to SohobOTP and
  *           the sign-in screen continues with the Windows password.
  *
@@ -89,38 +93,47 @@ final class CpEnrol
         $pendingKey = $id . '|' . $username;
 
         if ('start' === $req['step']) {
-            if (null === $user || !$user['synchronized'] || '' === $user['synced_dn']) {
-                $reply(['status' => 'not_needed']); // local accounts and unknown users: the normal sign-in decides
-            }
-            if (null !== $user['last_login'] && null === (new SelfEnrol())->resetAt($user['user'])) {
-                $reply(['status' => 'not_needed']); // already signs in with a code: no password check needed
-            }
-            $engine = MultiotpService::get();
-            $engine->SetUser($user['user']);
-            if (!$engine->CheckUserLdapPassword($engine->GetUserSynchronizedDn(), (string) ($req['password'] ?? ''))) {
-                $audit->record('self_enrol.sign_in', 'failure', $user['user'], ['reason' => 'wrong directory password', 'via' => 'sign-in screen', 'endpoint' => $id]);
-                $reply(['status' => 'not_needed']); // Windows itself refuses the wrong password afterwards
-            }
-            if (null !== ($refusal = (new SelfEnrol())->refusal($user))) {
-                $reply(['status' => 'not_needed']);
+            $local = true === ($req['local'] ?? false);
+            if ($local) {
+                if (empty($policy['enrol_local']) || !self::reportedLocalAccount($endpoint, $username)
+                    || (null !== $user && ($user['synchronized'] || null !== (new SelfEnrol())->refusal($user)))) {
+                    $reply(['status' => 'not_needed']); // the normal sign-in decides
+                }
+            } else {
+                if (null === $user || !$user['synchronized'] || '' === $user['synced_dn']) {
+                    $reply(['status' => 'not_needed']); // local accounts and unknown users: the normal sign-in decides
+                }
+                if (null !== $user['last_login'] && null === (new SelfEnrol())->resetAt($user['user'])) {
+                    $reply(['status' => 'not_needed']); // already signs in with a code: no password check needed
+                }
+                $engine = MultiotpService::get();
+                $engine->SetUser($user['user']);
+                if (!$engine->CheckUserLdapPassword($engine->GetUserSynchronizedDn(), (string) ($req['password'] ?? ''))) {
+                    $audit->record('self_enrol.sign_in', 'failure', $user['user'], ['reason' => 'wrong directory password', 'via' => 'sign-in screen', 'endpoint' => $id]);
+                    $reply(['status' => 'not_needed']); // Windows itself refuses the wrong password afterwards
+                }
+                if (null !== ($refusal = (new SelfEnrol())->refusal($user))) {
+                    $reply(['status' => 'not_needed']);
+                }
             }
             $seed = random_bytes(20);
-            self::pending()->update(static function (array &$data) use ($pendingKey, $seed): void {
+            $create = null === $user;
+            self::pending()->update(static function (array &$data) use ($pendingKey, $seed, $create): void {
                 foreach ($data as $k => $p) {
                     if ($p['at'] < time() - self::PENDING_LIFETIME) {
                         unset($data[$k]);
                     }
                 }
-                $data[$pendingKey] = ['seed' => Crypto::encrypt(bin2hex($seed)), 'at' => time(), 'tries' => 0];
+                $data[$pendingKey] = ['seed' => Crypto::encrypt(bin2hex($seed)), 'at' => time(), 'tries' => 0, 'create' => $create];
             });
-            $audit->record('self_enrol.sign_in', 'success', $user['user'], ['via' => 'sign-in screen', 'endpoint' => $id]);
-            $uri = SelfEnrol::otpauthUri($user['user'], $seed);
+            $audit->record('self_enrol.sign_in', 'success', $username, ['via' => 'sign-in screen', 'endpoint' => $id, 'account' => $local ? 'local (password checked by the computer)' : 'directory']);
+            $uri = SelfEnrol::otpauthUri($username, $seed);
             $reply(['status' => 'scan', 'secret' => implode(' ', str_split(Totp::base32($seed), 4)), 'qr' => self::matrix($uri), 'minutes' => intdiv(self::PENDING_LIFETIME, 60)]);
         }
 
         // confirm
         $pending = self::pending()->read()[$pendingKey] ?? null;
-        if (null === $user || null === $pending || $pending['at'] < time() - self::PENDING_LIFETIME) {
+        if ((null === $user && empty($pending['create'])) || null === $pending || $pending['at'] < time() - self::PENDING_LIFETIME) {
             $reply(['status' => 'expired', 'message' => 'The set-up expired. Sign in again to get a new QR code.']);
         }
         $seedHex = Crypto::decrypt($pending['seed']);
@@ -139,10 +152,20 @@ final class CpEnrol
                 return $tries;
             });
             if ($tries >= self::MAX_CODE_TRIES) {
-                $audit->record('self_enrol.confirm', 'failure', $user['user'], ['reason' => 'too many wrong codes', 'via' => 'sign-in screen', 'endpoint' => $id]);
+                $audit->record('self_enrol.confirm', 'failure', $username, ['reason' => 'too many wrong codes', 'via' => 'sign-in screen', 'endpoint' => $id]);
                 $reply(['status' => 'expired', 'message' => 'Too many wrong codes. Sign in again to get a new QR code.']);
             }
             $reply(['status' => 'wrong_code', 'message' => 'This code is not correct. Type the code the app shows now.']);
+        }
+        if (null === $user) {
+            // local account (start checked it): its SohobOTP user, created now that the first code is right
+            if ($users->exists($username)) {
+                self::forget($pendingKey);
+                $reply(['status' => 'not_needed']); // created elsewhere meanwhile
+            }
+            $users->create(['user' => $username, 'display_name' => $username . ' on ' . (string) ($endpoint['inventory']['hostname'] ?? $id), 'token_serial' => '']);
+            $audit->record('user.create', 'success', $username, ['via' => 'sign-in screen (local account)', 'endpoint' => $id]);
+            $user = $users->get($username);
         }
         if (null !== (new SelfEnrol())->refusal($user)) { // set up elsewhere meanwhile
             self::forget($pendingKey);
@@ -154,6 +177,17 @@ final class CpEnrol
         self::forget($pendingKey);
         $audit->record('user.token_enrolled', 'success', $user['user'], ['type' => 'software TOTP', 'via' => 'sign-in screen', 'endpoint' => $id]);
         $reply(['status' => 'done']);
+    }
+
+    /** The computer reported this local account (agent inventory): only those may be created. */
+    private static function reportedLocalAccount(array $endpoint, string $username): bool
+    {
+        foreach ((array) ($endpoint['inventory']['accounts'] ?? []) as $account) {
+            if ('local' === ($account['kind'] ?? '') && mb_strtolower((string) ($account['name'] ?? '')) === $username) {
+                return '' !== $username && null === Users::validateName($username);
+            }
+        }
+        return false;
     }
 
     /** QR code modules as rows of "0"/"1" (dark = 1), drawn by the sign-in screen. */

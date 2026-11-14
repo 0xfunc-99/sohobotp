@@ -176,7 +176,7 @@ final class EndpointsController extends Controller
             } catch (ValidationException $invalid) {
                 $error = $invalid->getMessage();
                 $input = array_merge($input, array_map(static fn ($v) => is_array($v) ? $v : (string) $v, $_POST));
-                foreach (['linux_enabled', 'linux_ssh_keys_need_code', 'linux_require_message_authenticator', 'win_cache_enabled', 'win_enrol_at_signin', 'win_signin_auto', 'win_upn_format', 'win_without2fa', 'win_two_step_hide_otp', 'win_two_step_send_password'] as $flag) {
+                foreach (['linux_enabled', 'linux_ssh_keys_need_code', 'linux_require_message_authenticator', 'win_cache_enabled', 'win_enrol_at_signin', 'win_enrol_local', 'win_signin_auto', 'win_upn_format', 'win_without2fa', 'win_two_step_hide_otp', 'win_two_step_send_password'] as $flag) {
                     $input[$flag] = !empty($_POST[$flag]);
                 }
                 $input['linux_services'] = (array) ($_POST['linux_services'] ?? []);
