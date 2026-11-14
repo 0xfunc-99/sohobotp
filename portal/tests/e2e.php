@@ -1016,6 +1016,18 @@ check('sign-in packages: the signed policy names both installers by version, siz
     ['amd64', 'arm64'] === array_keys((array) ($autoPolicy['signin_packages'] ?? [])) && '1.0.2.0' === ($autoPolicy['signin_packages']['arm64']['version'] ?? '')
     && $x64Sha === ($autoPolicy['signin_packages']['amd64']['sha256'] ?? '') && 300008 === ($autoPolicy['signin_packages']['amd64']['size'] ?? 0) && !isset($autoPolicy['vcredist']),
     json_encode($autoPolicy['signin_packages'] ?? null));
+$autoVersion = (int) ($windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows')['version'] ?? 0);
+$applied = ['version' => $autoVersion, 'status' => 'applied', 'error' => '', 'at' => time()];
+$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => $applied], $windows);
+check('sign-in packages: configuration applied, same Sign-in reported: nothing resent', $autoVersion > 0 && null === ($winReply['config'] ?? null), json_encode($winReply));
+$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts, 'component' => ['name' => 'sohobotp-signin', 'version' => '1.0.1.0']] + $windowsInventory, 'applied' => $applied], $windows);
+$resent = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows');
+check('sign-in packages: the computer reports another Sign-in (e.g. agent updated afterwards): configuration resent, so its agent installs',
+    ($resent['version'] ?? 0) > $autoVersion && isset($resent['policy']['signin_packages']['amd64']), json_encode($winReply['config'] ?? null));
+$appliedAgain = ['version' => (int) $resent['version'], 'status' => 'applied', 'error' => '', 'at' => time()];
+$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts, 'component' => ['name' => 'sohobotp-signin', 'version' => '1.0.1.0']] + $windowsInventory, 'applied' => $appliedAgain], $windows);
+check('sign-in packages: no loop while the reported version stays the same', null === ($winReply['config'] ?? null));
+$agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => $appliedAgain], $windows); // back to its own Sign-in version
 $agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sha], $windows);
 check('sign-in packages: the agent downloads exactly the named installer', 200 === $agentHttp->status && $agentHttp->body === file_get_contents($installers['signin/amd64']['file']), (string) $agentHttp->status);
 $agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => str_repeat('0', 64)], $windows);

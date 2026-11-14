@@ -1040,6 +1040,14 @@ final class Endpoints
         }
         [$policy, $secrets, $error] = $this->desired($endpoint, $group);
         $fingerprint = null === $policy ? '' : hash('sha256', json_encode([$endpoint['os'], $policy, $secrets], JSON_UNESCAPED_SLASHES));
+        // "Install and update SohobOTP Sign-in automatically": the Sign-in version the computer
+        // reports counts too. A computer that does not run the portal's version (agent updated
+        // after its configuration was applied, Sign-in removed or replaced by hand) gets its
+        // configuration again and its agent installs it; once installed, nothing repeats (an agent
+        // that cannot install keeps its version: nothing is resent, the agent retries by itself).
+        if ('' !== $fingerprint && isset($policy['signin_packages'])) {
+            $fingerprint = hash('sha256', $fingerprint . '|signin ' . (string) ($inventory['component']['version'] ?? ''));
+        }
 
         $record = self::endpointStore($id)->update(static function (array &$data) use ($inventory, $appliedVersion, $appliedStatus, $applied, $ip, $fingerprint, $error): array {
             $now = time();
