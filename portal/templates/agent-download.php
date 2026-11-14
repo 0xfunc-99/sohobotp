@@ -32,8 +32,8 @@
   <fieldset>
     <legend>3. Download</legend>
     <div class="actions">
-      <?php foreach (Portal\AgentBundle::PLATFORMS as $platform => $label): $program = $programs[$platform]; ?>
-        <button type="submit" name="platform" value="<?= e($platform) ?>" class="button-primary"<?= null === $program ? ' disabled' : '' ?>>Download for <?= e($label) ?></button>
+      <?php foreach (Portal\AgentBundle::DOWNLOADS as $key => [$platform, $format, $label]): $program = $programs[$platform]; ?>
+        <button type="submit" name="platform" value="<?= e($key) ?>" class="<?= 'program' === $format && str_starts_with($platform, 'linux/') ? 'button' : 'button-primary' ?>"<?= null === $program ? ' disabled' : '' ?>><?= 'deb' === $format ? 'Download' : 'Download for' ?> <?= e($label) ?></button>
       <?php endforeach; ?>
     </div>
     <ul class="hint">
@@ -42,7 +42,7 @@
       <?php endforeach; ?>
     </ul>
     <?php if ([] !== $missing): ?>
-      <p class="hint">To add an agent program: <code>portal-admin.php agent-program-add --file=sohobotp-agent-linux-amd64 --os=linux --arch=amd64</code> on the portal server (Windows: <code>--os=windows</code>, the <code>.exe</code>).</p>
+      <p class="hint">To add an agent program: <code>portal-admin.php agent-program-add --file=sohobotp-agent-linux-amd64 --os=linux --arch=amd64</code> on the portal server (Windows: <code>--os=windows</code>, the <code>.exe</code>; ARM: <code>--arch=arm64</code>).</p>
     <?php endif; ?>
   </fieldset>
 </form>
@@ -50,8 +50,9 @@
 <section class="panel">
   <h2>On the machine</h2>
   <ul>
-    <li><strong>Windows:</strong> double-click the downloaded file and allow it to run as administrator, or run <code>sohobotp-agent-….exe install</code> from an administrator prompt. Install SohobOTP Sign-in as well for the code on the sign-in screen.</li>
-    <li><strong>Linux:</strong> <code>chmod +x sohobotp-agent-… &amp;&amp; sudo ./sohobotp-agent-… install</code></li>
+    <li><strong>Windows:</strong> double-click the downloaded file and allow it to run as administrator, or run <code>sohobotp-agent-….exe install</code> from an administrator prompt. Install SohobOTP Sign-in as well for the code on the sign-in screen (Windows on ARM: its ARM64 installer).</li>
+    <li><strong>Debian, Ubuntu, Raspberry Pi OS:</strong> <code>sudo apt install ./sohobotp-agent-…_amd64.deb</code> (or <code>_arm64.deb</code>). It enrols and starts the agent, then deletes the token from the machine. If enrolment fails (network, expired token), fix it and run <code>sudo dpkg --configure -a</code>. <code>sudo apt remove sohobotp-agent</code> undoes the PAM changes and removes the agent.</li>
+    <li><strong>Other Linux:</strong> <code>chmod +x sohobotp-agent-… &amp;&amp; sudo ./sohobotp-agent-… install</code></li>
   </ul>
   <p class="hint">The download contains the enrolment token: send it only to whoever installs it, and delete it afterwards. The installed agent does not keep the token. A download that went astray is stopped by revoking its token under <a href="<?= e(route('endpoint-enrol')) ?>">Enrol endpoints</a>.</p>
 </section>

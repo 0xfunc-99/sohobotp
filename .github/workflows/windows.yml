@@ -31,6 +31,7 @@ jobs:
           path: |
             agent/dist/sohobotp-agent.msi
             agent/dist/sohobotp-agent-windows-amd64.exe
+            agent/dist/sohobotp-agent-windows-arm64.exe
             agent/dist/fakeportal.exe
             agent/dist/upgrade/sohobotp-agent-0.1.1.msi
 

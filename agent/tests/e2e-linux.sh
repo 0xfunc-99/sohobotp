@@ -180,5 +180,29 @@ check "the same download cannot enrol a second machine (token for 1)" "docker ex
 docker exec "$CLI" sh -c 'printf x | dd of=/root/sohobotp-agent-download bs=1 seek=$(( $(wc -c < /root/sohobotp-agent-download) - 60 )) conv=notrunc 2>/dev/null'
 check "a damaged download is refused with a clear message" "docker exec $CLI /root/sohobotp-agent-download install 2>&1 | grep -q 'settings built into this program are damaged'"
 
+if [ "$DISTRO" = debian ]; then
+  echo "== Debian package from the portal: apt/dpkg install enrols, remove uninstalls"
+  ARCH=$(docker exec "$CLI" dpkg --print-architecture)
+  portal deb /tmp/agent-plain /tmp/ca.pem "$ARCH" > "$TMP/agent.deb"
+  docker cp "$TMP/agent.deb" "$CLI:/root/sohobotp-agent.deb"
+  # the test machine has no systemd (container): systemctl that succeeds; clean up the earlier installs
+  docker exec "$CLI" sh -c 'printf "#!/bin/sh\nexit 0\n" > /usr/local/bin/systemctl && chmod 0755 /usr/local/bin/systemctl
+    /usr/local/sbin/sohobotp-agent uninstall >/dev/null 2>&1 || true; rm -rf /etc/sohobotp-agent /usr/local/sbin/sohobotp-agent'
+  check "dpkg reads the package (name, architecture, version)" "docker exec $CLI dpkg-deb -f /root/sohobotp-agent.deb Package Architecture Version | tr '\n' ' ' | grep -q 'Package: sohobotp-agent Architecture: $ARCH Version: 0.1.0'"
+  portal delete-endpoints >/dev/null  # the earlier installs on this machine, deleted as an administrator would
+  portal policy ssh-only >/dev/null   # 2FA on again (turned off above), so the install configures PAM
+  OUT=$(docker exec "$CLI" dpkg -i --force-depends /root/sohobotp-agent.deb 2>&1 || true)
+  check "installing the package enrols the machine with the built-in settings" "echo \"\$OUT\" | grep -q 'Enrolled as endpoint' && docker exec $CLI dpkg -s sohobotp-agent | grep -q 'Status: install ok installed'"
+  check "the token does not stay on the machine (setup file deleted)" "! docker exec $CLI test -e /var/lib/sohobotp-agent/setup"
+  check "the installed agent is the plain program" "[ \"\$(docker exec $CLI sha256sum /usr/local/sbin/sohobotp-agent | cut -d' ' -f1)\" = '$PLAIN_SUM' ]"
+  # the portal sends the Linux configuration once the worker created this machine's RADIUS client
+  # (seconds); the service checks in every minute, here: retry
+  for i in $(seq 1 30); do agent run --once 2>/dev/null | grep -q 'version [0-9]*, applied' && break; sleep 2; done
+  check "the agent receives and applies its configuration" "agent status | grep -q 'version [0-9]*, applied'"
+  check "PAM configured by the policy" "docker exec $CLI test -f /etc/pam.d/sohobotp-2fa"
+  OUT=$(docker exec "$CLI" dpkg -r sohobotp-agent 2>&1 || true)
+  check "removing the package uninstalls the agent (state, binary, PAM changes)" "docker exec $CLI sh -c '! test -e /etc/sohobotp-agent && ! test -e /usr/local/sbin/sohobotp-agent && ! test -e /etc/pam.d/sohobotp-2fa' && ! docker exec $CLI dpkg -s sohobotp-agent >/dev/null 2>&1"
+  docker exec "$CLI" rm -f /usr/local/bin/systemctl
+fi
 [ "$STATUS" = 0 ] && echo "All Linux agent end-to-end checks passed ($DISTRO)." || echo "Some Linux agent end-to-end checks FAILED ($DISTRO)."
 exit $STATUS

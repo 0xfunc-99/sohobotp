@@ -1350,8 +1350,9 @@ check('download agent: not for the help desk role (no page, no permission)', !st
 $anonymous = (new Browser($base))->get('/portal/index.php?r=agent-download');
 check('download agent: not without signing in', !str_contains($anonymous->body, 'name="platform"') && !str_contains($anonymous->body, Portal\AgentBundle::MAGIC));
 $admin->get('/portal/index.php?r=agent-download');
-check('download agent: page served, Linux available, Windows not (no program)', 200 === $admin->status
-    && 1 === preg_match('/value="linux\/amd64" class="button-primary">/', $admin->body) && 1 === preg_match('/value="windows\/amd64" class="button-primary" disabled>/', $admin->body), (string) $admin->status);
+check('download agent: page served, Linux available (program and .deb), Windows (Intel/AMD) not (no program)', 200 === $admin->status
+    && 1 === preg_match('/value="linux\/amd64" class="button">/', $admin->body) && 1 === preg_match('/value="linux\/amd64\/deb" class="button-primary">/', $admin->body)
+    && 1 === preg_match('/value="windows\/amd64" class="button-primary" disabled>/', $admin->body), (string) $admin->status);
 check('download agent: in the sidebar', str_contains($admin->body, 'r=agent-download'));
 $downloadForm = ['group_id' => $endpointGroupId, 'label' => 'e2e <b>download</b>', 'hours' => '2', 'max_uses' => '1', 'approval' => 'none', 'portal' => 'https://otp.example.test', 'ca_pem' => ''];
 $admin->post('/portal/index.php?r=agent-download', $downloadForm + ['platform' => 'windows/amd64']);
@@ -1396,6 +1397,63 @@ $admin->get('/portal/index.php?r=agent-download');
 $admin->post('/portal/index.php?r=agent-download', ['ca_pem' => $ownCa] + $downloadForm + ['platform' => 'linux/amd64']);
 $withCa = json_decode(substr($admin->body, strlen($plainProgram), unpack('N', substr($admin->body, -20, 4))[1]), true);
 check('download agent: CA certificate built in, and a different token each time', trim($ownCa) . "\n" === ($withCa['ca_pem'] ?? '') && '' !== ($withCa['token'] ?? '') && $builtToken !== $withCa['token']);
+
+// Windows on ARM: its own program and file name
+$admin->get('/portal/index.php?r=agent-download');
+check('download agent: Windows on ARM offered next to Windows (Intel/AMD)', str_contains($admin->body, 'value="windows/arm64"') && str_contains($admin->body, 'Download for Windows on ARM')
+    && str_contains($admin->body, 'Debian/Ubuntu package (Intel/AMD)'));
+$admin->post('/portal/index.php?r=agent-download', $downloadForm + ['platform' => 'windows/arm64']);
+$armProgram = (string) file_get_contents(Portal\AgentBundle::programsDir() . '/sohobotp-agent-windows-arm64.exe');
+check('download agent: Windows on ARM download is the ARM64 program plus settings', 200 === $admin->status && str_starts_with($admin->body, $armProgram) && str_ends_with($admin->body, Portal\AgentBundle::MAGIC)
+    && (bool) preg_match('/filename="sohobotp-agent-[A-Za-z0-9]+-arm64\.exe"/', $admin->headers['content-disposition'][0] ?? ''), json_encode($admin->headers['content-disposition'] ?? null));
+
+// Debian package: ar archive (debian-binary, control.tar.gz, data.tar.gz) with the downloaded agent inside
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', $downloadForm + ['platform' => 'linux/amd64/deb']);
+$deb = $admin->body;
+/** @return array<string, string> ar members */
+$arMembers = static function (string $ar): array {
+    $members = [];
+    for ($at = 8; $at + 60 <= strlen($ar);) {
+        $name = rtrim(substr($ar, $at, 16));
+        $size = (int) trim(substr($ar, $at + 48, 10));
+        $members[$name] = substr($ar, $at + 60, $size);
+        $at += 60 + $size + ($size % 2);
+    }
+    return $members;
+};
+/** @return array<string, array{mode: int, type: string, data: string}> tar entries */
+$tarEntries = static function (string $tar): array {
+    $entries = [];
+    for ($at = 0; $at + 512 <= strlen($tar) && "\0" !== $tar[$at];) {
+        $header = substr($tar, $at, 512);
+        $size = octdec(trim(substr($header, 124, 12), " \0"));
+        $sum = array_sum(array_map('ord', str_split(substr_replace($header, str_repeat(' ', 8), 148, 8))));
+        $entries[rtrim(substr($header, 0, 100), "\0")] = ['mode' => octdec(trim(substr($header, 100, 8), " \0")), 'type' => $header[156],
+            'data' => substr($tar, $at + 512, $size), 'sum_ok' => $sum === octdec(trim(substr($header, 148, 8), " \0")),
+            'owner' => rtrim(substr($header, 265, 32), "\0")];
+        $at += 512 + (int) ceil($size / 512) * 512;
+    }
+    return $entries;
+};
+$members = str_starts_with($deb, "!<arch>\n") ? $arMembers($deb) : [];
+check('debian package: a .deb download (ar archive, debian-binary 2.0 first)', 200 === $admin->status && ['debian-binary', 'control.tar.gz', 'data.tar.gz'] === array_keys($members)
+    && "2.0\n" === $members['debian-binary'] && (bool) preg_match('/filename="sohobotp-agent-[A-Za-z0-9]+_amd64\.deb"/', $admin->headers['content-disposition'][0] ?? ''),
+    json_encode([array_keys($members), $admin->headers['content-disposition'] ?? null]));
+$control = $tarEntries((string) @gzdecode($members['control.tar.gz'] ?? ''));
+$data = $tarEntries((string) @gzdecode($members['data.tar.gz'] ?? ''));
+check('debian package: control fields (package, architecture, depends on systemd)', str_contains($control['./control']['data'] ?? '', "Package: sohobotp-agent\n")
+    && str_contains($control['./control']['data'] ?? '', "Architecture: amd64\n") && str_contains($control['./control']['data'] ?? '', "Depends: systemd\n")
+    && (bool) preg_match('/^Version: [0-9][0-9.]*$/m', $control['./control']['data'] ?? ''));
+check('debian package: postinst enrols with the built-in settings then deletes them; prerm uninstalls',
+    0755 === ($control['./postinst']['mode'] ?? 0) && str_contains($control['./postinst']['data'] ?? '', '/var/lib/sohobotp-agent/setup install')
+    && str_contains($control['./postinst']['data'] ?? '', 'rm -f /var/lib/sohobotp-agent/setup') && str_contains($control['./prerm']['data'] ?? '', 'sohobotp-agent uninstall'));
+$setup = $data['./var/lib/sohobotp-agent/setup'] ?? null;
+$debSettings = null !== $setup ? json_decode(substr($setup['data'], strlen($plainProgram), unpack('N', substr($setup['data'], -20, 4))[1]), true) : null;
+check('debian package: the downloaded agent inside, root only (0700), with a new token', null !== $setup && 0700 === $setup['mode'] && 0700 === ($data['./var/lib/sohobotp-agent/']['mode'] ?? 0)
+    && str_starts_with($setup['data'], $plainProgram) && str_ends_with($setup['data'], Portal\AgentBundle::MAGIC) && '' !== ($debSettings['token'] ?? '')
+    && $builtToken !== $debSettings['token'] && 'root' === $setup['owner']);
+check('debian package: tar checksums valid', [] !== $data && [] === array_filter(array_merge($control, $data), static fn (array $entry): bool => !$entry['sum_ok']));
 
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

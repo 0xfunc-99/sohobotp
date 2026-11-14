@@ -83,6 +83,28 @@ switch ($argv[1] ?? '') {
         echo Portal\AgentBundle::trailer(Portal\AgentBundle::validatePortal('https://portal.test'), $plain, $endpoints->pin(),
             Portal\AgentBundle::validateCa((string) file_get_contents($argv[3])));
         break;
+    case 'deb':
+        // the portal's "Debian/Ubuntu package" download: the same agent and settings in a .deb
+        // (argument 2: agent program, 3: CA certificate, 4: architecture)
+        $endpoints = new Endpoints();
+        [, $plain] = $endpoints->createToken(group()['id'], 'agent e2e deb', 1, 1, 'agent-e2e');
+        echo Portal\AgentDeb::build($argv[2], Portal\AgentBundle::trailer(Portal\AgentBundle::validatePortal('https://portal.test'), $plain, $endpoints->pin(),
+            Portal\AgentBundle::validateCa((string) file_get_contents($argv[3]))), $argv[4], '0.1.0', time());
+        break;
+    case 'endpoints':
+        // id, last seen, RADIUS client or error, applied version (diagnostics)
+        foreach ((new Endpoints())->endpoints() as $e) {
+            echo $e['id'], ' seen=', $e['last_seen'] ?? '-', ' radius=', $e['radius_client_id'] ?? '-', ' error=', $e['radius_error'] ?? '', ' applied=', json_encode($e['applied'] ?? null), "\n";
+        }
+        break;
+    case 'delete-endpoints':
+        // an administrator deletes the old machines before reinstalling them
+        $endpoints = new Endpoints();
+        foreach ($endpoints->endpoints() as $e) {
+            $endpoints->deleteEndpoint($e['id']);
+            echo "deleted {$e['id']}\n";
+        }
+        break;
     case 'radius-applied':
         // the last FreeRADIUS apply finished successfully and nothing is pending
         $job = Portal\Jobs::latest('radius.apply');

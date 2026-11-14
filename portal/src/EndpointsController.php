@@ -334,7 +334,8 @@ final class EndpointsController extends Controller
             }
             $values['ca_pem'] = mb_substr((string) ($_POST['ca_pem'] ?? ''), 0, 70000);
             try {
-                $program = $programs[$values['platform']] ?? null;
+                [$platform, $format, $downloadLabel] = AgentBundle::DOWNLOADS[$values['platform']] ?? ['', '', ''];
+                $program = $programs[$platform] ?? null;
                 if (null === $program) {
                     throw new ValidationException('Choose Windows or Linux. A greyed-out choice means the portal has no agent program for it yet.');
                 }
@@ -342,7 +343,7 @@ final class EndpointsController extends Controller
                 $caPem = AgentBundle::validateCa($values['ca_pem']);
                 [$token, $plain] = $endpoints->createToken(
                     $values['group_id'],
-                    '' !== $values['label'] ? $values['label'] : 'Downloaded agent, ' . AgentBundle::PLATFORMS[$values['platform']],
+                    '' !== $values['label'] ? $values['label'] : 'Downloaded agent, ' . $downloadLabel,
                     (int) $values['hours'],
                     (int) $values['max_uses'],
                     $this->admin['username'],
@@ -350,22 +351,28 @@ final class EndpointsController extends Controller
                 );
                 $trailer = AgentBundle::trailer($portal, $plain, $endpoints->pin(), $caPem);
                 $this->audit->record('endpoint.agent_download', 'success', $token['label'], [
-                    'token' => $token['id'], 'group' => $token['group_id'], 'platform' => $values['platform'], 'portal' => $portal,
+                    'token' => $token['id'], 'group' => $token['group_id'], 'platform' => $platform, 'format' => $format, 'portal' => $portal,
                     'agent' => $program['source'] . ('' !== $program['version'] ? ' ' . $program['version'] : ''), 'with_ca' => '' !== $caPem,
                     'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
                 ]);
-                [$os] = explode('/', $values['platform']);
-                $name = 'sohobotp-agent-' . $token['id'] . ('windows' === $os ? '.exe' : '');
+                [$os, $arch] = explode('/', $platform);
+                $deb = 'deb' === $format ? AgentDeb::build($program['file'], $trailer, $arch, $program['version'], time()) : null;
+                $name = null !== $deb ? AgentDeb::fileName($token['id'], $arch)
+                    : 'sohobotp-agent-' . $token['id'] . ('windows' === $os ? ('arm64' === $arch ? '-arm64' : '') . '.exe' : ('arm64' === $arch ? '-arm64' : ''));
                 while (ob_get_level() > 0) {
                     ob_end_clean();
                 }
-                header('Content-Type: application/octet-stream');
+                header('Content-Type: ' . (null !== $deb ? 'application/vnd.debian.binary-package' : 'application/octet-stream'));
                 header('Content-Disposition: attachment; filename="' . $name . '"');
-                header('Content-Length: ' . ($program['size'] + strlen($trailer)));
+                header('Content-Length: ' . (null !== $deb ? strlen($deb) : $program['size'] + strlen($trailer)));
                 header('Cache-Control: no-store');
                 header('X-Content-Type-Options: nosniff');
-                readfile($program['file']);
-                echo $trailer;
+                if (null !== $deb) {
+                    echo $deb;
+                } else {
+                    readfile($program['file']);
+                    echo $trailer;
+                }
                 exit;
             } catch (ValidationException $invalid) {
                 $error = $invalid->getMessage();

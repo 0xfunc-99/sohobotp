@@ -15,7 +15,7 @@ docker run --rm -v "$REPO":/src -w /src/agent -e GOFLAGS=-buildvcs=false \
     echo "== builds"
     mkdir -p dist
     VERSION=$AGENT_VERSION
-    for target in linux/amd64 linux/arm64 windows/amd64; do
+    for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
       os=${target%/*}; arch=${target#*/}; ext=""; [ "$os" = windows ] && ext=.exe
       CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
         -ldflags "-s -w -X multiotp-portal/agent/internal/inventory.Version=$VERSION -X multiotp-portal/agent/internal/release.PublicKey=$RELEASE_PUBLIC_KEY" \

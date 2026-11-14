@@ -27,9 +27,29 @@ final class AgentBundle
     public const MAGIC = 'SOHOBOTP-BUNDLE1';
     public const MAX_SETTINGS = 262144;
     public const PLATFORMS = [
-        'windows/amd64' => 'Windows (64-bit)',
+        'windows/amd64' => 'Windows (Intel/AMD, 64-bit)',
+        'windows/arm64' => 'Windows on ARM (64-bit)',
         'linux/amd64'   => 'Linux (Intel/AMD, 64-bit)',
         'linux/arm64'   => 'Linux (ARM 64-bit, Raspberry Pi)',
+    ];
+
+    /**
+     * What the "Add a computer" page offers: the program for each platform, and for Linux also a
+     * Debian/Ubuntu package (AgentDeb) with the same settings inside. key => [platform, format, label]
+     */
+    public const DOWNLOADS = [
+        'windows/amd64'     => ['windows/amd64', 'program', 'Windows (Intel/AMD)'],
+        'windows/arm64'     => ['windows/arm64', 'program', 'Windows on ARM'],
+        'linux/amd64/deb'   => ['linux/amd64', 'deb', 'Debian/Ubuntu package (Intel/AMD)'],
+        'linux/arm64/deb'   => ['linux/arm64', 'deb', 'Debian/Ubuntu package (ARM, Raspberry Pi)'],
+        'linux/amd64'       => ['linux/amd64', 'program', 'Linux program (Intel/AMD)'],
+        'linux/arm64'       => ['linux/arm64', 'program', 'Linux program (ARM, Raspberry Pi)'],
+    ];
+
+    /** Machine type of each platform: PE header (Windows), ELF e_machine (Linux). */
+    private const MACHINES = [
+        'windows/amd64' => 0x8664, 'windows/arm64' => 0xAA64,
+        'linux/amd64'   => 62,     'linux/arm64'   => 183,
     ];
     private const SHIPPED = '/usr/local/share/sohobotp/agent-programs';
 
@@ -61,7 +81,7 @@ final class AgentBundle
         $dirs = [self::programsDir() => 'added by an administrator', (getenv('MULTIOTP_PORTAL_AGENT_DIR') ?: self::SHIPPED) => 'shipped with the portal'];
         foreach ($dirs as $dir => $source) {
             $file = $dir . '/' . self::programName($os, $arch);
-            if (is_file($file) && is_readable($file) && null === self::programError($file, $os)) {
+            if (is_file($file) && is_readable($file) && null === self::programError($file, $os, $arch)) {
                 return ['file' => $file, 'source' => $source, 'version' => '', 'size' => (int) filesize($file)];
             }
         }
@@ -69,7 +89,7 @@ final class AgentBundle
     }
 
     /** Why a file is not an agent program for this system, or null. */
-    public static function programError(string $file, string $os): ?string
+    public static function programError(string $file, string $os, ?string $arch = null): ?string
     {
         $size = @filesize($file);
         if (false === $size || $size < 1_000_000 || $size > 100_000_000) {
@@ -86,10 +106,28 @@ final class AgentBundle
         if ('windows' === $os ? !str_starts_with($head, 'MZ') : "\x7fELF" !== $head) {
             return 'windows' === $os ? 'Not a Windows program (.exe).' : 'Not a Linux program.';
         }
+        if (null !== $arch && null !== ($machine = self::machine($file, $os)) && $machine !== (self::MACHINES["$os/$arch"] ?? -1)) {
+            $found = array_search($machine, self::MACHINES, true);
+            return 'This program is for ' . (false !== $found ? self::PLATFORMS[$found] : 'another processor') . ', not ' . (self::PLATFORMS["$os/$arch"] ?? "$os/$arch") . '.';
+        }
         if (self::MAGIC === $tail) {
             return 'This file is a downloaded agent with settings built in: add the plain agent program.';
         }
         return null;
+    }
+
+    /** Machine type in the program's header, or null when the header cannot be read. */
+    private static function machine(string $file, string $os): ?int
+    {
+        $head = (string) @file_get_contents($file, false, null, 0, 4096);
+        if ('windows' === $os) {
+            if (strlen($head) < 0x40) {
+                return null;
+            }
+            $pe = unpack('V', substr($head, 0x3C, 4))[1];
+            return $pe + 6 <= strlen($head) && "PE\0\0" === substr($head, $pe, 4) ? unpack('v', substr($head, $pe + 4, 2))[1] : null;
+        }
+        return strlen($head) >= 20 && "\x7fELF" === substr($head, 0, 4) && "\x01" === $head[5] ? unpack('v', substr($head, 18, 2))[1] : null;
     }
 
     /** Store a plain agent program (CLI agent-program-add). @return array{file: string, sha256: string, size: int} */
@@ -98,7 +136,7 @@ final class AgentBundle
         if (!isset(self::PLATFORMS["$os/$arch"])) {
             throw new ValidationException('Supported platforms: ' . implode(', ', array_keys(self::PLATFORMS)) . '.');
         }
-        if (!is_file($file) || null !== ($error = self::programError($file, $os))) {
+        if (!is_file($file) || null !== ($error = self::programError($file, $os, $arch))) {
             throw new ValidationException($error ?? 'File not found.');
         }
         $dir = self::programsDir();
