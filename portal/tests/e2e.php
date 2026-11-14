@@ -975,6 +975,47 @@ $winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] +
 $winPushed = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows');
 check('computer users: Windows config: svc-print without a code at sign-in; carol and svc-print without one in admin prompts',
     ['svc-print'] === ($winPushed['policy']['code_exempt'] ?? null) && ['example\\carol', 'svc-print'] === ($winPushed['policy']['code_exempt_admin'] ?? null), json_encode([$winPushed['policy']['code_exempt'] ?? null, $winPushed['policy']['code_exempt_admin'] ?? null]));
+
+// SohobOTP Sign-in installed by the agent: the policy names the installers, a=package hands them out
+check('sign-in packages: not in the policy while the group installs Sign-in by hand', !isset($winPushed['policy']['signin_packages']) && !isset($winPushed['policy']['vcredist']));
+$installers = Portal\SigninPackages::all();
+$x64Sha = $installers['signin/amd64']['sha256'] ?? '';
+$agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sha], $windows);
+check('sign-in packages: download refused while the group does not install Sign-in', 404 === $agentHttp->status && '' !== $x64Sha, (string) $agentHttp->status);
+$groupInput = static function (string $groupId, bool $auto): array {
+    $g = (new Portal\Endpoints())->group($groupId);
+    $form = ['name' => $g['name'], 'description' => $g['description']];
+    foreach (Portal\Endpoints::policyToInput($g['policy']) as $key => $value) {
+        $form[$key] = is_bool($value) ? ($value ? '1' : '') : $value;
+    }
+    $form['win_signin_auto'] = $auto ? '1' : '';
+    return array_filter($form, static fn ($v): bool => '' !== $v);
+};
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+check('sign-in packages: the switch is on the computer policy page, with the installers on this portal', str_contains($admin->body, 'name="win_signin_auto"')
+    && str_contains($admin->body, 'SohobOTP Sign-in (Windows on ARM) 1.0.2.0'));
+$admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, $groupInput($endpointGroupId, true));
+check('sign-in packages: "install automatically" saved', 303 === $admin->status && true === Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows']['signin_auto'], (string) $admin->status);
+$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+$autoPolicy = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows')['policy'] ?? [];
+check('sign-in packages: the signed policy names both installers by version, size and SHA-256 (no VC++ runtime added)',
+    ['amd64', 'arm64'] === array_keys((array) ($autoPolicy['signin_packages'] ?? [])) && '1.0.2.0' === ($autoPolicy['signin_packages']['arm64']['version'] ?? '')
+    && $x64Sha === ($autoPolicy['signin_packages']['amd64']['sha256'] ?? '') && 300008 === ($autoPolicy['signin_packages']['amd64']['size'] ?? 0) && !isset($autoPolicy['vcredist']),
+    json_encode($autoPolicy['signin_packages'] ?? null));
+$agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sha], $windows);
+check('sign-in packages: the agent downloads exactly the named installer', 200 === $agentHttp->status && $agentHttp->body === file_get_contents($installers['signin/amd64']['file']), (string) $agentHttp->status);
+$agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => str_repeat('0', 64)], $windows);
+check('sign-in packages: another SHA-256 refused (only what the policy names)', 404 === $agentHttp->status);
+$agentCall('package', ['kind' => 'vcredist', 'arch' => 'amd64', 'sha256' => $x64Sha], $windows);
+check('sign-in packages: an installer the portal does not have refused', 404 === $agentHttp->status);
+$agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sha]);
+check('sign-in packages: unsigned request refused', in_array($agentHttp->status, [400, 401], true) && !str_contains($agentHttp->body, "\xD0\xCF\x11\xE0"), (string) $agentHttp->status);
+$agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sha], $linux);
+check('sign-in packages: not for a Linux machine', in_array($agentHttp->status, [403, 404], true), (string) $agentHttp->status);
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+$admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, $groupInput($endpointGroupId, false));
+check('sign-in packages: switched off again', false === Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows']['signin_auto']);
+
 $winPage = (string) $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id)->body;
 check('computer users: no reminder while the policy asks for a code in admin prompts', str_contains($winPage, 'Code for admin actions') && !str_contains($winPage, 'Credential prompts on this machine</strong> turned off'));
 $admin->get('/portal/index.php?r=endpoint&id=' . $waiting->id);

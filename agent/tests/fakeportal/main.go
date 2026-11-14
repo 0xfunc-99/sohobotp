@@ -13,6 +13,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -53,21 +54,33 @@ type portal struct {
 	token     string
 	cpSecret  string
 	radiusSec string
-	mu        sync.Mutex
-	endpoints map[string]*endpoint
-	nonces    map[string]bool
+	// computer policy "install SohobOTP Sign-in automatically": the real installer (x64)
+	signinMSI     []byte
+	signinVersion string
+	mu            sync.Mutex
+	endpoints     map[string]*endpoint
+	nonces        map[string]bool
 }
 
 func main() {
 	dir := flag.String("dir", ".", "output folder")
 	addr := flag.String("addr", "127.0.0.1:8443", "listen address")
+	signinMSI := flag.String("signin-msi", "", "SohobOTP Sign-in installer the policy tells the agent to install")
+	signinVersion := flag.String("signin-version", "", "its version (ProductVersion)")
 	flag.Parse()
 	if err := os.MkdirAll(*dir, 0o755); err != nil {
 		log.Fatal(err)
 	}
 	_, key, _ := ed25519.GenerateKey(rand.Reader)
 	p := &portal{dir: *dir, addr: *addr, key: key, endpoints: map[string]*endpoint{}, nonces: map[string]bool{},
-		token: randHex(6) + "." + randB64url(24), cpSecret: randHex(24), radiusSec: "Radius-" + randHex(10)}
+		token: randHex(6) + "." + randB64url(24), cpSecret: randHex(24), radiusSec: "Radius-" + randHex(10), signinVersion: *signinVersion}
+	if *signinMSI != "" {
+		data, err := os.ReadFile(*signinMSI)
+		if err != nil {
+			log.Fatal(err)
+		}
+		p.signinMSI = data
+	}
 	cert, caPEM := makeCerts()
 	write(p.dir, "ca.pem", caPEM)
 	write(p.dir, "token.txt", []byte(p.token))
@@ -84,6 +97,8 @@ func (p *portal) serve(w http.ResponseWriter, r *http.Request) {
 		p.enroll(w, body)
 	case "checkin":
 		p.checkin(w, r, body)
+	case "package":
+		p.pkg(w, r, body)
 	default:
 		fail(w, 404, "bad_request")
 	}
@@ -126,7 +141,8 @@ func (p *portal) enroll(w http.ResponseWriter, body []byte) {
 	reply(w, protocol.EnrollReply{EndpointID: id, PortalKey: b64.EncodeToString(p.key.Public().(ed25519.PublicKey)), CheckinInterval: 30})
 }
 
-func (p *portal) checkin(w http.ResponseWriter, r *http.Request, body []byte) {
+// verify checks a signed agent request; nil (and the answer sent) when it is refused.
+func (p *portal) verify(w http.ResponseWriter, r *http.Request, body []byte) (string, *endpoint) {
 	id := r.Header.Get("X-Agent-Id")
 	p.mu.Lock()
 	ep := p.endpoints[id]
@@ -139,6 +155,31 @@ func (p *portal) checkin(w http.ResponseWriter, r *http.Request, body []byte) {
 	if ep == nil || seen || time.Since(time.Unix(ts, 0)).Abs() > 5*time.Minute ||
 		!ed25519.Verify(ep.sign, protocol.RequestMessage(r.Method, r.URL.RequestURI(), r.Header.Get("X-Agent-Time"), nonce, body), sig) {
 		fail(w, 401, "bad_signature")
+		return "", nil
+	}
+	return id, ep
+}
+
+// pkg hands out the Sign-in installer the policy names (a=package).
+func (p *portal) pkg(w http.ResponseWriter, r *http.Request, body []byte) {
+	if _, ep := p.verify(w, r, body); ep == nil {
+		return
+	}
+	var req protocol.PackageRequest
+	_ = json.Unmarshal(body, &req)
+	sum := sha256.Sum256(p.signinMSI)
+	if p.signinMSI == nil || req.Kind != "signin" || req.SHA256 != hex.EncodeToString(sum[:]) {
+		fail(w, 404, "bad_request")
+		return
+	}
+	log.Printf("Sign-in installer downloaded (%s)", req.Arch)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	_, _ = w.Write(p.signinMSI)
+}
+
+func (p *portal) checkin(w http.ResponseWriter, r *http.Request, body []byte) {
+	id, ep := p.verify(w, r, body)
+	if ep == nil {
 		return
 	}
 	var req protocol.CheckinRequest
@@ -164,6 +205,13 @@ func (p *portal) config(id string, ep *endpoint) *protocol.Envelope {
 			ServerURL: "https://" + p.addr + "/portal/cp.php?e=" + id, ServerTimeout: 5,
 			CpusLogon: "0e", CpusUnlock: "0d", CpusCredui: "3e", ExcludedAccount: `.\breakglass`,
 			CacheEnabled: true, TimeoutUnlock: 10, TimeoutReconnect: 15, CodeExempt: []string{"svc-print"}, CodeExemptAdmin: []string{"svc-print", "helpdesk"}, LoginText: "SohobOTP", OTPText: "SohobOTP code",
+		}
+		if p.signinMSI != nil {
+			sum := sha256.Sum256(p.signinMSI)
+			// the CI runner is x64; the real portal names one installer per processor
+			wp := policy.(protocol.WindowsPolicy)
+			wp.SigninPackages = map[string]protocol.Package{"amd64": {Version: p.signinVersion, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(p.signinMSI))}}
+			policy = wp
 		}
 		secrets["cp_shared_secret"] = seal(p.cpSecret)
 	} else {

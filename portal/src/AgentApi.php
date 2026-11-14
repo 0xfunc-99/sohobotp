@@ -75,6 +75,14 @@ final class AgentApi
                     header('Content-Length: ' . filesize($file));
                     readfile($file);
                     exit;
+                case 'package':
+                    // SohobOTP Sign-in / Visual C++ runtime the agent installs (the policy names them)
+                    $id = $endpoints->authenticate(self::headers(), 'POST', (string) ($_SERVER['REQUEST_URI'] ?? ''), $body);
+                    $file = $endpoints->packageFile($id, $request);
+                    header('Content-Type: application/octet-stream');
+                    header('Content-Length: ' . filesize($file));
+                    readfile($file);
+                    exit;
                 default:
                     throw new AgentError('bad_request', 404, 'Unknown action.');
             }

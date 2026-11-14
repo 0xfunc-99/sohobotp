@@ -207,6 +207,49 @@ if ($SignInMsi -ne "") {
   Check "SohobOTP Sign-in uninstalls again (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
 }
 
+if ($SignInMsi -ne "") {
+  Write-Host "== SohobOTP Sign-in installed by the agent (computer policy: install automatically)"
+  # the installer's own version (ProductVersion), read with Windows Installer
+  $wi = New-Object -ComObject WindowsInstaller.Installer
+  $db = $wi.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $wi, @($SignInMsi, 0))
+  $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @("SELECT Value FROM Property WHERE Property='ProductVersion'"))
+  $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+  $rec = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+  $msiVersion = $rec.GetType().InvokeMember("StringData", "GetProperty", $null, $rec, 1)
+  $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
+  foreach ($o in @($rec, $view, $db, $wi)) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($o) }
+  [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+  Check "installer version read ($msiVersion)" ($msiVersion -match '^\d+(\.\d+){1,3}$')
+  $signinEntry = { Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "SohobOTP Sign-in*" } | Select-Object -First 1 }
+  Check "starting point: SohobOTP Sign-in not installed" ($null -eq (& $signinEntry))
+  Remove-Item -Recurse -Force $cpKey -ErrorAction SilentlyContinue
+  $auto = Start-Process -FilePath $FakePortal -ArgumentList "--dir `"$work\auto`" --addr 127.0.0.1:8445 --signin-msi `"$SignInMsi`" --signin-version $msiVersion" -PassThru -WindowStyle Hidden `
+    -RedirectStandardError "$work\fakeportal-auto.log"
+  Wait-Until { Test-Path "$work\auto\pin.txt" } 30 | Out-Null
+  $autoToken = (Get-Content "$work\auto\token.txt" -Raw).Trim(); $autoPin = (Get-Content "$work\auto\pin.txt" -Raw).Trim()
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$AgentMsi`" /qn PORTAL=https://127.0.0.1:8445 TOKEN=$autoToken PIN=$autoPin CAFILE=`"$work\auto\ca.pem`" /l*v `"$work\agent-auto.log`""
+  Check "agent MSI installs (only the agent) (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+  $state3 = { if (Test-Path "$work\auto\state.json") { Get-Content "$work\auto\state.json" -Raw | ConvertFrom-Json } }
+  Check "the agent installs SohobOTP Sign-in by itself and applies the configuration" (Wait-Until {
+    $s = & $state3
+    return ($null -ne $s -and $s.applied.version -eq 1 -and $s.applied.status -eq "applied")
+  } 300) "$((& $state3) | ConvertTo-Json -Compress -Depth 4)"
+  $entry = & $signinEntry
+  Check "SohobOTP Sign-in $msiVersion installed" ($null -ne $entry -and $entry.DisplayVersion -eq $msiVersion) "$($entry.DisplayName) $($entry.DisplayVersion)"
+  Check "registered on the sign-in screen" (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\$clsid")
+  $autoExpected = Get-Content "$work\auto\expected.json" -Raw | ConvertFrom-Json
+  Check "its settings written by the agent right after (portal address)" ((Get-ItemProperty $cpKey -ErrorAction SilentlyContinue).multiOTPServers -eq $autoExpected.multiOTPServers)
+  $agentLog = Get-Content "$env:ProgramData\SohobOTP\agent\agent.log" -Raw -ErrorAction SilentlyContinue
+  Check "agent log: installing SohobOTP Sign-in $msiVersion" ($agentLog -match "installing SohobOTP Sign-in $([regex]::Escape($msiVersion))") (($agentLog -split "`n" | Select-Object -Last 5) -join " | ")
+  Check "the downloaded installer is not left on the machine" (-not (Test-Path "$env:ProgramData\SohobOTP\agent\packages"))
+  Check "the portal sees the installed version at the next check-in" (Wait-Until { $s = & $state3; return ($null -ne $s -and $s.inventory.component.version -eq $msiVersion) } 120)
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$AgentMsi`" /qn /l*v `"$work\agent-uninstall3.log`""
+  Check "agent MSI uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$SignInMsi`" /qn"
+  Check "SohobOTP Sign-in uninstalls (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
+  Stop-Process -Id $auto.Id -Force -ErrorAction SilentlyContinue
+}
+
 Stop-Process -Id $portal.Id -Force -ErrorAction SilentlyContinue
 Write-Host ""
 if ($script:failures -eq 0) { Write-Host "All Windows checks passed." } else { Write-Host "$($script:failures) Windows check(s) failed." }

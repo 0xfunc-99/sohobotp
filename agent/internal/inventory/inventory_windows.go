@@ -27,6 +27,9 @@ func platform(inv *protocol.Inventory) {
 	inv.Component = protocol.Component{Name: "sohobotp-signin", Version: credentialProviderVersion()}
 }
 
+// SigninVersion is the installed SohobOTP Sign-in version ("" when not installed).
+func SigninVersion() string { return credentialProviderVersion() }
+
 // credentialProviderVersion reads the installed SohobOTP Sign-in version
 // from the uninstall entries (64-bit view).
 func credentialProviderVersion() string {

@@ -49,6 +49,9 @@ func Load() (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	setPackageSource(func(req protocol.PackageRequest, max int64) ([]byte, error) {
+		return c.Package(st.EndpointID, keys.Sign, req, max)
+	})
 	return &Agent{St: st, Keys: keys, Client: c, Applier: NewApplier(), Log: Logf, now: time.Now}, nil
 }
 

@@ -26,7 +26,7 @@
     <dt>Domain</dt><dd><?= e($inv['domain'] ?: '—') ?></dd>
     <dt>IP addresses</dt><dd><?= e([] === $inv['ips'] ? '—' : implode(', ', $inv['ips'])) ?></dd>
     <dt>Agent version</dt><dd><?= e($inv['agent_version'] ?: '—') ?></dd>
-    <dt>Login component</dt><dd><?= e(trim($inv['component']['name'] . ' ' . $inv['component']['version']) ?: '—') ?></dd>
+    <dt>Login component</dt><dd><?= 'windows' === ($endpoint['os'] ?? '') ? e('' !== (string) $inv['component']['version'] ? 'SohobOTP Sign-in ' . $inv['component']['version'] : 'SohobOTP Sign-in not installed') : e(trim($inv['component']['name'] . ' ' . $inv['component']['version']) ?: '—') ?></dd>
     <dt>Endpoint id</dt><dd><code><?= e($endpoint['id']) ?></code></dd>
   </dl>
 </section>

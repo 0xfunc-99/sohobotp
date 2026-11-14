@@ -118,6 +118,13 @@ func (c *Client) Download(endpointID string, sign ed25519.PrivateKey, req protoc
 	return data, err
 }
 
+// Package fetches an installer the configuration names (signed request). The caller verifies it.
+func (c *Client) Package(endpointID string, sign ed25519.PrivateKey, req protocol.PackageRequest, max int64) ([]byte, error) {
+	var data []byte
+	err := c.do("package", req, sign, endpointID, max, func(raw []byte) error { data = raw; return nil })
+	return data, err
+}
+
 func (c *Client) post(action string, payload any, sign ed25519.PrivateKey, endpointID string, out any) error {
 	return c.do(action, payload, sign, endpointID, 1<<20, func(raw []byte) error {
 		if err := json.Unmarshal(raw, out); err != nil {

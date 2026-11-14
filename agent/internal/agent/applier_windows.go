@@ -24,14 +24,23 @@ func (windowsApplier) Apply(cfg *protocol.Config) (string, error) {
 	if err := json.Unmarshal(cfg.Policy, &p); err != nil {
 		return "", fmt.Errorf("Windows policy not readable: %w", err)
 	}
+	// SohobOTP Sign-in first (computer policy "install automatically"), then its settings
+	installed, err := ensureSignin(&p)
+	if err != nil {
+		return "", err
+	}
 	changed, err := winapply.Apply(winapply.RealRegistry{}, winapply.RealSecretStore{}, &p, cfg.Secrets["cp_shared_secret"], false)
 	if err != nil {
 		return "", err
 	}
-	if len(changed) == 0 {
-		return "nothing to change", nil
+	summary := "nothing to change"
+	if len(changed) > 0 {
+		summary = "Credential Provider values set: " + strings.Join(changed, ", ")
 	}
-	return "Credential Provider values set: " + strings.Join(changed, ", "), nil
+	if installed != "" {
+		summary = installed + "; " + summary
+	}
+	return summary, nil
 }
 
 // DryRun is Linux-only.

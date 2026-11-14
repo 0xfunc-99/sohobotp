@@ -206,6 +206,25 @@ The installer is then `WixInstall\multiOTPCredentialProviderInstaller\bin\x64\Re
 Create the break-glass account (`net user breakglass <password> /add` as administrator), keep a
 second session open while testing.
 
+**Easiest: let the agent install SohobOTP Sign-in.** Once, on the portal server, add the
+installers from this kit (and Microsoft's Visual C++ runtime, from
+https://aka.ms/vs/17/release/vc_redist.x64.exe):
+
+```bash
+A="sudo docker exec sohobotp php /usr/local/bin/multiotp/portal/bin/portal-admin.php"
+sudo docker cp windows-signin/SohobOTPSignIn.msi sohobotp:/tmp/ && $A signin-package-add --file=/tmp/SohobOTPSignIn.msi --kind=signin/amd64 --version=1.0.2.0
+sudo docker cp windows-signin/arm64/SohobOTPSignIn_arm64.msi sohobotp:/tmp/ && $A signin-package-add --file=/tmp/SohobOTPSignIn_arm64.msi --kind=signin/arm64 --version=1.0.2.0
+sudo docker cp vc_redist.x64.exe sohobotp:/tmp/ && $A signin-package-add --file=/tmp/vc_redist.x64.exe --kind=vcredist --version=14
+```
+
+Then tick **Install and update SohobOTP Sign-in automatically** in the computer policy. A
+double-click on the agent from **Add a computer** now installs the agent, the Visual C++ runtime
+(if missing) and SohobOTP Sign-in for the computer's processor (Windows on ARM included), and
+writes its settings. The agent checks each installer against the SHA-256 in the signed policy.
+Adding a newer Sign-in later (`--version=1.0.3.0`) updates those computers at their next
+check-in; an older one is never installed over a newer one. The computer's page shows the
+installed version. Steps 1 and 2 below are then not needed.
+
 1. Install **Microsoft Visual C++ Redistributable 2015–2022 x64**
    (https://aka.ms/vs/17/release/vc_redist.x64.exe).
 2. Install **SohobOTP Sign-in**: run `windows-signin\SohobOTPSignIn.msi` from the kit. Its own settings pages

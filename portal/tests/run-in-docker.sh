@@ -73,6 +73,14 @@ docker run --rm --network "$RUN" -v "$REPO":/src:ro multiotp-portal-php sh -euc 
   if php portal/bin/portal-admin.php agent-program-add --file=/tmp/fake-agent --os=linux --arch=arm64 2>&1 | grep -q "for Linux (Intel/AMD"; then echo "ok   CLI: x86-64 program refused as ARM64"; else echo "FAIL CLI stored an x86-64 program as ARM64"; exit 1; fi
   php portal/bin/portal-admin.php agent-program-add --file=/tmp/fake-agent-win-arm64 --os=windows --arch=arm64 | grep -q "Agent program stored" && echo "ok   CLI: Windows on ARM program added"
   if php portal/bin/portal-admin.php agent-program-add --file=/tmp/fake-agent-win-arm64 --os=windows --arch=amd64 >/dev/null 2>&1; then echo "FAIL CLI stored an ARM64 program as x64"; exit 1; else echo "ok   CLI: ARM64 Windows program refused as x64"; fi
+  # stand-in SohobOTP Sign-in installers (Windows Installer header) for "install Sign-in automatically"
+  { printf "\320\317\021\340\241\261\032\341"; head -c 300000 /dev/zero; } > /tmp/fake-signin.msi
+  { printf "\320\317\021\340\241\261\032\341"; head -c 310000 /dev/zero; } > /tmp/fake-signin-arm64.msi
+  php portal/bin/portal-admin.php signin-package-add --file=/tmp/fake-signin.msi --kind=signin/amd64 --version=1.0.2.0 | grep -q "Installer stored: SohobOTP Sign-in (Windows Intel/AMD) 1.0.2.0" && echo "ok   CLI: Sign-in installer added (x64)"
+  php portal/bin/portal-admin.php signin-package-add --file=/tmp/fake-signin-arm64.msi --kind=signin/arm64 --version=1.0.2.0 | grep -q "Installer stored" && echo "ok   CLI: Sign-in installer added (ARM64)"
+  if php portal/bin/portal-admin.php signin-package-add --file=/tmp/fake-agent --kind=signin/amd64 --version=1.0.2.0 >/dev/null 2>&1; then echo "FAIL CLI stored a program as a Sign-in installer"; exit 1; else echo "ok   CLI: a file that is not an .msi refused"; fi
+  if php portal/bin/portal-admin.php signin-package-add --file=/tmp/fake-signin.msi --kind=signin/amd64 --version="1.0 /qn" >/dev/null 2>&1; then echo "FAIL CLI accepted a version that is not numbers"; exit 1; else echo "ok   CLI: a version that is not numbers refused"; fi
+  php portal/bin/portal-admin.php signin-package-list | grep -q "^signin/arm64 *1.0.2.0" && echo "ok   CLI: installers listed"
   TEMP=$(php portal/bin/portal-admin.php create --username=root --role=superadmin | sed -n "s/^Temporary password.*: //p")
   MULTIOTP_PORTAL_ALLOW_HTTP=1 php -d display_errors=stderr -S 127.0.0.1:8080 -t /app >/tmp/server.log 2>&1 &
   php portal/bin/worker.php --loop >/tmp/worker.log 2>&1 &

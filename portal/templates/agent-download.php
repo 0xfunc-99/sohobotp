@@ -50,7 +50,7 @@
 <section class="panel">
   <h2>On the machine</h2>
   <ul>
-    <li><strong>Windows:</strong> double-click the downloaded file and allow it to run as administrator, or run <code>sohobotp-agent-….exe install</code> from an administrator prompt. Install SohobOTP Sign-in as well for the code on the sign-in screen (Windows on ARM: its ARM64 installer).</li>
+    <li><strong>Windows:</strong> double-click the downloaded file and allow it to run as administrator, or run <code>sohobotp-agent-….exe install</code> from an administrator prompt. For the code on the sign-in screen it also needs SohobOTP Sign-in: with <strong>Install and update SohobOTP Sign-in automatically</strong> in the computer policy, the agent installs it by itself; otherwise install it by hand (Windows on ARM: its ARM64 installer).</li>
     <li><strong>Debian, Ubuntu, Raspberry Pi OS:</strong> <code>sudo apt install ./sohobotp-agent-…_amd64.deb</code> (or <code>_arm64.deb</code>). It enrols and starts the agent, then deletes the token from the machine. If enrolment fails (network, expired token), fix it and run <code>sudo dpkg --configure -a</code>. <code>sudo apt remove sohobotp-agent</code> undoes the PAM changes and removes the agent.</li>
     <li><strong>Other Linux:</strong> <code>chmod +x sohobotp-agent-… &amp;&amp; sudo ./sohobotp-agent-… install</code></li>
   </ul>

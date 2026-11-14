@@ -171,6 +171,25 @@ type WindowsPolicy struct {
 	TwoStepSendPassword bool     `json:"two_step_send_password"`
 	LoginText           string   `json:"login_text"`
 	OTPText             string   `json:"otp_text"`
+	// Computer policy "Install and update SohobOTP Sign-in automatically": the installers the
+	// agent downloads from the portal (a=package) for the machine's processor, checked against
+	// these SHA-256 values (this policy is signed by the portal key). Empty: install by hand.
+	SigninPackages map[string]Package `json:"signin_packages,omitempty"` // amd64 | arm64
+	VCRedist       *Package           `json:"vcredist,omitempty"`        // Visual C++ runtime x64 (Sign-in's PHP engine)
+}
+
+// Package is an installer the agent downloads from the portal and checks before running it.
+type Package struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"` // hex
+	Size    int64  `json:"size"`
+}
+
+// PackageRequest is the body of a=package (signed): which installer to download.
+type PackageRequest struct {
+	Kind   string `json:"kind"` // signin | vcredist
+	Arch   string `json:"arch"` // signin: amd64 | arm64
+	SHA256 string `json:"sha256"`
 }
 
 // EnrollMessage is the exact byte string signed by the enrolment proof.

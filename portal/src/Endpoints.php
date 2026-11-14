@@ -53,6 +53,7 @@ final class Endpoints
             'timeout_unlock'   => 0,
             'timeout_reconnect' => 0, // minutes: Remote Desktop reconnect from the same client without a new code
             'enrol_at_signin'  => false, // users without an authenticator set it up on the sign-in screen (CpEnrol)
+            'signin_auto'      => false, // the agent installs and updates SohobOTP Sign-in (SigninPackages)
             'without2fa'       => false,
             'two_step_hide_otp'      => false,
             'two_step_send_password' => false,
@@ -292,6 +293,7 @@ final class Endpoints
                 'timeout_unlock'   => $int('win_timeout_unlock', 0, 1440, 'Unlock grace period'),
                 'timeout_reconnect' => array_key_exists('win_timeout_reconnect', $input) ? $int('win_timeout_reconnect', 0, 480, 'Remote Desktop reconnect grace period') : 0,
                 'enrol_at_signin'  => $flag('win_enrol_at_signin'),
+                'signin_auto'      => $flag('win_signin_auto'),
                 'without2fa'       => $flag('win_without2fa'),
                 'two_step_hide_otp'      => $flag('win_two_step_hide_otp'),
                 'two_step_send_password' => $flag('win_two_step_send_password'),
@@ -1171,7 +1173,29 @@ final class Endpoints
             'two_step_send_password' => $w['two_step_send_password'],
             'login_text' => $w['login_text'],
             'otp_text' => $w['otp_text'],
-        ], ['cp_shared_secret' => Crypto::decrypt($endpoint['cp_secret'] ?? self::endpointStore($endpoint['id'])->read()['cp_secret'])], ''];
+        ] + (!empty($w['signin_auto']) ? SigninPackages::policy() : []), ['cp_shared_secret' => Crypto::decrypt($endpoint['cp_secret'] ?? self::endpointStore($endpoint['id'])->read()['cp_secret'])], ''];
+    }
+
+    /**
+     * An installer the endpoint's policy names (a=package): only for an active Windows endpoint
+     * whose group installs Sign-in automatically, and only the exact file (SHA-256) it names.
+     */
+    public function packageFile(string $id, array $request): string
+    {
+        $endpoint = $this->endpoint($id) ?? throw new AgentError('unknown_endpoint', 401, 'Unknown endpoint.');
+        if ('active' !== $endpoint['status']) {
+            throw new AgentError('disabled', 403, 'This endpoint is not active.');
+        }
+        $group = $this->group((string) $endpoint['group_id']);
+        $w = null !== $group ? self::effectivePolicy($group['policy'])['windows'] : [];
+        $kind = (string) ($request['kind'] ?? '');
+        $kind = 'signin' === $kind ? 'signin/' . (string) ($request['arch'] ?? '') : $kind;
+        $file = 'windows' === $endpoint['os'] && !empty($w['signin_auto']) && isset(SigninPackages::KINDS[$kind])
+            ? SigninPackages::file($kind, (string) ($request['sha256'] ?? '')) : null;
+        if (null === $file) {
+            throw new AgentError('bad_request', 404, 'No such installer for this machine.');
+        }
+        return $file;
     }
 
     /** The endpoint's Credential Provider secret in clear (CP gateway only). */
