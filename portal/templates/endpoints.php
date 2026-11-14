@@ -13,7 +13,7 @@
   <div class="toolbar">
     <h2>Computers</h2>
     <input type="search" class="search" placeholder="Search endpoints" data-filter-table="endpoints-table" aria-label="Search endpoints">
-    <a class="button" href="<?= e(route('endpoint-groups')) ?>">Computer policies</a><?php if ($canManage): ?> <a class="button" href="<?= e(route('endpoint-enrol')) ?>">Enrolment tokens</a><?php endif; ?>
+    <a class="button" href="<?= e(route('endpoint-groups')) ?>">Computer policies</a><?php if ($canManage): ?> <a class="button" href="<?= e(route('endpoint-enrol')) ?>">Enrolment tokens</a> <a class="button" href="<?= e(route('signin-packages')) ?>">Windows sign-in installers</a><?php endif; ?>
     <?php if ($canManage): ?><a class="button-primary" href="<?= e(route('agent-download')) ?>">+ Add a computer</a><?php endif; ?>
   </div>
   <form method="get" action="index.php" class="filters">

@@ -20,7 +20,7 @@
   }
 
   // Which sidebar entry the current page belongs to (detail and form pages highlight their list).
-  $navRoute = ['password' => 'account', 'licences' => 'account', 'jobs' => 'directory', 'self-service' => 'users'][$current] ?? null;
+  $navRoute = ['password' => 'account', 'licences' => 'account', 'jobs' => 'directory', 'self-service' => 'users', 'signin-packages' => 'endpoints'][$current] ?? null;
   if ('job' === $current) {
       $jobType = (string) ($job['type'] ?? '');
       $navRoute = match (true) {

@@ -79,9 +79,33 @@ final class SigninPackages
         return null !== $p && hash_equals($p['sha256'], strtolower($sha256)) ? $p['file'] : null;
     }
 
+    /** FileVersion from a Windows program's version resource (vc_redist.x64.exe), or ''. */
+    public static function fileVersion(string $file): string
+    {
+        $data = (string) @file_get_contents($file, false, null, 0, 64 * 1024 * 1024);
+        $key = mb_convert_encoding("FileVersion\0", 'UTF-16LE', 'UTF-8');
+        $at = strrpos($data, $key);
+        if (false === $at) {
+            return '';
+        }
+        $at += strlen($key);
+        while ($at + 1 < strlen($data) && "\0\0" === substr($data, $at, 2)) {
+            $at += 2; // padding to the value
+        }
+        $value = '';
+        for (; $at + 1 < strlen($data) && "\0\0" !== substr($data, $at, 2) && strlen($value) < 40; $at += 2) {
+            $value .= substr($data, $at, 2);
+        }
+        $version = trim((string) mb_convert_encoding($value, 'UTF-8', 'UTF-16LE'));
+        return preg_match('/^\d{1,5}(\.\d{1,5}){1,3}$/', $version) ? $version : '';
+    }
+
     /** @return array{kind: string, version: string, sha256: string, size: int} */
     public static function add(string $file, string $kind, string $version): array
     {
+        if ('' === $version && 'vcredist' === $kind) {
+            $version = self::fileVersion($file); // Microsoft's installer carries its version
+        }
         if (!isset(self::KINDS[$kind])) {
             throw new ValidationException('Kinds: ' . implode(', ', array_keys(self::KINDS)) . '.');
         }

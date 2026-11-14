@@ -53,6 +53,20 @@ final class Browser
         return $this->request('POST', $path, http_build_query($fields), $extraHeaders + ['Content-Type' => 'application/x-www-form-urlencoded']);
     }
 
+    /** multipart/form-data POST with one file (and the CSRF token) */
+    public function postFile(string $path, array $fields, string $fileField, string $file, string $fileName): self
+    {
+        $fields['_csrf'] ??= $this->csrf();
+        $boundary = '----e2e' . bin2hex(random_bytes(8));
+        $body = '';
+        foreach ($fields as $name => $value) {
+            $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n";
+        }
+        $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$fileField\"; filename=\"$fileName\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            . file_get_contents($file) . "\r\n--$boundary--\r\n";
+        return $this->request('POST', $path, $body, ['Content-Type' => 'multipart/form-data; boundary=' . $boundary]);
+    }
+
     public function raw(string $method, string $path, ?string $body, array $headers): self
     {
         return $this->request($method, $path, $body, $headers);
@@ -1012,6 +1026,24 @@ $agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sh
 check('sign-in packages: unsigned request refused', in_array($agentHttp->status, [400, 401], true) && !str_contains($agentHttp->body, "\xD0\xCF\x11\xE0"), (string) $agentHttp->status);
 $agentCall('package', ['kind' => 'signin', 'arch' => 'amd64', 'sha256' => $x64Sha], $linux);
 check('sign-in packages: not for a Linux machine', in_array($agentHttp->status, [403, 404], true), (string) $agentHttp->status);
+// the "Windows sign-in installers" page: what is on the portal, where it is used, upload
+$admin->get('/portal/index.php?r=signin-packages');
+check('installers page: lists the installers and the computers by Sign-in version, linked from Computers', 200 === $admin->status
+    && str_contains($admin->body, 'SohobOTP Sign-in (Windows on ARM)') && str_contains($admin->body, '1.0.2.0') && str_contains($admin->body, 'Installed automatically for the computers in')
+    && str_contains($admin->body, '5.10.4.1') && str_contains((string) $admin->get('/portal/index.php?r=endpoints')->body, 'r=signin-packages'));
+$admin->get('/portal/index.php?r=signin-packages');
+$upload = tempnam(sys_get_temp_dir(), 'msi');
+file_put_contents($upload, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" . str_repeat("\x01", 320000));
+$admin->postFile('/portal/index.php?r=signin-packages', ['kind' => 'signin/amd64', 'version' => '1.0.3.0'], 'installer', $upload, 'SohobOTPSignIn.msi');
+check('installers page: upload a newer Sign-in from the browser', 303 === $admin->status && '1.0.3.0' === (Portal\SigninPackages::all()['signin/amd64']['version'] ?? ''), (string) $admin->status);
+$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+check('installers page: the computers are offered the newer one at their next check-in', '1.0.3.0' === ($windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows')['policy']['signin_packages']['amd64']['version'] ?? ''));
+$admin->get('/portal/index.php?r=signin-packages');
+$admin->postFile('/portal/index.php?r=signin-packages', ['kind' => 'signin/amd64', 'version' => '1.0 /qn'], 'installer', $upload, 'SohobOTPSignIn.msi');
+check('installers page: a version that is not numbers refused', 400 === $admin->status && str_contains($admin->body, 'numbers and dots'));
+$helper->get('/portal/index.php?r=signin-packages');
+check('installers page: not for the help desk role', !str_contains($helper->body, 'name="installer"'));
+unlink($upload);
 $admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
 $admin->post('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId, $groupInput($endpointGroupId, false));
 check('sign-in packages: switched off again', false === Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows']['signin_auto']);

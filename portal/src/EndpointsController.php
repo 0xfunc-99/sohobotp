@@ -390,6 +390,53 @@ final class EndpointsController extends Controller
         ]);
     }
 
+    /**
+     * "Windows sign-in installers": what the agent installs by itself (computer policy "Install
+     * and update SohobOTP Sign-in automatically"), which computers have which Sign-in version,
+     * and an upload form (the same checks as portal-admin.php signin-package-add).
+     */
+    public function signinPackages(): void
+    {
+        $this->requirePermission('endpoints.manage');
+        $error = null;
+        if ($this->isPost()) {
+            $kind = $this->post('kind', 32);
+            $version = $this->post('version', 32);
+            $file = $_FILES['installer'] ?? null;
+            try {
+                if (!is_array($file) || UPLOAD_ERR_OK !== ($file['error'] ?? UPLOAD_ERR_NO_FILE) || !is_uploaded_file((string) $file['tmp_name'])) {
+                    throw new ValidationException(is_array($file) && in_array($file['error'] ?? 0, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+                        ? 'The file is too large for this server.' : 'Choose the installer file.');
+                }
+                $added = SigninPackages::add((string) $file['tmp_name'], $kind, $version);
+                $this->audit->record('signin.package_add', 'success', $added['kind'], ['version' => $added['version'], 'sha256' => $added['sha256'], 'size' => $added['size'], 'via' => 'portal']);
+                Session::flash('success', SigninPackages::KINDS[$added['kind']]['label'] . ' ' . $added['version'] . ' added. Computers whose policy installs Sign-in automatically get it at their next check-in.');
+                $this->redirect('signin-packages');
+            } catch (ValidationException $invalid) {
+                $error = $invalid->getMessage();
+                http_response_code(400);
+            }
+        }
+        $endpoints = new Endpoints();
+        $versions = [];
+        foreach ($endpoints->endpoints() as $e) {
+            if ('windows' === $e['os'] && null !== $e['last_seen']) {
+                $v = (string) ($e['inventory']['component']['version'] ?? '');
+                $versions['' === $v ? 'not installed' : $v] = ($versions['' === $v ? 'not installed' : $v] ?? 0) + 1;
+            }
+        }
+        uksort($versions, static fn (string $a, string $b): int => strnatcmp($b, $a));
+        $autoGroups = array_values(array_filter($endpoints->groups(), static fn (array $g): bool => !empty(Endpoints::effectivePolicy($g['policy'])['windows']['signin_auto'])));
+        $this->view->render('signin-packages', [
+            'title' => 'Windows sign-in installers',
+            'packages' => SigninPackages::all(),
+            'versions' => $versions,
+            'autoGroups' => $autoGroups,
+            'groups' => $endpoints->groups(),
+            'error' => $error,
+        ]);
+    }
+
     /** Reason an endpoint needs the administrator's attention, or null. */
     private static function attention(array $endpoint): ?string
     {
