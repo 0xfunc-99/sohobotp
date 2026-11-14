@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: SohobOTP Sign-in uses one provider id everywhere (code, installer, agent)
+        run: python3 windows-signin/check-ids.py
       - name: Agent tests and builds (Linux and Windows binaries)
         run: sh agent/tests/run-in-docker.sh
       - name: Agent MSI

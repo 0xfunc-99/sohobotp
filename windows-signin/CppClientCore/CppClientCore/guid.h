@@ -16,10 +16,13 @@
 **
 ** * * * * * * * * * * * * * * * * * * */
 
-// GUID of primary Credential Provider
-// {7BAF541E-F8E0-4EDF-B69A-BD2771139E8E}
+// GUID of primary Credential Provider: the key holding its settings and history.
+// SohobOTP: {B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}, the same as CLSID_CSample in
+// CredentialProvider\guid.h, the installer and the agent (multiOTP's own id, {FCEFDFAB-...},
+// sent the program folder, portal address and timeouts to a key that does not exist: the
+// sign-in screen then started c:\multiotp\multiotp.exe, "file not found"). CI checks both match.
 DEFINE_GUID(CLSID_Multiotp,
-	0xfcefdfab, 0xb0a1, 0x4c4d, 0x8b, 0x2b, 0x4f, 0xf4, 0xe0, 0xa3, 0xd9, 0x78);
+	0xb3d2c6a1, 0x5e7f, 0x4c21, 0x9a, 0x6e, 0x0d, 0x4f, 0x5c, 0x8b, 0x7a, 0x31);
 
 
 // ADD ADDITIONAL HERE
