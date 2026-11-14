@@ -152,14 +152,14 @@ if ($UpgradeMsi -ne "") {
   $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$UpgradeMsi`" /qn /l*v `"$work\agent-upgrade.log`""
   Check "newer agent MSI installs over the old one (exit $($p.ExitCode))" ($p.ExitCode -eq 0)
   $entries = @(Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall | Get-ItemProperty | Where-Object { $_.DisplayName -eq "SohobOTP Agent" })
-  Check "one SohobOTP Agent in Programs, version 0.1.1" ($entries.Count -eq 1 -and $entries[0].DisplayVersion -eq "0.1.1") (($entries | ForEach-Object { $_.DisplayVersion }) -join ", ")
-  Check "upgraded program installed" ((& $exe version 2>&1 | Out-String) -match "sohobotp-agent 0.1.1")
+  Check "one SohobOTP Agent in Programs, version 0.2.1" ($entries.Count -eq 1 -and $entries[0].DisplayVersion -eq "0.2.1") (($entries | ForEach-Object { $_.DisplayVersion }) -join ", ")
+  Check "upgraded program installed" ((& $exe version 2>&1 | Out-String) -match "sohobotp-agent 0.2.1")
   Check "service running after the upgrade" (Wait-Until { (Get-Service SohobOTPAgent -ErrorAction SilentlyContinue).Status -eq "Running" } 30)
   $after = Get-Content $stateFile -Raw | ConvertFrom-Json
   Check "machine identity kept by the upgrade" ($after.endpoint_id -eq $state.endpoint_id -and $after.sign_seed -eq $state.sign_seed)
-  Check "upgraded agent checks in with its new version" (Wait-Until { (Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json).inventory.agent_version -eq "0.1.1" } 90)
+  Check "upgraded agent checks in with its new version" (Wait-Until { (Get-Content "$work\portal\state.json" -Raw | ConvertFrom-Json).inventory.agent_version -eq "0.2.1" } 90)
   $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$AgentMsi`" /qn /l*v `"$work\agent-downgrade.log`""
-  Check "older MSI refused over the newer one (exit $($p.ExitCode))" ($p.ExitCode -ne 0 -and ((& $exe version 2>&1 | Out-String) -match "sohobotp-agent 0.1.1"))
+  Check "older MSI refused over the newer one (exit $($p.ExitCode))" ($p.ExitCode -ne 0 -and ((& $exe version 2>&1 | Out-String) -match "sohobotp-agent 0.2.1"))
   $installed = $UpgradeMsi
 }
 

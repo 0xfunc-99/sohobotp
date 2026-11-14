@@ -11,7 +11,7 @@ import (
 )
 
 // Version of the agent, set at build time with -ldflags "-X ...inventory.Version=x".
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 // Collect returns the inventory of this machine. It never fails: unknown fields stay empty.
 func Collect() protocol.Inventory {

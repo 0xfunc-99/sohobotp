@@ -36,7 +36,7 @@ In this guide, replace **`PORTAL_IP`** with the IP address (or DNS name) of your
 | `source/` | full source: portal, agent, SohobOTP Sign-in (`source/windows-signin`) |
 | `SHA256SUMS` | checksums (`shasum -a 256 -c SHA256SUMS`, or `Get-FileHash` on Windows) |
 
-Version: agent 0.1.0, SohobOTP Sign-in 1.0.0. The Windows installers were built and tested
+Version: agent 0.2.0, SohobOTP Sign-in 1.0.3. The Windows installers were built and tested
 on Windows Server 2022 (36 automatic checks, see step 5).
 
 ---

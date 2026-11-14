@@ -2,12 +2,12 @@
 # Builds agent/dist/sohobotp-agent.msi from agent/dist/sohobotp-agent-windows-amd64.exe with
 # msitools (wixl) in a throwaway Debian container, then lists the tables that matter.
 # Usage (from the repository root, after agent/tests/run-in-docker.sh):  sh agent/packaging/windows/build-msi.sh
-#   AGENT_VERSION=x.y.z        MSI version (must grow for an upgrade; default 0.1.0)
+#   AGENT_VERSION=x.y.z        MSI version (must grow for an upgrade; default 0.2.0)
 #   AGENT_EXE=dist/...exe      agent binary, relative to agent/ (default dist/sohobotp-agent-windows-amd64.exe)
 #   MSI_OUT=dist/...msi        output, relative to agent/ (default dist/sohobotp-agent.msi)
 set -eu
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
-VERSION="${AGENT_VERSION:-0.1.0}"
+VERSION="${AGENT_VERSION:-0.2.0}"
 docker run --rm -v "$REPO/agent":/agent -e VERSION="$VERSION" \
   -e EXE="${AGENT_EXE:-dist/sohobotp-agent-windows-amd64.exe}" -e OUT="${MSI_OUT:-dist/sohobotp-agent.msi}" debian:bookworm-slim sh -euc '
   apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends msitools wixl >/dev/null
