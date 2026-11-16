@@ -35,6 +35,9 @@ func (q *quietApplier) Apply(*protocol.Config) (string, error) {
 
 // protected returns an agent whose portal turned tamper protection on (one check-in done).
 func protected(t *testing.T) (*Agent, *fakePortal, *quietApplier) {
+	// the test machine may have no SohobOTP Sign-in (Windows CI): not what these tests look at
+	signinMissing = func() bool { return false }
+	t.Cleanup(func() { signinMissing = componentMissing })
 	a, fp, _ := setup(t)
 	q := &quietApplier{}
 	a.Applier = q
@@ -210,6 +213,15 @@ func TestDriftIsPutBackAndReported(t *testing.T) {
 	a.Once()
 	if !strings.HasSuffix(kinds(fp.events), protocol.EventProtectionBroken) {
 		t.Fatalf("events %q", kinds(fp.events))
+	}
+	// SohobOTP Sign-in removed by hand, installed again by the applier: reported as such
+	q.err = nil
+	signinMissing = func() bool { return true }
+	a.lastDrift = 0
+	a.watch()
+	a.Once()
+	if !strings.HasSuffix(kinds(fp.events), protocol.EventSigninRemoved) {
+		t.Fatalf("Sign-in removal not reported: %q", kinds(fp.events))
 	}
 }
 

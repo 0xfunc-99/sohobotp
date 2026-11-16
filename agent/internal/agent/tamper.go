@@ -54,6 +54,9 @@ const (
 	NoChange = "nothing to change"
 )
 
+// signinMissing tells whether SohobOTP Sign-in is gone (Windows); tests replace it.
+var signinMissing = componentMissing
+
 // stopByHand is set by the service code when it is told to stop while the system is not
 // shutting down (Windows: a Stop control; Linux: SIGTERM while systemd is not stopping).
 var stopByHand atomic.Bool
@@ -224,7 +227,7 @@ func (a *Agent) checkDrift() bool {
 	if err != nil || cfg.Version != a.St.Applied.Version {
 		return changed
 	}
-	missing := componentMissing()
+	missing := signinMissing()
 	summary, err := a.Applier.Apply(cfg)
 	switch {
 	case err != nil && missing:
