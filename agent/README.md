@@ -80,7 +80,7 @@ configuration then carries the switch and the hash of the computer's own **unins
 | Without the code | refused; five wrong codes block codes for 15 minutes | the same; Windows Installer ends with an error before anything is removed (custom action `CheckUninstall`) |
 | Service | — (root can always stop it; a stop is reported) | administrators cannot stop, disable, reconfigure or delete `SohobOTPAgent`, nor change its permissions (service DACL; SYSTEM keeps full control, so MSI upgrades and self-update work) |
 | Files | — | program folder and state folder read-only for administrators (state folder owned by SYSTEM) |
-| Programs list | — | *Uninstall* and *Change* hidden for SohobOTP Agent and SohobOTP Sign-in (`NoRemove`, `NoModify`; previous values restored) |
+| Programs list | — | *Uninstall* and *Change* hidden for SohobOTP Agent and SohobOTP Sign-in (`NoRemove`, `NoModify`; previous values restored); an entry that appears later (MSI install, Sign-in installed again) within a minute |
 | Watch (every minute) | the configuration is applied again: PAM, sshd and RADIUS files changed by hand are put back | the same for the Sign-in settings; SohobOTP Sign-in removed by hand is installed again when the policy has its installers; start type and permissions of the service put back |
 | Reported to the portal | uninstall attempts, the code accepted, settings put back, the service stopped by hand (`systemctl stop`, not a shutdown), the process killed | the same |
 

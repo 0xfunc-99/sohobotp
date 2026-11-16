@@ -297,7 +297,9 @@ $denied = $false; try { Set-Content -Path $stateFile -Value "{}" -ErrorAction St
 Check "the agent state is read-only for administrators" ($denied -and (Get-Content $stateFile -Raw) -eq $before)
 $denied = $false; try { Remove-Item -Force $exe -ErrorAction Stop } catch { $denied = $true }
 Check "the agent program cannot be deleted by an administrator" ($denied -and (Test-Path $exe))
-Check "Uninstall hidden in Windows' list of programs (agent)" ((& $agentEntry).NoRemove -eq 1 -and (& $agentEntry).NoModify -eq 1)
+# Windows Installer writes the agent's own entry at the end of its install, after the service
+# started: the agent hides it at its next check of the machine (once a minute)
+Check "Uninstall hidden in Windows' list of programs (agent)" (Wait-Until { $e = & $agentEntry; ($null -ne $e -and $e.NoRemove -eq 1 -and $e.NoModify -eq 1) } 120)
 if ($SignInMsi -ne "") { Check "Uninstall hidden in Windows' list of programs (SohobOTP Sign-in)" ((& $signinEntry2).NoRemove -eq 1) }
 
 # uninstall needs the code
