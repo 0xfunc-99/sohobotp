@@ -36,7 +36,8 @@ In this guide, replace **`PORTAL_IP`** with the IP address (or DNS name) of your
 | `source/` | full source: portal, agent, SohobOTP Sign-in (`source/windows-signin`) |
 | `SHA256SUMS` | checksums (`shasum -a 256 -c SHA256SUMS`, or `Get-FileHash` on Windows) |
 
-Version: agent 0.2.0, SohobOTP Sign-in 1.0.3. The Windows installers were built and tested
+Version: agent 0.3.0 (tamper protection, self-update with a release key, Group Policy kit),
+SohobOTP Sign-in 1.0.3. The Windows installers were built and tested
 on Windows Server 2022 (36 automatic checks, see step 5).
 
 ---
@@ -247,8 +248,73 @@ installed version. Steps 1 and 2 below are then not needed.
 6. Check: `& "C:\Program Files\SohobOTP\Agent\sohobotp-agent.exe" status` shows
    "Configuration: version 1, applied". Sign out and sign in with password + code.
 
-For many machines: deploy both MSIs with Group Policy (silent command above, or Software
-Installation with a transform), and use a token with **Active Directory approval**.
+### Many Windows computers: the Group Policy kit
+
+For computers in Active Directory you do not visit each one. In the portal: **Add a computer** →
+**Many Windows computers at once: Group Policy kit** → choose the computer policy → **Download
+the Group Policy kit (.zip)**. Unzip it and follow its `README.txt` (six steps): copy the folder
+to `\\<your domain>\NETLOGON\SohobOTP`, create a Group Policy for the OU, name
+`Install-SohobOTP.cmd` as **computer startup script**, restart a test computer. Each computer
+then installs the agent by itself at its next start and appears under **Computers**; with
+**Install and update SohobOTP Sign-in automatically** in the policy, the agent installs Sign-in
+too. The kit's token is readable by every domain user, so keep **approved automatically when
+the computer is in Active Directory** (the default). The kit works for the number of days you
+choose (up to 365); after that only *new* computers need a new kit.
+
+(The classic way still works: deploy both MSIs with Group Policy, silent command above or
+Software Installation with a transform.)
+
+### Tamper protection: users cannot switch the code off
+
+A user who is administrator of their own computer could uninstall the agent or SohobOTP
+Sign-in. To stop that, tick **Tamper protection** in the computer policy (Computers → Computer
+policies → the policy). Computers with agent 0.3.0 or later then, within a minute or two:
+
+- only uninstall the agent with **that computer's uninstall code**. You find it in the portal:
+  Computers → the computer → **Show the uninstall code** (your look at it is recorded). On the
+  computer, as administrator:
+  `"C:\Program Files\SohobOTP\Agent\sohobotp-agent.exe" uninstall --code XXXX-XXXX-XXXX`
+  (Linux: `sudo sohobotp-agent uninstall --code XXXX-XXXX-XXXX`);
+- lock the agent's Windows service: an administrator cannot stop, disable or delete it, and the
+  Uninstall buttons of the agent and of SohobOTP Sign-in disappear from Windows' list of programs;
+- put back what is changed by hand: Sign-in's settings, and SohobOTP Sign-in itself if it is
+  removed (needs **Install and update SohobOTP Sign-in automatically** in the same policy);
+- tell you: uninstall attempts, the service stopped, the agent killed, settings changed. They
+  show on the computer's page under **Alerts from this computer**, the computer is marked
+  "needs attention" in the list, and each alert is in the audit trail.
+
+To take the protection off a computer without the code, untick it in the policy (or move the
+computer to a policy without it): it is lifted at the next check-in. Honest limit: someone with
+administrator rights and enough determination can still get around it (for example by starting
+the computer from a USB stick); the point is that it cannot be done by accident or unnoticed
+while the computer is online. A protected computer that stays **Offline** deserves a look.
+
+### Agent updates from the portal (release key)
+
+Agents update themselves, but only to programs **signed with your release key**, so nobody who
+breaks into the portal can make your computers run something else.
+
+1. Once, on the computer where you build (not the portal server):
+   `AGENT_VERSION=0.3.0 sh agent/packaging/release.sh`. The first run creates the key in
+   `~/SohobOTP-release-key`. **Back that folder up** (USB stick, password manager) and never copy
+   `release-private.key` to the portal: if it is lost, every computer needs a new agent by hand.
+2. Give the release to the portal:
+
+   ```bash
+   A="sudo docker exec sohobotp php /usr/local/bin/multiotp/portal/bin/portal-admin.php"
+   sudo docker cp agent/dist/release-0.3.0 sohobotp:/tmp/release
+   $A release-key-set --key="$(cat agent/dist/release-0.3.0/release-public.key)"   # first time only
+   $A agent-release-add --dir=/tmp/release
+   ```
+
+   **Add a computer** now hands out this agent.
+3. In each computer policy choose **Agent version** 0.3.0: computers with an older agent *that
+   was built with your key* update within a minute or two.
+4. Agents from before the release key (0.2.0 and older) cannot update themselves; their page in
+   the portal says so. Once per such computer: download the agent again from **Add a computer**
+   and run it there (double-click, or `sohobotp-agent-….exe install`). It sees that the computer
+   is already enrolled, replaces the old program and keeps the enrolment. From then on updates
+   are automatic. For the next version: step 1 with the new number, steps 2 and 3.
 
 ## Step 7 — Linux machine
 
@@ -383,6 +449,11 @@ snapshot if you are locked out.
       break-glass account can then sign in; enable it again afterwards)
 - [ ] Uninstall and reinstall a machine with a new token: it appears as a new machine
 - [ ] Windows: unlock, Remote Desktop, offline login (if the group allows the offline cache)
+- [ ] Tamper protection (policy ticked, agent 0.3.0): the computer's page says "protected";
+      `sc stop SohobOTPAgent` and `sohobotp-agent.exe uninstall` are refused and appear as
+      alerts in the portal; uninstall with the code from the portal works
+- [ ] Self-update: add a newer signed release, choose it as Agent version, the computer's page
+      shows the new version a minute or two later, sign-in still asks for the code
 - [ ] Symantec VIP migration (if used): a Symantec user signs in through SohobOTP, a user
       moved to SohobOTP signs in with the SohobOTP code, *Forwarded to Symantec VIP* lists them
 
@@ -401,6 +472,10 @@ snapshot if you are locked out.
 | Status says "failed" | the error is shown by `status`; the agent retries by itself (1, 2, 4 … 30 minutes), `run --once` retries now. Typical: SohobOTP Sign-in not installed yet, package lock, no EPEL |
 | Check-ins refused "clock" after restoring a VM snapshot | the machine's clock is behind: wait for time sync (`w32tm /resync` on Windows, `chronyc makestep` on Linux) |
 | Reinstalling a machine | uninstall (Windows MSI or `sohobotp-agent uninstall`) removes its identity; delete the old machine in the portal, then install with a new token |
+| Uninstall says "the uninstall code is needed" | the computer has tamper protection: portal → Computers → the computer → **Show the uninstall code**, then `sohobotp-agent uninstall --code …`; or untick Tamper protection in its policy and wait for a check-in |
+| "too many wrong uninstall codes" | five wrong codes: the computer refuses codes for 15 minutes |
+| Computer page: "cannot update itself" | its agent was built without your release key: run a newer agent from **Add a computer** on it once (see *Agent updates from the portal*) |
+| Group Policy kit: computer does not appear | on the computer read `C:\ProgramData\SohobOTP\gpo-install.log`; no file = the startup script did not run (`gpresult /r /scope computer`, restart, "Always wait for the network") |
 
 ## Limitations of this version
 
@@ -413,7 +488,12 @@ snapshot if you are locked out.
   the same NAT address cannot both be protected; RADIUS across the internet needs a VPN.
 - SSH passwords go through the keyboard-interactive prompt: scripts that send a password
   directly stop working on protected machines.
-- The agents in this kit are built **without self-update** (no release key).
+- Self-update needs agents built with **your release key** (`agent/packaging/release.sh`);
+  agents from kits before 0.3.0 have none and are replaced once by hand.
+- **Tamper protection slows a local administrator down and reports them; it cannot make
+  removal impossible** for someone with administrator rights. On Windows it was tested
+  automatically on Windows Server 2022; SohobOTP Sign-in's own installer does not ask for the
+  code (the agent reinstalls Sign-in when the policy installs it automatically).
 - Changes reach machines at their next check-in (60 s by default), not instantly.
 - A disabled or deleted machine keeps its last configuration, and its sign-in requests are
   refused: on a disabled **Windows** machine only the break-glass account can sign in.

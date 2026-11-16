@@ -33,7 +33,7 @@ func (windowsApplier) Apply(cfg *protocol.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	summary := "nothing to change"
+	summary := NoChange
 	if len(changed) > 0 {
 		summary = "Credential Provider values set: " + strings.Join(changed, ", ")
 	}

@@ -162,8 +162,22 @@ check "portal policy changed to 2FA off" "portal policy off | grep -q 'policy sa
 check "agent picks up the 2FA-off configuration" "agent run --once | grep -q 'version [0-9]*, applied'"
 client disabled
 
-echo "== uninstall"
-check "uninstall removes the agent state and binary" "docker exec $CLI sh -c '/usr/local/sbin/sohobotp-agent uninstall >/dev/null 2>&1; ! test -e /etc/sohobotp-agent && ! test -e /usr/local/sbin/sohobotp-agent'"
+echo "== tamper protection: uninstall only with the computer's code"
+check "portal policy: tamper protection on" "portal policy tamper | grep -q 'policy saved'"
+check "agent picks it up: protected" "agent run --once | grep -q 'version [0-9]*, applied' && agent status | grep -q 'Tamper protection: on'"
+OUT="$(agent uninstall 2>&1 || true)"
+check "uninstall without the code refused, agent untouched" "echo \"\$OUT\" | grep -q 'uninstall code is needed' && docker exec $CLI test -e /etc/sohobotp-agent/agent.json -a -e /usr/local/sbin/sohobotp-agent"
+OUT="$(agent uninstall --code WRNG-WRNG-WRNG 2>&1 || true)"
+check "uninstall with a wrong code refused" "echo \"\$OUT\" | grep -q 'wrong uninstall code' && docker exec $CLI test -e /etc/sohobotp-agent/agent.json"
+agent forget >/dev/null 2>&1 || true
+check "the agent's identity cannot be deleted either (forget)" "docker exec $CLI test -e /etc/sohobotp-agent/agent.json"
+agent run --once >/dev/null 2>&1 || true
+check "the portal has both uninstall attempts as alerts" "portal endpoint | python3 -c 'import json,sys; a=json.load(sys.stdin).get(\"alerts\",[]); sys.exit(0 if len([x for x in a if x[\"kind\"]==\"uninstall_refused\"])==2 else 1)'"
+check "the portal shows the computer as protected" "portal tamper-state | grep -qx on"
+CODE="$(portal uninstall-code)"
+
+echo "== uninstall (with the computer's uninstall code from the portal)"
+check "uninstall removes the agent state and binary" "docker exec $CLI sh -c '/usr/local/sbin/sohobotp-agent uninstall --code $CODE >/dev/null 2>&1; ! test -e /etc/sohobotp-agent && ! test -e /usr/local/sbin/sohobotp-agent'"
 echo "== agent downloaded from the portal: enrolment settings built in, nothing typed"
 docker cp "$BIN" "$APP:/tmp/agent-plain" && docker exec "$APP" chmod 0644 /tmp/agent-plain
 portal download /tmp/agent-plain /tmp/ca.pem > "$TMP/agent-download"

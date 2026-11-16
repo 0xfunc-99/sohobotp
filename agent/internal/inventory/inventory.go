@@ -8,10 +8,11 @@ import (
 	"sort"
 
 	"multiotp-portal/agent/internal/protocol"
+	"multiotp-portal/agent/internal/release"
 )
 
 // Version of the agent, set at build time with -ldflags "-X ...inventory.Version=x".
-var Version = "0.2.0"
+var Version = "0.3.0"
 
 // Collect returns the inventory of this machine. It never fails: unknown fields stay empty.
 func Collect() protocol.Inventory {
@@ -22,6 +23,7 @@ func Collect() protocol.Inventory {
 		Arch:         runtime.GOARCH,
 		IPs:          addresses(),
 		AgentVersion: Version,
+		ReleaseKey:   release.Fingerprint(),
 	}
 	platform(&inv)
 	inv.Accounts = accounts()

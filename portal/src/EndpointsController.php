@@ -21,6 +21,7 @@ final class EndpointsController extends Controller
         foreach ($list as $endpoint) {
             $endpoint['health'] = $endpoints->health($endpoint);
             $endpoint['attention'] = self::attention($endpoint);
+            $endpoint['tamper'] = $endpoints->tamperState($endpoint);
             $counts[$endpoint['health']]++;
             $counts['attention'] += null !== $endpoint['attention'] ? 1 : 0;
             if ('' !== $groupFilter && $endpoint['group_id'] !== $groupFilter) {
@@ -51,11 +52,12 @@ final class EndpointsController extends Controller
         $this->requirePermission('endpoints.view');
         $endpoints = new Endpoints();
         $endpoint = $endpoints->endpoint($this->query('id', 20)) ?? $this->notFound('This endpoint does not exist.');
+        $shownCode = null; // the uninstall code, shown once in the answer to "Show the uninstall code"
         if ($this->isPost()) {
             $this->requirePermission('endpoints.manage');
             $name = $endpoint['inventory']['hostname'] ?: $endpoint['id'];
             try {
-                switch ($this->post('op', 16)) {
+                switch ($this->post('op', 24)) {
                     case 'approve':
                         $endpoints->approve($endpoint['id']);
                         $this->audit->record('endpoint.approve', 'success', $name, ['endpoint' => $endpoint['id'], 'by' => 'admin']);
@@ -96,6 +98,18 @@ final class EndpointsController extends Controller
                             'no_code_at_signin' => implode(', ', $exempt['signin']), 'no_code_for_admin' => implode(', ', $exempt['admin'])]);
                         Session::flash('success', 'Saved. The computer applies it at its next check-in (within a minute or two).');
                         break;
+                    case 'uninstall-code':
+                    case 'uninstall-code-new':
+                        // the code itself never goes to the audit trail, only who looked at it
+                        $new = 'uninstall-code-new' === $this->post('op', 24);
+                        $shownCode = $endpoints->uninstallCode($endpoint['id'], $new);
+                        $this->audit->record($new ? 'endpoint.uninstall_code_new' : 'endpoint.uninstall_code_view', 'success', $name, ['endpoint' => $endpoint['id']]);
+                        break;
+                    case 'alerts-seen':
+                        $count = $endpoints->markAlertsSeen($endpoint['id']);
+                        $this->audit->record('endpoint.alerts_seen', 'success', $name, ['endpoint' => $endpoint['id'], 'alerts' => $count]);
+                        Session::flash('success', 'Alerts marked as seen.');
+                        break;
                     case 'create-user':
                         $this->requirePermission('users.manage');
                         $account = $this->post('account', 120);
@@ -119,7 +133,11 @@ final class EndpointsController extends Controller
             } catch (ValidationException $invalid) {
                 Session::flash('error', $invalid->getMessage());
             }
-            $this->redirect('endpoint', ['id' => $endpoint['id']]);
+            if (null === $shownCode) {
+                $this->redirect('endpoint', ['id' => $endpoint['id']]);
+            }
+            header('Cache-Control: no-store');
+            $endpoint = $endpoints->endpoint($endpoint['id']) ?? $endpoint;
         }
         $endpoint['health'] = $endpoints->health($endpoint);
         $endpoint['attention'] = self::attention($endpoint);
@@ -135,6 +153,10 @@ final class EndpointsController extends Controller
             'promptsOn' => '3' !== substr((string) (Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows']['cpus_credui'] ?? '3e'), 0, 1),
             'canManage' => $this->can('endpoints.manage'),
             'canCreateUsers' => $this->can('users.manage'),
+            'tamper' => $endpoints->tamperState($endpoint),
+            'alerts' => Endpoints::alerts($endpoint),
+            'shownCode' => $shownCode,
+            'portalReleaseKey' => AgentReleases::fingerprint(),
         ]);
     }
 
@@ -176,7 +198,7 @@ final class EndpointsController extends Controller
             } catch (ValidationException $invalid) {
                 $error = $invalid->getMessage();
                 $input = array_merge($input, array_map(static fn ($v) => is_array($v) ? $v : (string) $v, $_POST));
-                foreach (['linux_enabled', 'linux_ssh_keys_need_code', 'linux_require_message_authenticator', 'win_cache_enabled', 'win_enrol_at_signin', 'win_enrol_local', 'win_signin_auto', 'win_upn_format', 'win_without2fa', 'win_two_step_hide_otp', 'win_two_step_send_password'] as $flag) {
+                foreach (['tamper_protection', 'linux_enabled', 'linux_ssh_keys_need_code', 'linux_require_message_authenticator', 'win_cache_enabled', 'win_enrol_at_signin', 'win_enrol_local', 'win_signin_auto', 'win_upn_format', 'win_without2fa', 'win_two_step_hide_otp', 'win_two_step_send_password'] as $flag) {
                     $input[$flag] = !empty($_POST[$flag]);
                 }
                 $input['linux_services'] = (array) ($_POST['linux_services'] ?? []);
@@ -391,6 +413,69 @@ final class EndpointsController extends Controller
     }
 
     /**
+     * Group Policy kit (GpoKit): a zip with a computer startup script, the plain Windows agent
+     * programs and a new enrolment token, for rolling the agent out to an OU. POST only, from
+     * the "Add a computer" page; like a downloaded agent, the token exists only in the download.
+     */
+    public function gpoKit(): void
+    {
+        $this->requirePermission('endpoints.manage');
+        if (!$this->isPost()) {
+            $this->redirect('agent-download');
+        }
+        $endpoints = new Endpoints();
+        try {
+            $portal = AgentBundle::validatePortal($this->post('portal', 300));
+            $caPem = AgentBundle::validateCa(mb_substr((string) ($_POST['ca_pem'] ?? ''), 0, 70000));
+            $programs = [];
+            foreach (['amd64', 'arm64'] as $arch) {
+                $program = AgentBundle::program("windows/$arch");
+                if (null !== $program) {
+                    $programs[$arch] = $program;
+                }
+            }
+            if ([] === $programs) {
+                throw new ValidationException('The portal has no Windows agent program yet: add one first (see the list above).');
+            }
+            $group = $endpoints->group($this->post('group_id', 32)) ?? throw new ValidationException('Choose a computer policy.');
+            $days = (int) $this->post('days', 4);
+            [$token, $plain] = $endpoints->createToken(
+                $group['id'],
+                '' !== $this->post('label', 100) ? $this->post('label', 100) : 'Group Policy kit',
+                24 * $days,
+                (int) $this->post('max_uses', 6),
+                $this->admin['username'],
+                $this->post('approval', 16) ?: 'directory',
+                24 * 365
+            );
+            $policy = Endpoints::effectivePolicy($group['policy']);
+            $now = time();
+            $zip = GpoKit::build($portal, $plain, $endpoints->pin(), $caPem, array_map(static fn (array $p): string => $p['file'], $programs), [
+                'group' => $group['name'], 'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
+                'tamper' => $policy['tamper_protection'], 'signin_auto' => !empty($policy['windows']['signin_auto']),
+            ], $now);
+            $this->audit->record('endpoint.gpo_kit', 'success', $token['label'], [
+                'token' => $token['id'], 'group' => $token['group_id'], 'portal' => $portal, 'with_ca' => '' !== $caPem,
+                'agents' => implode(', ', array_map(static fn (string $a, array $p): string => "$a " . ('' !== $p['version'] ? $p['version'] : $p['source']), array_keys($programs), $programs)),
+                'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
+            ]);
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            header('Content-Type: application/zip');
+            header('Content-Disposition: attachment; filename="SohobOTP-GroupPolicy-' . $token['id'] . '.zip"');
+            header('Content-Length: ' . strlen($zip));
+            header('Cache-Control: no-store');
+            header('X-Content-Type-Options: nosniff');
+            echo $zip;
+            exit;
+        } catch (ValidationException $invalid) {
+            Session::flash('error', 'Group Policy kit: ' . $invalid->getMessage());
+            $this->redirect('agent-download');
+        }
+    }
+
+    /**
      * "Windows sign-in installers": what the agent installs by itself (computer policy "Install
      * and update SohobOTP Sign-in automatically"), which computers have which Sign-in version,
      * and an upload form (the same checks as portal-admin.php signin-package-add).
@@ -445,6 +530,10 @@ final class EndpointsController extends Controller
         }
         if ('pending' === $endpoint['status']) {
             return 'Waiting for approval' . ('' !== ($endpoint['approval_note'] ?? '') ? ': ' . $endpoint['approval_note'] : '.');
+        }
+        $unseen = array_values(array_filter(Endpoints::alerts($endpoint), static fn (array $a): bool => empty($a['seen'])));
+        if ([] !== $unseen) {
+            return 'Tamper alert' . (count($unseen) > 1 ? ' (' . count($unseen) . ' new)' : '') . ': ' . (Endpoints::EVENT_KINDS[$unseen[0]['kind']] ?? $unseen[0]['kind']) . ' (' . format_time($unseen[0]['at']) . ').';
         }
         $adName = (string) ($endpoint['ad_name'] ?? '');
         if ('' !== $adName && '' !== $endpoint['inventory']['hostname'] && 0 !== strcasecmp(explode('.', $adName)[0], explode('.', $endpoint['inventory']['hostname'])[0])) {

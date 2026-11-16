@@ -25,10 +25,68 @@
     <dt>Kernel / architecture</dt><dd><?= e($inv['kernel'] ?: '—') ?> / <?= e($inv['arch'] ?: '—') ?></dd>
     <dt>Domain</dt><dd><?= e($inv['domain'] ?: '—') ?></dd>
     <dt>IP addresses</dt><dd><?= e([] === $inv['ips'] ? '—' : implode(', ', $inv['ips'])) ?></dd>
-    <dt>Agent version</dt><dd><?= e($inv['agent_version'] ?: '—') ?></dd>
+    <dt>Agent version</dt><dd><?= e($inv['agent_version'] ?: '—') ?>
+      <?php if ('' !== $inv['agent_version'] && null !== $endpoint['last_seen']): ?>
+        <?php if ('' === ($inv['release_key'] ?? '')): ?><span class="muted">— cannot update itself (this agent was built without a release key): install a newer agent on the computer once</span>
+        <?php elseif ('' !== $portalReleaseKey && $inv['release_key'] !== $portalReleaseKey): ?><span class="muted">— built with another release key (<?= e($inv['release_key']) ?>) than this portal's: it will refuse this portal's releases</span>
+        <?php else: ?><span class="muted">— updates itself to the computer policy's agent version</span><?php endif; ?>
+      <?php endif; ?></dd>
     <dt>Login component</dt><dd><?= 'windows' === ($endpoint['os'] ?? '') ? e('' !== (string) $inv['component']['version'] ? 'SohobOTP Sign-in ' . $inv['component']['version'] : 'SohobOTP Sign-in not installed') : e(trim($inv['component']['name'] . ' ' . $inv['component']['version']) ?: '—') ?></dd>
     <dt>Endpoint id</dt><dd><code><?= e($endpoint['id']) ?></code></dd>
   </dl>
+</section>
+<section class="panel" id="tamper">
+  <h2>Tamper protection</h2>
+  <?php $tamperText = [
+      'off' => 'Off for this computer\'s policy. Any administrator of the computer can uninstall the agent and SohobOTP Sign-in.',
+      'on' => 'On: the agent can only be uninstalled with this computer\'s uninstall code, administrators of the computer cannot stop or change its service, and changes made by hand are put back and reported here.',
+      'waiting' => 'On in the computer policy; the computer has not confirmed it yet (it does at its next check-in).',
+      'old_agent' => 'On in the computer policy, but this computer is NOT protected: its agent ' . ($inv['agent_version'] ?: '?') . ' is too old. It needs agent ' . Portal\Endpoints::TAMPER_MIN_AGENT . ' or later.',
+  ]; ?>
+  <p><span class="status status-<?= ['off' => 'info', 'on' => 'success', 'waiting' => 'info', 'old_agent' => 'failure'][$tamper] ?>"><?= ['off' => 'off', 'on' => 'protected', 'waiting' => 'waiting for the computer', 'old_agent' => 'not protected'][$tamper] ?></span> <?= e($tamperText[$tamper]) ?>
+    <?php if ('off' === $tamper && $canManage): ?>Turn it on in the <a href="<?= e(route('endpoint-group', ['id' => $endpoint['group_id']])) ?>">computer policy</a>.<?php endif; ?></p>
+  <?php if (null !== $shownCode): ?>
+    <div class="alert alert-info" role="status">
+      <p>Uninstall code of <strong><?= e($inv['hostname'] ?: $endpoint['id']) ?></strong>: <code class="secret-once"><?= e($shownCode) ?></code></p>
+      <p>On the computer, as an administrator:<br>
+        <?php if ('windows' === $endpoint['os']): ?><code>"C:\Program Files\SohobOTP\Agent\sohobotp-agent.exe" uninstall --code <?= e($shownCode) ?></code>
+        <?php else: ?><code>sudo sohobotp-agent uninstall --code <?= e($shownCode) ?></code><?php endif; ?></p>
+      <p class="hint">The code only works on this computer. Capital or small letters, with or without the dashes. It is shown only now: this page does not keep it on screen, and your look at it is in the audit trail. After five wrong codes the computer refuses codes for 15 minutes.</p>
+    </div>
+  <?php endif; ?>
+  <?php if ('off' !== $tamper && $canManage): ?>
+    <div class="actions">
+      <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>#tamper" class="inline">
+        <?= csrf_field() ?><input type="hidden" name="op" value="uninstall-code"><button type="submit" class="button-small">Show the uninstall code</button></form>
+      <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>#tamper" class="inline" data-confirm="Replace the uninstall code of this computer? The computer takes the new code at its next check-in; until then the old one still works there.">
+        <?= csrf_field() ?><input type="hidden" name="op" value="uninstall-code-new"><button type="submit" class="button-small">New code</button></form>
+    </div>
+  <?php endif; ?>
+  <?php if ([] !== $alerts): ?>
+    <?php $unseen = count(array_filter($alerts, static fn (array $a): bool => empty($a['seen']))); ?>
+    <h3>Alerts from this computer<?= $unseen > 0 ? ' (' . $unseen . ' new)' : '' ?></h3>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>When (computer's clock)</th><th>What</th><th>Details</th></tr></thead>
+        <tbody>
+          <?php foreach (array_slice($alerts, 0, 30) as $alert): ?>
+            <tr>
+              <td class="nowrap"><?= e(format_time($alert['at'])) ?><?= empty($alert['seen']) ? ' <span class="status status-failure">new</span>' : '' ?></td>
+              <td><?= e(Portal\Endpoints::EVENT_KINDS[$alert['kind']] ?? $alert['kind']) ?></td>
+              <td><?= e($alert['detail']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php if ($unseen > 0 && $canManage): ?>
+      <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>#tamper" class="inline">
+        <?= csrf_field() ?><input type="hidden" name="op" value="alerts-seen"><button type="submit" class="button-small">Mark as seen</button></form>
+    <?php endif; ?>
+    <p class="hint">Every alert is also in the audit trail (action <code>endpoint.tamper</code>). A computer that is switched off or cut from the network cannot report: watch computers that stay <strong>Offline</strong> too.</p>
+  <?php elseif ('off' !== $tamper): ?>
+    <p class="muted">No alerts from this computer.</p>
+  <?php endif; ?>
 </section>
 <section class="panel">
   <h2>Users on this computer</h2>

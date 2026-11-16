@@ -612,5 +612,135 @@ if (function_exists('posix_geteuid') && 0 === posix_geteuid()) {
 }
 unlink($programFile);
 
+// --- Tamper protection: uninstall code, policy, events and alerts
+check('uninstall code hash identical to the Go agent (vector)', 'c16b05e4423b985807e9a2cf3087d72744ec3a097f991753d6e63ad3d28ecdba' === Endpoints::uninstallCodeHash('e0000000000000000001', 'abcd efgh-JKLM'));
+check('uninstall code: XXXX-XXXX-XXXX without look-alike characters, random', 1 === preg_match('/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/', Endpoints::newUninstallCode()) && Endpoints::newUninstallCode() !== Endpoints::newUninstallCode());
+check('policy: tamper protection off by default, kept by the form', false === Endpoints::effectivePolicy([])['tamper_protection']
+    && true === Endpoints::policyFromInput($form(['tamper_protection' => '1']))['tamper_protection'] && false === Endpoints::policyFromInput($form())['tamper_protection']
+    && true === Endpoints::policyToInput(['tamper_protection' => true])['tamper_protection']);
+$plainGroup = $endpoints->saveGroup(null, ['name' => 'Plain'] + $form(['linux_enabled' => '']));
+$guarded = $endpoints->saveGroup(null, ['name' => 'Guarded'] + $form(['linux_enabled' => '', 'tamper_protection' => '1']));
+[, $tpToken] = $endpoints->createToken($plainGroup['id'], 'tamper', 1, 1, 'unit');
+$tp = new AgentSim();
+$tpInv = ['hostname' => 'tp-01', 'os' => 'linux', 'arch' => 'amd64', 'agent_version' => '0.3.0'];
+$tp->id = $endpoints->enroll($tp->enrollRequest($tpToken, $tpInv), '192.0.2.96', 'portal.example.test')['endpoint_id'];
+$tpCheckin = static function (int $version, array $extra = [], array $inventory = []) use ($endpoints, $tp, $tpInv): array {
+    $applied = 0 === $version ? ['version' => 0, 'status' => 'none'] : ['version' => $version, 'status' => 'applied', 'error' => '', 'at' => time()];
+    $body = json_encode(['inventory' => $inventory + $tpInv, 'applied' => $applied] + $extra);
+    $uri = '/portal/agent.php?a=checkin';
+    return $endpoints->checkin($endpoints->authenticate($tp->headers('POST', $uri, $body), 'POST', $uri, $body), json_decode($body, true), '192.0.2.96');
+};
+$tpState = static fn (): string => $endpoints->tamperState($endpoints->endpoint($tp->id));
+$cfg = $tp->openConfig($tpCheckin(0)['config'], $portalKey, 0, 'linux');
+check('tamper off: nothing about it in the policy (other computers keep their configuration)', !array_key_exists('tamper_protection', $cfg['policy']) && 'off' === $tpState());
+$endpoints->moveEndpoint($tp->id, $guarded['id']);
+$cfg = $tp->openConfig($tpCheckin(1)['config'], $portalKey, 1, 'linux');
+$tpCode = $endpoints->uninstallCode($tp->id);
+check('tamper on: the policy has the switch and the hash of this computer\'s code, never the code',
+    true === $cfg['policy']['tamper_protection'] && Endpoints::uninstallCodeHash($tp->id, $tpCode) === $cfg['policy']['uninstall_code_hash'] && !str_contains((string) json_encode($cfg), $tpCode));
+check('uninstall code: the same each time, stored encrypted', $tpCode === $endpoints->uninstallCode($tp->id)
+    && !str_contains((string) file_get_contents(Endpoints::dir() . '/' . $tp->id . '.json'), $tpCode));
+check('uninstall code and its hash are not part of the endpoint record pages use', !isset($endpoints->endpoint($tp->id)['uninstall_code']) && !isset($endpoints->endpoint($tp->id)['uninstall_code_hash']));
+check('tamper on: configuration not resent once applied; waiting until the computer confirms', null === $tpCheckin(2)['config'] && 'waiting' === $tpState());
+$tpCheckin(2, [], ['protected' => true, 'release_key' => '0123456789abcdef']);
+check('the computer confirms: protected; its release key is kept', 'on' === $tpState() && '0123456789abcdef' === $endpoints->endpoint($tp->id)['inventory']['release_key']);
+$tpCheckin(2, [], ['agent_version' => '0.2.0', 'release_key' => 'XYZ']);
+check('an agent older than ' . Endpoints::TAMPER_MIN_AGENT . ' is shown as not protected; a malformed release key is dropped', 'old_agent' === $tpState() && '' === $endpoints->endpoint($tp->id)['inventory']['release_key']);
+$tpCode2 = $endpoints->uninstallCode($tp->id, true);
+$cfg = $tp->openConfig($tpCheckin(2, [], ['protected' => true])['config'], $portalKey, 2, 'linux');
+check('new code: different, and the computer gets its hash as a new configuration', $tpCode2 !== $tpCode && 3 === $cfg['version'] && Endpoints::uninstallCodeHash($tp->id, $tpCode2) === $cfg['policy']['uninstall_code_hash']);
+$auditBefore = substr_count((string) @file_get_contents(Config::auditFile()), 'endpoint.tamper');
+$tpEvents = ['events' => [
+    ['id' => 'aaaaaaaaaaaaaaaa', 'at' => time() - 30, 'kind' => 'uninstall_refused', 'detail' => "wrong uninstall code\nsecond line"],
+    ['id' => 'bbbbbbbbbbbbbbbb', 'at' => 5, 'kind' => 'agent_killed', 'detail' => str_repeat('d', 500)],
+    ['id' => 'cccccccccccccccc', 'at' => time(), 'kind' => 'made_up', 'detail' => ''],
+    ['id' => 'not-hex', 'at' => time(), 'kind' => 'agent_killed'],
+    'garbage',
+]];
+$tpCheckin(3, $tpEvents, ['protected' => true]);
+$tpCheckin(3, $tpEvents, ['protected' => true]); // the agent repeats them until a check-in succeeds
+$tpAlerts = Endpoints::alerts($endpoints->endpoint($tp->id));
+check('events: known kinds stored once each, newest first', ['uninstall_refused', 'agent_killed'] === array_column($tpAlerts, 'kind') || ['agent_killed', 'uninstall_refused'] === array_column($tpAlerts, 'kind'));
+$byKind = array_column($tpAlerts, null, 'kind');
+check('events: line breaks removed, long details cut, an absurd time replaced by the check-in time',
+    'wrong uninstall code second line' === $byKind['uninstall_refused']['detail'] && 300 === strlen($byKind['agent_killed']['detail']) && $byKind['agent_killed']['at'] > time() - 60);
+check('events: each one written to the audit trail once', $auditBefore + 2 === substr_count((string) file_get_contents(Config::auditFile()), 'endpoint.tamper'));
+check('alerts: new until an administrator marks them as seen', 2 === $endpoints->markAlertsSeen($tp->id) && 0 === $endpoints->markAlertsSeen($tp->id));
+$many = [];
+for ($i = 0; $i < 50; $i++) {
+    $many[] = ['id' => sprintf('%016x', $i + 1), 'at' => time(), 'kind' => 'settings_restored', 'detail' => "n $i"];
+}
+$tpCheckin(3, ['events' => $many], ['protected' => true]);
+$tpCheckin(3, ['events' => array_map(static fn (array $e): array => ['id' => 'f' . substr($e['id'], 1)] + $e, $many)], ['protected' => true]);
+$tpCheckin(3, ['events' => array_map(static fn (array $e): array => ['id' => 'e' . substr($e['id'], 1)] + $e, $many)], ['protected' => true]);
+check('alerts: only the last 100 are kept for a computer', 100 === count(Endpoints::alerts($endpoints->endpoint($tp->id))));
+$endpoints->moveEndpoint($tp->id, $plainGroup['id']);
+$cfg = $tp->openConfig($tpCheckin(3)['config'], $portalKey, 3, 'linux');
+check('moved to a policy without tamper protection: the next configuration lifts it', !array_key_exists('tamper_protection', $cfg['policy']) && 'off' === $tpState());
+$endpoints->deleteEndpoint($tp->id);
+
+// --- Release key kept by the portal, Windows on ARM releases
+check('releases: Windows on ARM supported', in_array('windows/arm64', AgentReleases::PLATFORMS, true));
+putenv('MULTIOTP_PORTAL_RELEASE_KEY');
+check('no release key: no fingerprint', '' === AgentReleases::releaseKey() && '' === AgentReleases::fingerprint());
+check('release key: anything but a public key refused', throws(static fn () => AgentReleases::setReleaseKey('not a key'), ValidationException::class)
+    && throws(static fn () => AgentReleases::setReleaseKey(base64_encode(random_bytes(31))), ValidationException::class));
+$relPublic = sodium_crypto_sign_publickey($relKeys);
+check('release key stored: fingerprint as agents report theirs', substr(hash('sha256', $relPublic), 0, 16) === AgentReleases::setReleaseKey(base64_encode($relPublic) . "\n")
+    && base64_encode($relPublic) === AgentReleases::releaseKey());
+$relArm = ['version' => '0.3.0', 'os' => 'windows', 'arch' => 'arm64', 'sha256' => hash_file('sha256', $relBin), 'size' => filesize($relBin)];
+check('release: signature from another key refused with the stored key', throws(static fn () => AgentReleases::add($relBin, ['signature' => base64_encode(random_bytes(64))] + $relArm), ValidationException::class));
+$relArm['signature'] = base64_encode(sodium_crypto_sign_detached(AgentReleases::message($relArm), sodium_crypto_sign_secretkey($relKeys)));
+AgentReleases::add($relBin, $relArm);
+check('release: Windows on ARM release stored', null !== AgentReleases::find('0.3.0', 'windows', 'arm64'));
+
+// --- Group Policy kit (zip made by the portal)
+$unzip = static function (string $zip): array {
+    $files = [];
+    $end = strrpos($zip, "PK\x05\x06");
+    $eocd = unpack('vdisk/vstart/vhere/vtotal/Vsize/Voffset', substr($zip, $end + 4, 16));
+    $pos = $eocd['offset'];
+    for ($i = 0; $i < $eocd['total']; $i++) {
+        $h = unpack('vmade/vneed/vflags/vmethod/vtime/vdate/Vcrc/Vpacked/Vsize/vname/vextra/vcomment/vdisk/vint/Vext/Vlocal', substr($zip, $pos + 4, 42));
+        $name = substr($zip, $pos + 46, $h['name']);
+        $local = unpack('vname/vextra', substr($zip, $h['local'] + 26, 4));
+        $raw = substr($zip, $h['local'] + 30 + $local['name'] + $local['extra'], $h['packed']);
+        $data = 8 === $h['method'] ? (string) gzinflate($raw) : $raw;
+        if ("PK\x03\x04" !== substr($zip, $h['local'], 4) || crc32($data) !== $h['crc'] || strlen($data) !== $h['size']) {
+            return [];
+        }
+        $files[$name] = $data;
+        $pos += 46 + $h['name'] + $h['extra'] + $h['comment'];
+    }
+    return $files;
+};
+$kitProgram = sys_get_temp_dir() . '/unit-kit-agent.exe';
+file_put_contents($kitProgram, 'MZ' . random_bytes(5000) . str_repeat("\0", 20000));
+$kitAbout = ['group' => "Office PCs", 'expires_at' => time() + 86400 * 90, 'max_uses' => 500, 'approval' => 'directory', 'tamper' => true, 'signin_auto' => false];
+$kitToken = '0123456789ab.' . str_repeat('A', 32);
+$kit = $unzip(Portal\GpoKit::build('https://otp.example.test', $kitToken, str_repeat('ab', 32), '', ['amd64' => $kitProgram, 'arm64' => $kitProgram], $kitAbout, time()));
+$f = 'SohobOTP-GroupPolicy/';
+check('Group Policy kit: a readable zip with the script, the read-me and both agent programs',
+    [$f . 'README.txt', $f . 'Install-SohobOTP.cmd', $f . 'Install-SohobOTP.ps1', $f . 'sohobotp-agent-amd64.exe', $f . 'sohobotp-agent-arm64.exe'] === array_keys($kit)
+    && file_get_contents($kitProgram) === $kit[$f . 'sohobotp-agent-amd64.exe']);
+$ps1 = $kit[$f . 'Install-SohobOTP.ps1'] ?? '';
+check('Group Policy kit: the script carries portal, pin and token, with Windows line ends', str_contains($ps1, "\$Portal = 'https://otp.example.test'\r\n") && str_contains($ps1, "\$Token  = '$kitToken'\r\n")
+    && str_contains($ps1, "\$Pin    = '" . str_repeat('ab', 32) . "'") && !str_contains(str_replace("\r\n", '', $ps1), "\n") && str_contains($ps1, "Get-Service -Name 'SohobOTPAgent'"));
+check('Group Policy kit: the startup script runs the PowerShell file beside it', str_contains($kit[$f . 'Install-SohobOTP.cmd'] ?? '', '-ExecutionPolicy Bypass -File "%~dp0Install-SohobOTP.ps1"'));
+check('Group Policy kit: the read-me names the policy, warns when Sign-in is not installed automatically, and has the steps',
+    str_contains($kit[$f . 'README.txt'] ?? '', 'Computer policy: Office PCs') && str_contains($kit[$f . 'README.txt'], 'does NOT have "Install and update SohobOTP Sign-in automatically"')
+    && str_contains($kit[$f . 'README.txt'], '\\\\<your domain>\\NETLOGON\\SohobOTP\\Install-SohobOTP.cmd') && str_contains($kit[$f . 'README.txt'], 'uninstall code'));
+check('Group Policy kit: a quote in a value cannot end the PowerShell string', str_contains(
+    $unzip(Portal\GpoKit::build("https://otp.example.test", "a'b", 'pin', '', ['amd64' => $kitProgram], $kitAbout, time()))[$f . 'Install-SohobOTP.ps1'], "\$Token  = 'a''b'"));
+$kitCa = $unzip(Portal\GpoKit::build('https://otp.example.test', $kitToken, 'pin', "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n", ['amd64' => $kitProgram], ['signin_auto' => true] + $kitAbout, time()));
+check('Group Policy kit: the portal certificate is added when given; one program is enough', isset($kitCa[$f . 'portal-ca.pem']) && !isset($kitCa[$f . 'sohobotp-agent-arm64.exe']) && !isset($kit[$f . 'portal-ca.pem'])
+    && str_contains($kitCa[$f . 'README.txt'], 'the agent installs SohobOTP Sign-in'));
+check('Group Policy kit: refused without a Windows agent program', throws(static fn () => Portal\GpoKit::build('https://otp.example.test', $kitToken, 'pin', '', [], $kitAbout, time()), ValidationException::class));
+check('zip: unsafe entry names refused', throws(static fn () => (new Portal\ZipWriter(time()))->add('../x', 'y')));
+unlink($kitProgram);
+check('token: a Group Policy kit may be valid for up to a year, a download for 30 days', throws(static fn () => $endpoints->createToken($servers['id'], 'x', 721, 1, 'unit'), ValidationException::class)
+    && 8760 * 3600 === (static function () use ($endpoints, $servers): int { [$t] = $endpoints->createToken($servers['id'], 'kit', 8760, 1, 'unit', 'directory', 8760); return $t['expires_at'] - $t['created_at']; })()
+    && throws(static fn () => $endpoints->createToken($servers['id'], 'x', 8761, 1, 'unit', 'directory', 8760), ValidationException::class));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -707,3 +707,6 @@ pre:has(> code) { position: relative; }
 /* Users on this computer: tick or untick a column for the users the search shows */
 .tick-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 #accounts-table td:nth-child(2), #accounts-table td:nth-child(3), #accounts-table th:nth-child(2), #accounts-table th:nth-child(3) { text-align: center; }
+
+/* a secret shown once (uninstall code of a computer) */
+.secret-once { font-size: 1.1rem; letter-spacing: .08em; user-select: all; padding: .15em .5em; }

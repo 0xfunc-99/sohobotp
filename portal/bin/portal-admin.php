@@ -13,7 +13,12 @@
  *   php portal/bin/portal-admin.php enable|disable --username=alice
  *   php portal/bin/portal-admin.php verify-audit
  *   php portal/bin/portal-admin.php engine-key   (encrypt token secrets with a private key; status: --state=status)
+ *   php portal/bin/portal-admin.php release-key-set --key=<public release key>   (release-key-show: which one is set)
+ *       the PUBLIC key printed by "sohobotp-agent release keygen" / agent/packaging/release.sh: the portal
+ *       then refuses agent releases that are not signed with it. The private key never comes here.
  *   php portal/bin/portal-admin.php agent-release-add --file=sohobotp-agent-linux-amd64 --manifest=manifest.json
+ *   php portal/bin/portal-admin.php agent-release-add --dir=release-0.3.0
+ *       --dir: every <program> + <program>.manifest.json pair in a folder made by agent/packaging/release.sh
  *   php portal/bin/portal-admin.php agent-release-list
  *   php portal/bin/portal-admin.php agent-program-add --file=sohobotp-agent-linux-amd64 --os=linux --arch=amd64
  *       agent program for the "Download agent" page (os: linux|windows, arch: amd64|arm64); a signed
@@ -80,7 +85,7 @@ $command = $argv[1] ?? 'help';
 // --name=value options after the command (getopt() would stop at the command word)
 $options = [];
 foreach (array_slice($argv, 2) as $arg) {
-    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest|os|arch|kind|version)=(.*)$/s', $arg, $m)) {
+    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest|os|arch|kind|version|key|dir)=(.*)$/s', $arg, $m)) {
         $options[$m[1]] = $m[2];
     } elseif ('--once' === $arg) {
         $options['once'] = true;
@@ -221,14 +226,40 @@ try {
             out('Back up this key file with your data: without it, the data cannot be read.');
             break;
 
+        case 'release-key-set':
+            $fingerprint = Portal\AgentReleases::setReleaseKey((string) ($options['key'] ?? ''));
+            $audit->record('agent.release_key_set', 'success', $fingerprint);
+            out('Release key stored (public key ' . $fingerprint . '). Agent releases must now be signed with it.');
+            break;
+
+        case 'release-key-show':
+            $fingerprint = Portal\AgentReleases::fingerprint();
+            out('' === $fingerprint ? 'No release key set: agent releases are stored without a check here (agents check them themselves).'
+                : 'Release key ' . $fingerprint . ' (public key ' . Portal\AgentReleases::releaseKey() . ').');
+            break;
+
         case 'agent-release-add':
-            $manifest = json_decode((string) @file_get_contents((string) ($options['manifest'] ?? '')), true);
-            if (!is_array($manifest)) {
-                fail('--manifest must be the JSON file written by "sohobotp-agent release sign".');
+            $pairs = [];
+            if (isset($options['dir'])) {
+                foreach (glob(rtrim((string) $options['dir'], '/') . '/*.manifest.json') ?: [] as $manifestFile) {
+                    $pairs[] = [substr($manifestFile, 0, -strlen('.manifest.json')), $manifestFile];
+                }
+                if ([] === $pairs) {
+                    fail('No *.manifest.json in ' . $options['dir'] . ' (use the folder written by agent/packaging/release.sh).');
+                }
+            } else {
+                $pairs[] = [(string) ($options['file'] ?? ''), (string) ($options['manifest'] ?? '')];
             }
-            $m = Portal\AgentReleases::add((string) ($options['file'] ?? ''), $manifest);
-            $audit->record('agent.release_add', 'success', "{$m['os']}/{$m['arch']} {$m['version']}", ['sha256' => $m['sha256'], 'size' => $m['size']]);
-            out("Added agent {$m['version']} for {$m['os']}/{$m['arch']}. Choose it as the target version of an endpoint group to roll it out.");
+            foreach ($pairs as [$file, $manifestFile]) {
+                $manifest = json_decode((string) @file_get_contents($manifestFile), true);
+                if (!is_array($manifest)) {
+                    fail('--manifest must be the JSON file written by "sohobotp-agent release sign".');
+                }
+                $m = Portal\AgentReleases::add($file, $manifest);
+                $audit->record('agent.release_add', 'success', "{$m['os']}/{$m['arch']} {$m['version']}", ['sha256' => $m['sha256'], 'size' => $m['size']]);
+                out("Added agent {$m['version']} for {$m['os']}/{$m['arch']}.");
+            }
+            out('Choose the version as "Agent version" of a computer policy to roll it out; "Add a computer" now gives this agent.');
             break;
 
         case 'agent-program-add':

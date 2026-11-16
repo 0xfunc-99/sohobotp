@@ -11,14 +11,15 @@ defined('PORTAL_ROOT') || exit;
  * Releases are signed OFFLINE with the release key (sohobotp-agent release sign); the portal
  * only stores and serves them through the signed agent API (a=release). Agents check the
  * signature against the release key built into them, so the portal cannot make them run
- * other code. If MULTIOTP_PORTAL_RELEASE_KEY (base64 public key) is set, the portal also
- * refuses to store a release whose signature does not verify.
+ * other code. When the portal knows the public release key (portal-admin.php release-key-set,
+ * or MULTIOTP_PORTAL_RELEASE_KEY), it also refuses to store a release whose signature does
+ * not verify, and shows which computers run an agent built with another key or none.
  *
  * Storage: <data>/releases/releases.json and <data>/releases/<os>-<arch>-<version>.bin
  */
 final class AgentReleases
 {
-    public const PLATFORMS = ['linux/amd64', 'linux/arm64', 'windows/amd64'];
+    public const PLATFORMS = ['linux/amd64', 'linux/arm64', 'windows/amd64', 'windows/arm64'];
     private const VERSION = '/^\d{1,4}\.\d{1,4}\.\d{1,4}$/';
 
     public static function dir(): string
@@ -28,6 +29,59 @@ final class AgentReleases
             throw new \RuntimeException('Cannot create the releases folder.');
         }
         return $dir;
+    }
+
+    /**
+     * The PUBLIC release key (base64) this portal checks uploads against: the environment
+     * variable MULTIOTP_PORTAL_RELEASE_KEY, else <data>/releases/release-public.key
+     * (portal-admin.php release-key-set). '' when none is set: uploads are stored unchecked
+     * (agents check them anyway). The private key is never on the portal.
+     */
+    public static function releaseKey(): string
+    {
+        $key = trim((string) (getenv('MULTIOTP_PORTAL_RELEASE_KEY') ?: ''));
+        if ('' === $key && is_file($file = Config::dataDir() . '/releases/release-public.key')) {
+            $key = trim((string) @file_get_contents($file));
+        }
+        return $key;
+    }
+
+    public static function setReleaseKey(string $key): string
+    {
+        $key = trim($key);
+        $raw = base64_decode($key, true);
+        if (false === $raw || SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES !== strlen($raw)) {
+            throw new ValidationException('The release key must be the public key printed by "sohobotp-agent release keygen" (44 characters of base64).');
+        }
+        $file = self::dir() . '/release-public.key';
+        if (false === file_put_contents($file, $key . "\n", LOCK_EX)) {
+            throw new \RuntimeException('Cannot store the release key.');
+        }
+        @chmod($file, 0600);
+        self::giveToWebUser();
+        return self::fingerprint();
+    }
+
+    /** Short name of the release key, as agents report theirs (first 8 bytes of its SHA-256, hex). '' when none. */
+    public static function fingerprint(): string
+    {
+        $raw = base64_decode(self::releaseKey(), true);
+        return false !== $raw && SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES === strlen($raw) ? substr(hash('sha256', $raw), 0, 16) : '';
+    }
+
+    /**
+     * portal-admin.php usually runs as root (docker exec): the releases folder and its files
+     * then go to the owner of the data folder (the web server user), which serves them.
+     */
+    private static function giveToWebUser(): void
+    {
+        if (!function_exists('posix_geteuid') || 0 !== posix_geteuid() || false === ($owner = @fileowner(Config::dataDir()))) {
+            return;
+        }
+        @chown(self::dir(), $owner);
+        foreach (glob(self::dir() . '/*') ?: [] as $file) {
+            @chown($file, $owner);
+        }
     }
 
     private static function store(): JsonStore
@@ -64,11 +118,11 @@ final class AgentReleases
         if (false === $signature || SODIUM_CRYPTO_SIGN_BYTES !== strlen($signature)) {
             throw new ValidationException('The manifest has no valid signature.');
         }
-        $key = getenv('MULTIOTP_PORTAL_RELEASE_KEY') ?: '';
+        $key = self::releaseKey();
         if ('' !== $key) {
             $pub = base64_decode($key, true);
             if (false === $pub || SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES !== strlen($pub) || !sodium_crypto_sign_verify_detached($signature, self::message($m), $pub)) {
-                throw new ValidationException('The release signature does not verify with MULTIOTP_PORTAL_RELEASE_KEY.');
+                throw new ValidationException('The release signature does not verify with the release key of this portal (' . self::fingerprint() . ').');
             }
         }
         $target = self::dir() . "/{$m['os']}-{$m['arch']}-{$m['version']}.bin";
@@ -80,6 +134,7 @@ final class AgentReleases
         self::store()->update(static function (array &$data) use ($m): void {
             $data["{$m['os']}/{$m['arch']}/{$m['version']}"] = $m;
         });
+        self::giveToWebUser();
         return $m;
     }
 

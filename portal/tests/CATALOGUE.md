@@ -156,6 +156,25 @@ State on 2026-11-09 after the P1 round: about 600 automated checks (160 unit, 32
 | Release download for another platform, disabled endpoint | refused by the portal | auto (portal unit) |
 | Upload of a release with a bad signature when the portal knows the release key | refused | auto (portal unit) |
 | Windows: running exe replaced, service restarts on the new version | yes | **manual** (Windows) |
+| Portal knows the release key: fingerprint as agents report it, other keys refused, Windows on ARM releases | as designed | auto (portal unit) |
+
+## 8b. Tamper protection and Group Policy kit
+
+| Case | Expected | Status |
+|---|---|---|
+| Policy switch on: policy carries the switch and the hash of the computer's code (same vector in Go and PHP); off: nothing added | as designed | auto (portal unit, agent unit) |
+| Uninstall without the code / wrong code / `forget` | refused, reported to the portal | auto (agent unit, agent e2e Linux, Windows e2e) |
+| Five wrong codes | codes refused for 15 minutes | auto (agent unit) |
+| Right code | agent removable for 10 minutes, then protected again | auto (agent unit, agent e2e Linux, Windows e2e) |
+| Windows: administrator stops / disables / deletes / re-permissions the service; edits the state; deletes the program | access denied | auto (Windows e2e) |
+| Windows Installer uninstall without or with a wrong code | fails before anything is removed; code not in the log | auto (Windows e2e) |
+| Setting changed by hand; SohobOTP Sign-in removed by hand | put back / installed again, reported | auto (agent unit, Windows e2e) |
+| Agent killed; service stopped by hand; power loss; upgrade | first two reported, last two not | auto (agent unit), killed: Windows e2e |
+| Events: unknown kinds, repeats, oversized, absurd time | ignored / stored once / cut / corrected; audit trail once each | auto (portal unit, e2e) |
+| Uninstall code page: shown once, not cached, audited without the code, not for help desk, CSRF | as designed | auto (e2e) |
+| Group Policy kit: zip readable, script values quoted, token limits, audited, not for help desk | as designed | auto (portal unit, e2e) |
+| Group Policy kit on a real domain (startup script from NETLOGON) | computers enrol at start | **manual** (needs Active Directory) |
+| Sign-in screen still asks for the code after an agent self-update / with tamper protection on | yes | **manual** (Windows) |
 
 ## 9. Web security
 

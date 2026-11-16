@@ -115,6 +115,12 @@ writes its registry values under
 
 ## Rollout from Active Directory (Group Policy)
 
+0. **Simplest: the Group Policy kit.** *Add a computer* → *Group Policy kit* downloads a zip
+   with a computer startup script, the agent programs, the portal certificate and a README
+   with the steps (copy to NETLOGON, name `Install-SohobOTP.cmd` as startup script, link the
+   GPO to the OU). The script installs the agent on computers that have none; with *Install and
+   update SohobOTP Sign-in automatically* the agent installs Sign-in itself, and with *Tamper
+   protection* local administrators cannot remove it. The points below are what the kit does.
 1. **Install with GPO.** Deploy the agent MSI (`sohobotp-agent.msi`, properties `PORTAL`, `TOKEN`,
    `PIN`, optional `CAFILE`) with Computer Configuration → Software Installation, or a startup
    script that runs `sohobotp-agent.exe install ...`. The Credential Provider MSI is deployed

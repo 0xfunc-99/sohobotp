@@ -66,6 +66,7 @@ final class AgentApi
                     // no break: respond() exits
                 case 'checkin':
                     $id = $endpoints->authenticate(self::headers(), 'POST', (string) ($_SERVER['REQUEST_URI'] ?? ''), $body);
+                    Audit::setActor('agent:' . $id); // tamper events are written to the audit trail
                     self::respond(200, $endpoints->checkin($id, $request, $ip));
                     // no break
                 case 'release':

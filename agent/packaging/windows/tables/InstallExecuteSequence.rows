@@ -4,3 +4,4 @@ FindRelatedProducts		25
 LaunchConditions		100
 MigrateFeatureStates		1200
 RemoveExistingProducts		1450
+CheckUninstall	REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE	1550

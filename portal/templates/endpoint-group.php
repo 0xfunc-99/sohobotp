@@ -39,7 +39,16 @@
       <option value="">No automatic update</option>
       <?php foreach (Portal\AgentReleases::versions() as $version): ?><option value="<?= e($version) ?>"<?= $input['agent_version'] === $version ? ' selected' : '' ?>><?= e($version) ?></option><?php endforeach; ?>
     </select>
-    <small>Machines with an older agent update themselves to this signed release (never downgraded). Releases are signed offline and added with portal-admin.php agent-release-add.</small></label>
+    <small>Machines with an older agent update themselves to this signed release (never downgraded). Releases are signed offline with your release key and added with <code>portal-admin.php agent-release-add</code>.
+      <?php $rk = Portal\AgentReleases::fingerprint(); ?><?= '' !== $rk ? 'This portal only accepts releases signed with release key <code>' . e($rk) . '</code>.' : '<strong>No release key set on this portal</strong> (<code>portal-admin.php release-key-set</code>): uploads are not checked here, agents still check them.' ?>
+      An agent built without a release key (0.2.0 and older downloads) cannot update itself: each computer's page says so.</small></label>
+  <label class="choice"><input type="checkbox" name="tamper_protection" value="1"<?= $on('tamper_protection') ?>>
+    <span><strong>Tamper protection</strong>: users who are administrators of their own computer cannot switch the two-factor sign-in off.
+      The agent is only uninstalled with the computer's <strong>uninstall code</strong> (each computer has its own; you see it on the computer's page);
+      on Windows its service cannot be stopped, disabled or deleted by an administrator and the Uninstall buttons of the agent and of SohobOTP Sign-in are hidden;
+      SohobOTP Sign-in removed by hand, or settings changed by hand, are put back within a minute or two; and every attempt is reported on the computer's page and in the audit trail.
+      Needs agent <?= e(Portal\Endpoints::TAMPER_MIN_AGENT) ?> or later; with <strong>Install and update SohobOTP Sign-in automatically</strong> below, a removed Sign-in is installed again.
+      Turning this off (or moving the computer to a policy without it) lifts the protection at the computer's next check-in.</span></label>
 
   <fieldset>
     <legend>Linux (PAM → RADIUS)</legend>

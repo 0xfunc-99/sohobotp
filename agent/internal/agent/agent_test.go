@@ -35,6 +35,8 @@ type fakePortal struct {
 	mode     string // active | pending | disabled | forged
 	version  int
 	seen     protocol.CheckinRequest
+	policy   map[string]any // nil: {"enabled": true}
+	events   []protocol.Event
 }
 
 func (f *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +48,9 @@ func (f *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"error":"bad_signature","message":"x"}`))
 		return
 	}
+	f.seen = protocol.CheckinRequest{}
 	json.Unmarshal(body, &f.seen)
+	f.events = append(f.events, f.seen.Events...)
 	switch f.mode {
 	case "disabled":
 		w.WriteHeader(403)
@@ -61,7 +65,7 @@ func (f *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sealed, _ := box.SealAnonymous(nil, []byte("Radius-Secret-0123"), f.boxPub, rand.Reader)
 		payload, _ := json.Marshal(map[string]any{
 			"endpoint_id": "e0000000000000000001", "version": f.version, "issued_at": time.Now().Unix(), "os": runtime.GOOS,
-			"policy": map[string]any{"enabled": true}, "secrets": map[string]string{"radius_secret": b64.EncodeToString(sealed)},
+			"policy": f.policyOrDefault(), "secrets": map[string]string{"radius_secret": b64.EncodeToString(sealed)},
 		})
 		signer := f.key
 		if f.mode == "forged" {
@@ -70,6 +74,13 @@ func (f *fakePortal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply.Config = &protocol.Envelope{Payload: b64.EncodeToString(payload), Signature: b64.EncodeToString(ed25519.Sign(signer, append([]byte("multiotp-config-v1\n"), payload...)))}
 	}
 	json.NewEncoder(w).Encode(reply)
+}
+
+func (f *fakePortal) policyOrDefault() map[string]any {
+	if f.policy != nil {
+		return f.policy
+	}
+	return map[string]any{"enabled": true}
 }
 
 type recordApplier struct {

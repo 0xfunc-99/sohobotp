@@ -124,6 +124,7 @@ final class App
             'endpoint-rules'        => $endpoints->rules(),
             'endpoint-enrol'        => $endpoints->enrol(),
             'agent-download'        => $endpoints->agentDownload(),
+            'gpo-kit'               => $endpoints->gpoKit(),
             'signin-packages'       => $endpoints->signinPackages(),
             'users'          => $users->index(),
             'self-service'   => $users->selfService(),

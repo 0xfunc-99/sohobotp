@@ -6,7 +6,8 @@
 //	sohobotp-agent run [--once]
 //	sohobotp-agent status
 //	sohobotp-agent apply --dry-run --config FILE   (Linux: {"policy": {...}, "secret": "..."})
-//	sohobotp-agent uninstall
+//	sohobotp-agent uninstall [--code CODE]         (the code: computers with tamper protection)
+//	sohobotp-agent upgrade                         (replace an older installed agent by this program)
 //	sohobotp-agent version
 package main
 
@@ -64,7 +65,19 @@ func main() {
 	case "apply":
 		err = dryRun(os.Args[2:])
 	case "uninstall":
-		err = uninstall()
+		err = uninstall(os.Args[2:])
+	case "upgrade":
+		if err = agent.RequireAdmin(); err == nil {
+			err = upgrade()
+		}
+	case "check-uninstall": // run by the Windows MSI before it removes anything (hidden from the log)
+		if err = agent.RequireAdmin(); err == nil {
+			code := ""
+			if len(os.Args) > 2 {
+				code = os.Args[2]
+			}
+			err = agent.AuthoriseUninstall(code)
+		}
 	case "release":
 		err = releaseCmd(os.Args[2:])
 	case "save-token": // run by the Windows MSI (custom action hidden from the log)
@@ -79,12 +92,16 @@ func main() {
 		err = selftest(os.Args[2:])
 	case "forget": // run by the Windows MSI on uninstall: the next install enrols afresh
 		if err = agent.RequireAdmin(); err == nil {
-			err = state.Remove()
+			if err = agent.RemovalAllowed(); err == nil {
+				err = state.Remove()
+			}
 		}
 	case "version":
 		fmt.Println("sohobotp-agent", inventory.Version)
-		if release.PublicKey == "" {
+		if fp := release.Fingerprint(); fp == "" {
 			fmt.Println("self-update: disabled (no release key in this build)")
+		} else {
+			fmt.Println("self-update: signed releases only (release key " + fp + ")")
 		}
 	default:
 		usage()
@@ -103,7 +120,9 @@ func usage() {
   run [--once]       check in with the portal (the service runs this)
   status             enrolment, last check-in, applied configuration
   apply --dry-run --config FILE   show what a Linux policy would change
-  uninstall          remove the PAM changes (Linux), the service and the agent state
+  uninstall [--code CODE]   remove the PAM changes (Linux), the service and the agent state; a computer
+                     with tamper protection needs its uninstall code (portal: Computers, the computer)
+  upgrade            replace an older installed agent by this program (the enrolment is kept)
   forget             delete the agent state only (the Windows MSI runs it on uninstall)
   version
   release keygen --out DIR                       create the OFFLINE release key (keep it off the portal)
@@ -138,6 +157,16 @@ func install(args []string) error {
 	}
 	if err := agent.RequireAdmin(); err != nil {
 		return err
+	}
+	if state.Exists() {
+		// already enrolled: a newer agent program replaces the installed one, nothing else changes
+		if err := upgrade(); err != nil {
+			return fmt.Errorf("this machine is already enrolled, and %w", err)
+		}
+		if fromDownload {
+			fmt.Println("Delete the downloaded file: it contains an enrolment token (not used: the machine keeps its enrolment).")
+		}
+		return nil
 	}
 	st, err := agent.Enroll(agent.Enrolment{Portal: *portal, Token: *token, Pin: *pin, CAFile: *caFile, CAPEM: caPEM})
 	if err != nil {
@@ -248,6 +277,13 @@ func report(st *state.State) {
 	if st.Applied.Error != "" {
 		fmt.Printf("Apply error:     %s\n", st.Applied.Error)
 	}
+	if st.Protected {
+		note := "on (uninstall needs the code from the portal)"
+		if time.Now().Unix() < st.UninstallAllowedUntil {
+			note = "on, uninstall allowed until " + time.Unix(st.UninstallAllowedUntil, 0).UTC().Format("15:04 UTC") + " (the right code was entered)"
+		}
+		fmt.Printf("Tamper protection: %s\n", note)
+	}
 	if st.UpdateBlockedVersion != "" {
 		fmt.Printf("Update blocked:  %s (rolled back: it stopped at start; publish a fixed version)\n", st.UpdateBlockedVersion)
 	}
@@ -292,9 +328,37 @@ func dryRun(args []string) error {
 	return nil
 }
 
-func uninstall() error {
+// upgrade replaces the installed agent by this (newer) program.
+func upgrade() error {
+	old, err := agent.Upgrade()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("The installed agent %s was replaced by %s and started again. The machine keeps its enrolment.\n", old, inventory.Version)
+	return nil
+}
+
+func uninstall(args []string) error {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	code := fs.String("code", "", "uninstall code of this computer (portal: Computers, the computer, Uninstall code)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if err := agent.RequireAdmin(); err != nil {
 		return err
+	}
+	if err := agent.AuthoriseUninstall(*code); err != nil {
+		if errors.Is(err, agent.ErrCodeNeeded) || errors.Is(err, agent.ErrWrongCode) {
+			return fmt.Errorf("%w\nAn administrator of the SohobOTP portal finds the code under Computers, this computer, Uninstall code. Then:\n  sohobotp-agent uninstall --code XXXX-XXXX-XXXX\n(every attempt is reported to the portal)", err)
+		}
+		return err
+	}
+	if byInstaller, err := agent.UninstallByInstaller(); byInstaller {
+		if err != nil {
+			return err
+		}
+		fmt.Println("Windows Installer is removing the SohobOTP agent. Delete the computer in the portal if it is retired.")
+		return nil
 	}
 	if err := agent.UninstallService(); err != nil {
 		return err

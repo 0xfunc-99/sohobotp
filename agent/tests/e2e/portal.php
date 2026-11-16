@@ -129,6 +129,7 @@ switch ($argv[1] ?? '') {
             'update-0.4.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.4.0'],
             'update-0.5.0' => ['linux_services' => ['sshd'], 'agent_version' => '0.5.0'],
             'off' => ['linux_enabled' => ''],
+            'tamper' => ['linux_enabled' => '', 'tamper_protection' => '1'],
         ];
         $over = $presets[$argv[2] ?? ''] ?? throw new InvalidArgumentException('policy presets: ' . implode(', ', array_keys($presets)));
         $g = group();
@@ -147,6 +148,14 @@ switch ($argv[1] ?? '') {
         $admin = 'admin' === ($argv[2] ?? '') ? array_values(array_diff($all, [$who])) : $all;
         $endpoints->setCodeExempt($e['id'], $signin, $admin);
         echo "saved\n";
+        break;
+    case 'uninstall-code':
+    case 'tamper-state':
+        // what the computer's page shows: its uninstall code, and whether it is protected
+        $endpoints = new Endpoints();
+        $g = group();
+        $e = array_values(array_filter($endpoints->endpoints(), static fn (array $x): bool => $x['group_id'] === $g['id'] && null !== $x['last_seen']))[0] ?? throw new RuntimeException('no Linux endpoint');
+        echo 'uninstall-code' === $argv[1] ? $endpoints->uninstallCode($e['id']) : $endpoints->tamperState($e), "\n";
         break;
     case 'endpoint':
         $g = group();

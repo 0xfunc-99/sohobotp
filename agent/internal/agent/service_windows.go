@@ -54,8 +54,7 @@ func InstallService() error {
 		return err
 	}
 	defer m.Disconnect()
-	if s, err := m.OpenService(serviceName); err == nil {
-		s.Close()
+	if serviceExists() {
 		return fmt.Errorf("the %s service already exists", serviceName)
 	}
 	s, err := m.CreateService(serviceName, target, mgr.Config{
@@ -129,6 +128,7 @@ func (h *handler) Execute(_ []string, requests <-chan svc.ChangeRequest, status 
 			case svc.Interrogate:
 				status <- req.CurrentStatus
 			case svc.Stop, svc.Shutdown:
+				stopByHand.Store(req.Cmd == svc.Stop) // not at shutdown (tamper.go)
 				status <- svc.Status{State: svc.StopPending}
 				close(stop)
 				<-done

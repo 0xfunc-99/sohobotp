@@ -14,3 +14,7 @@ func ensureDir(dir string) error {
 }
 
 func protectFile(path string) error { return os.Chmod(path, 0o600) }
+
+func requestDir() string { return Dir() + "/requests" }
+
+func ensureRequestDir(dir string) error { return ensureDir(dir) }

@@ -47,6 +47,33 @@
   </fieldset>
 </form>
 
+<section class="panel" id="gpo">
+  <h2>Many Windows computers at once: Group Policy kit</h2>
+  <p>For computers in Active Directory. The kit is a folder you copy to a network share and name as a <strong>computer startup script</strong> in a Group Policy: every computer of the OU then installs the agent by itself the next time it starts. The steps are in the kit's README.txt.</p>
+  <?php if (null === $programs['windows/amd64'] && null === $programs['windows/arm64']): ?>
+    <p class="muted">The portal has no Windows agent program yet (see the list above).</p>
+  <?php else: ?>
+    <form method="post" action="<?= e(route('gpo-kit')) ?>" class="form narrow">
+      <?= csrf_field() ?>
+      <label>Computer policy
+        <select name="group_id"><?php foreach ($groups as $g): ?><option value="<?= e($g['id']) ?>"<?= $g['id'] === $values['group_id'] ? ' selected' : '' ?>><?= e($g['name']) ?></option><?php endforeach; ?></select>
+        <small>Tip: a policy with <strong>Install and update SohobOTP Sign-in automatically</strong> (nothing else to deploy) and <strong>Tamper protection</strong> (users who are administrators of their computer cannot remove it).</small></label>
+      <label>Label <input name="label" maxlength="100" value="" placeholder="Group Policy kit, head office"></label>
+      <label>The kit works for (days) <input name="days" value="90" inputmode="numeric"><small>1 to 365. After that, new computers need a new kit; computers already enrolled are not affected.</small></label>
+      <label>Maximum computers <input name="max_uses" value="500" inputmode="numeric"><small>Up to 10000.</small></label>
+      <label>New computers
+        <select name="approval">
+          <?php foreach (Portal\Endpoints::APPROVAL as $value => $label): ?><option value="<?= e($value) ?>"<?= 'directory' === $value ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?>
+        </select>
+        <small>Every domain user can read a startup script, and so the kit's token. With approval, a copied token cannot add an unknown machine.</small></label>
+      <label>Portal address <input name="portal" value="<?= e($values['portal']) ?>" maxlength="300" autocapitalize="none" spellcheck="false" required></label>
+      <label>CA certificate of the portal (PEM)
+        <textarea name="ca_pem" rows="4" spellcheck="false" autocapitalize="none" placeholder="Leave empty when the portal's certificate comes from a public authority"><?= e($values['ca_pem']) ?></textarea></label>
+      <div class="actions"><button type="submit" class="button-primary">Download the Group Policy kit (.zip)</button></div>
+    </form>
+  <?php endif; ?>
+</section>
+
 <section class="panel">
   <h2>On the machine</h2>
   <ul>

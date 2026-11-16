@@ -16,11 +16,11 @@ jobs:
         run: sh agent/tests/run-in-docker.sh
       - name: Agent MSI
         run: sh agent/packaging/windows/build-msi.sh
-      - name: Agent 0.2.1 and its MSI (upgrade test)
+      - name: Agent 0.3.1 and its MSI (upgrade test)
         run: |
           docker run --rm -v "$PWD":/src -w /src/agent -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 golang:1.22.10-bookworm \
-            go build -buildvcs=false -trimpath -ldflags "-s -w -X multiotp-portal/agent/internal/inventory.Version=0.2.1" -o dist/upgrade/sohobotp-agent-windows-amd64.exe ./cmd/sohobotp-agent
-          AGENT_VERSION=0.2.1 AGENT_EXE=dist/upgrade/sohobotp-agent-windows-amd64.exe MSI_OUT=dist/upgrade/sohobotp-agent-0.2.1.msi sh agent/packaging/windows/build-msi.sh
+            go build -buildvcs=false -trimpath -ldflags "-s -w -X multiotp-portal/agent/internal/inventory.Version=0.3.1" -o dist/upgrade/sohobotp-agent-windows-amd64.exe ./cmd/sohobotp-agent
+          AGENT_VERSION=0.3.1 AGENT_EXE=dist/upgrade/sohobotp-agent-windows-amd64.exe MSI_OUT=dist/upgrade/sohobotp-agent-0.3.1.msi sh agent/packaging/windows/build-msi.sh
       - name: Test portal for Windows
         run: |
           docker run --rm -v "$PWD":/src -w /src/agent -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 \
@@ -33,7 +33,7 @@ jobs:
             agent/dist/sohobotp-agent-windows-amd64.exe
             agent/dist/sohobotp-agent-windows-arm64.exe
             agent/dist/fakeportal.exe
-            agent/dist/upgrade/sohobotp-agent-0.2.1.msi
+            agent/dist/upgrade/sohobotp-agent-0.3.1.msi
 
   signin-build:
     runs-on: windows-2022
@@ -119,7 +119,7 @@ jobs:
         run: |
           $signin = Get-ChildItem signin-out -Filter *.msi -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'x86' } | Select-Object -First 1
           $params = @{ AgentMsi = (Resolve-Path agent-out/sohobotp-agent.msi).Path; FakePortal = (Resolve-Path agent-out/fakeportal.exe).Path; Work = "$env:RUNNER_TEMP\sohobotp-e2e"
-                       UpgradeMsi = (Resolve-Path agent-out/upgrade/sohobotp-agent-0.2.1.msi).Path }
+                       UpgradeMsi = (Resolve-Path agent-out/upgrade/sohobotp-agent-0.3.1.msi).Path }
           if ($signin) { $params.SignInMsi = $signin.FullName; Write-Host "with SohobOTP Sign-in: $($signin.Name)" } else { Write-Host "SohobOTP Sign-in not built: testing the agent with its registry key only" }
           & ./agent/tests/windows/e2e.ps1 @params
           $rc = $LASTEXITCODE

@@ -44,6 +44,37 @@ type State struct {
 	// Self-update safety (agent/internal/agent/safeupdate.go)
 	UpdatePending        *UpdatePending `json:"update_pending,omitempty"`
 	UpdateBlockedVersion string         `json:"update_blocked_version,omitempty"`
+	// Tamper protection (agent/internal/agent/tamper.go). Protected and the hash come from
+	// the last configuration received, also when applying it failed.
+	Protected         bool   `json:"protected,omitempty"`
+	UninstallCodeHash string `json:"uninstall_code_hash,omitempty"`
+	// Locked: this agent locked the machine (service and folder permissions, Uninstall
+	// buttons hidden); it unlocks what it locked when the protection is turned off.
+	Locked bool `json:"locked,omitempty"`
+	// wrong uninstall codes: after MaxCodeFailures the code is refused for a while
+	UninstallFailures    int   `json:"uninstall_failures,omitempty"`
+	UninstallLockedUntil int64 `json:"uninstall_locked_until,omitempty"`
+	// the right code was given: until then the agent may be removed (uninstall, MSI)
+	UninstallAllowedUntil int64 `json:"uninstall_allowed_until,omitempty"`
+	// Events not yet received by the portal.
+	Events []protocol.Event `json:"events,omitempty"`
+	// The configuration in force, as received (signed, secrets sealed): with tamper protection
+	// the agent applies it again when it finds the machine's settings changed.
+	LastConfig *protocol.Envelope `json:"last_config,omitempty"`
+	// Running is set while the service runs and removed when it stops normally: found at a
+	// start in the same Windows/Linux session, the agent was killed.
+	Running *RunMarker `json:"running,omitempty"`
+	// Stopped is set when the service is stopped by hand (not at shutdown).
+	Stopped *RunMarker `json:"stopped,omitempty"`
+	// when an event was last raised, by kind and detail: the same one is not repeated for an hour
+	EventSeen map[string]int64 `json:"event_seen,omitempty"`
+}
+
+// RunMarker notes when the service started or was stopped, and with which version.
+type RunMarker struct {
+	At      int64  `json:"at"`
+	Version string `json:"version"`
+	PID     int    `json:"pid,omitempty"`
 }
 
 // UpdatePending is a self-update installed but not yet confirmed by a successful check-in.
@@ -172,7 +203,22 @@ func (s *State) Save() error {
 // Administrators only).
 func EnsureDir() error { return ensureDir(Dir()) }
 
-// Remove deletes the state directory (uninstall).
+// Remove deletes the state directory (uninstall) and the requests folder.
 func Remove() error {
+	_ = os.RemoveAll(RequestDir())
 	return os.RemoveAll(Dir())
 }
+
+// RequestDir is where a command run by an administrator leaves a request for the running
+// service (uninstall with the code). It is beside the state folder on Windows, where the state
+// folder becomes read-only for administrators under tamper protection.
+func RequestDir() string { return requestDir() }
+
+// EnsureRequestDir creates the requests folder (root, or SYSTEM and Administrators, only).
+func EnsureRequestDir() error { return ensureRequestDir(RequestDir()) }
+
+// SetLocked tells the state folder's permissions to use: with tamper protection on Windows,
+// administrators can read it but only SYSTEM (the service) can change it. No effect on Linux.
+func SetLocked(on bool) { locked = on }
+
+var locked bool

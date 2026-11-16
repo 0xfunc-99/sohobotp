@@ -37,6 +37,11 @@ type Inventory struct {
 	AgentVersion string    `json:"agent_version"`
 	Component    Component `json:"component"`
 	Accounts     []Account `json:"accounts,omitempty"`
+	// ReleaseKey is the short fingerprint of the release key built into this agent ("" when the
+	// build has none: it cannot update itself). The portal shows which computers can self-update.
+	ReleaseKey string `json:"release_key,omitempty"`
+	// Protected: tamper protection is in force on the machine (uninstall code, locked service).
+	Protected bool `json:"protected,omitempty"`
 }
 
 // Account is a user account that can sign in on the machine: local accounts with a login
@@ -86,6 +91,41 @@ type EnrollReply struct {
 type CheckinRequest struct {
 	Inventory Inventory `json:"inventory"`
 	Applied   Applied   `json:"applied"`
+	// Events the agent noticed since its last successful check-in (tamper protection). They
+	// are sent again until a check-in succeeds; the portal ignores an id it already has.
+	Events []Event `json:"events,omitempty"`
+}
+
+// Event is something that happened on the machine that an administrator should know about:
+// an uninstall attempt, the agent stopped or killed, sign-in settings changed by hand.
+type Event struct {
+	ID     string `json:"id"`   // random (16 hex characters)
+	At     int64  `json:"at"`   // Unix time on the machine
+	Kind   string `json:"kind"` // see the Event* constants
+	Detail string `json:"detail,omitempty"`
+}
+
+// Kinds of events (portal/docs/agent-protocol.md, section 5).
+const (
+	EventUninstallRefused = "uninstall_refused" // uninstall tried without the right code
+	EventUninstalled      = "uninstalled"       // uninstall allowed by the right code
+	EventServiceStopped   = "service_stopped"   // the service was stopped by hand, then started again
+	EventAgentKilled      = "agent_killed"      // the agent process ended without being stopped
+	EventSigninRemoved    = "signin_removed"    // SohobOTP Sign-in was removed from the machine
+	EventSettingsRestored = "settings_restored" // settings changed outside the agent, put back
+	EventProtectionBroken = "protection_broken" // the agent could not put the settings back
+	EventServiceChanged   = "service_changed"   // the service's start type or permissions were changed, put back
+)
+
+// MaxEvents bounds the events kept on the machine and sent at a check-in.
+const MaxEvents = 50
+
+// Protection is the tamper-protection part of a policy; the same two fields are in the Linux
+// and in the Windows policy. With tamper protection the agent is only uninstalled with the
+// computer's uninstall code (shown in the portal): the policy carries its hash, never the code.
+type Protection struct {
+	TamperProtection  bool   `json:"tamper_protection"`
+	UninstallCodeHash string `json:"uninstall_code_hash"` // hex PBKDF2-HMAC-SHA256 (internal/tamper)
 }
 
 // CheckinReply is the answer to a=checkin. Unknown fields are ignored.
@@ -142,6 +182,7 @@ type LinuxPolicy struct {
 	// Set from the computer's page in the portal ("Users on this computer").
 	ExcludedUsersByService map[string][]string `json:"excluded_users_by_service,omitempty"`
 	SSHKeysNeedCode        bool                `json:"ssh_keys_need_code"`
+	Protection                                 // tamper_protection, uninstall_code_hash
 }
 
 // RadiusServer is one FreeRADIUS server, in failover order.
@@ -176,6 +217,7 @@ type WindowsPolicy struct {
 	// these SHA-256 values (this policy is signed by the portal key). Empty: install by hand.
 	SigninPackages map[string]Package `json:"signin_packages,omitempty"` // amd64 | arm64
 	VCRedist       *Package           `json:"vcredist,omitempty"`        // Visual C++ runtime x64 (Sign-in's PHP engine)
+	Protection                        // tamper_protection, uninstall_code_hash
 }
 
 // Package is an installer the agent downloads from the portal and checks before running it.

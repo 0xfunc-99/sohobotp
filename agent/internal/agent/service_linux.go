@@ -92,6 +92,7 @@ func RunService() error {
 	stop := make(chan struct{})
 	go func() {
 		waitForSignal()
+		stopByHand.Store(stoppedByHand())
 		close(stop)
 	}()
 	if Serve(stop) {

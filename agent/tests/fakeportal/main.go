@@ -5,7 +5,9 @@
 //	fakeportal --dir C:\sohobotp-test --addr 127.0.0.1:8443
 //
 // It writes into --dir: ca.pem, token.txt, pin.txt, expected.json (the values the agent must
-// write) and state.json (the last check-in: endpoint id, applied version and status).
+// write), state.json (the last check-in: endpoint id, applied version and status) and
+// events.json (every event the agents reported). With --tamper-code the policy turns tamper
+// protection on with that uninstall code.
 package main
 
 import (
@@ -37,6 +39,7 @@ import (
 	"golang.org/x/crypto/nacl/box"
 
 	"multiotp-portal/agent/internal/protocol"
+	"multiotp-portal/agent/internal/tamper"
 )
 
 var b64 = base64.StdEncoding
@@ -57,6 +60,8 @@ type portal struct {
 	// computer policy "install SohobOTP Sign-in automatically": the real installer (x64)
 	signinMSI     []byte
 	signinVersion string
+	tamperCode    string // computer policy "tamper protection" with this uninstall code
+	events        []protocol.Event
 	mu            sync.Mutex
 	endpoints     map[string]*endpoint
 	nonces        map[string]bool
@@ -67,13 +72,14 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8443", "listen address")
 	signinMSI := flag.String("signin-msi", "", "SohobOTP Sign-in installer the policy tells the agent to install")
 	signinVersion := flag.String("signin-version", "", "its version (ProductVersion)")
+	tamperCode := flag.String("tamper-code", "", "turn tamper protection on, with this uninstall code")
 	flag.Parse()
 	if err := os.MkdirAll(*dir, 0o755); err != nil {
 		log.Fatal(err)
 	}
 	_, key, _ := ed25519.GenerateKey(rand.Reader)
 	p := &portal{dir: *dir, addr: *addr, key: key, endpoints: map[string]*endpoint{}, nonces: map[string]bool{},
-		token: randHex(6) + "." + randB64url(24), cpSecret: randHex(24), radiusSec: "Radius-" + randHex(10), signinVersion: *signinVersion}
+		token: randHex(6) + "." + randB64url(24), cpSecret: randHex(24), radiusSec: "Radius-" + randHex(10), signinVersion: *signinVersion, tamperCode: *tamperCode}
 	if *signinMSI != "" {
 		data, err := os.ReadFile(*signinMSI)
 		if err != nil {
@@ -186,6 +192,16 @@ func (p *portal) checkin(w http.ResponseWriter, r *http.Request, body []byte) {
 	_ = json.Unmarshal(body, &req)
 	state, _ := json.MarshalIndent(map[string]any{"endpoint_id": id, "applied": req.Applied, "inventory": req.Inventory, "at": time.Now().Unix()}, "", "  ")
 	write(p.dir, "state.json", state)
+	if len(req.Events) > 0 {
+		p.mu.Lock()
+		p.events = append(p.events, req.Events...)
+		all, _ := json.MarshalIndent(p.events, "", "  ")
+		p.mu.Unlock()
+		write(p.dir, "events.json", all)
+		for _, e := range req.Events {
+			log.Printf("event %s: %s", e.Kind, e.Detail)
+		}
+	}
 	out := protocol.CheckinReply{CheckinInterval: 30, State: "active"}
 	if req.Applied.Version < 1 {
 		out.Config = p.config(id, ep)
@@ -213,9 +229,18 @@ func (p *portal) config(id string, ep *endpoint) *protocol.Envelope {
 			wp.SigninPackages = map[string]protocol.Package{"amd64": {Version: p.signinVersion, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(p.signinMSI))}}
 			policy = wp
 		}
+		if p.tamperCode != "" {
+			wp := policy.(protocol.WindowsPolicy)
+			wp.Protection = protocol.Protection{TamperProtection: true, UninstallCodeHash: tamper.Hash(id, p.tamperCode)}
+			policy = wp
+		}
 		secrets["cp_shared_secret"] = seal(p.cpSecret)
 	} else {
-		policy = protocol.LinuxPolicy{Enabled: false}
+		lp := protocol.LinuxPolicy{Enabled: false}
+		if p.tamperCode != "" {
+			lp.Protection = protocol.Protection{TamperProtection: true, UninstallCodeHash: tamper.Hash(id, p.tamperCode)}
+		}
+		policy = lp
 	}
 	policyRaw, _ := json.Marshal(policy)
 	payload, _ := json.Marshal(map[string]any{"endpoint_id": id, "version": 1, "issued_at": time.Now().Unix(), "os": ep.os, "policy": json.RawMessage(policyRaw), "secrets": secrets})

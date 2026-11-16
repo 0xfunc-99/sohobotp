@@ -47,7 +47,9 @@
             <td class="nowrap"><?= e(format_time($r['last_seen'])) ?></td>
             <td><?= (int) $r['applied']['version'] ?> / <?= (int) $r['config']['version'] ?>
               <?php if ($r['applied']['version'] === $r['config']['version'] && 'applied' === $r['applied']['status']): ?><span class="muted">up to date</span><?php endif; ?></td>
-            <td><?= e($inv['agent_version']) ?></td>
+            <td><?= e($inv['agent_version']) ?>
+              <?php if ('on' === $r['tamper']): ?><br><span class="status status-success" title="Tamper protection is in force on this computer">protected</span>
+              <?php elseif ('old_agent' === $r['tamper']): ?><br><span class="status status-failure" title="Tamper protection is on in its policy, but its agent is too old (needs <?= e(Portal\Endpoints::TAMPER_MIN_AGENT) ?>)">not protected</span><?php endif; ?></td>
           </tr>
         <?php endforeach; ?>
         <?php if ([] === $rows): ?><tr><td colspan="7" class="empty"><?= 0 === $total ? 'No endpoints yet. Create an enrolment token and install the agent on a machine.' : 'No endpoint matches the filter.' ?></td></tr><?php endif; ?>

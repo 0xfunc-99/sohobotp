@@ -33,6 +33,8 @@ type Agent struct {
 	backoff time.Duration
 	// Updated is the version installed by a self-update; the process must restart.
 	Updated string
+	// lastDrift: when a protected agent last checked the machine's settings (tamper.go)
+	lastDrift int64
 }
 
 // Load prepares the agent from its saved state.
@@ -45,6 +47,7 @@ func Load() (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	state.SetLocked(protectedNow(st, time.Now().Unix())) // keep the folder's permissions as they are
 	c, err := client.New(st.PortalURL, st.CAFile)
 	if err != nil {
 		return nil, err
@@ -63,7 +66,10 @@ func Logf(format string, args ...any) {
 // Once performs one check-in and applies a configuration if one is received.
 // It returns how long to wait before the next check-in.
 func (a *Agent) Once() (time.Duration, error) {
-	reply, err := a.Client.Checkin(a.St.EndpointID, a.Keys.Sign, protocol.CheckinRequest{Inventory: inventory.Collect(), Applied: a.St.Applied})
+	inv := inventory.Collect()
+	inv.Protected = protectedNow(a.St, a.now().Unix())
+	sent := len(a.St.Events)
+	reply, err := a.Client.Checkin(a.St.EndpointID, a.Keys.Sign, protocol.CheckinRequest{Inventory: inv, Applied: a.St.Applied, Events: a.St.Events})
 	if err != nil {
 		var apiErr *client.APIError
 		if errors.As(err, &apiErr) && apiErr.Code == "disabled" {
@@ -74,6 +80,7 @@ func (a *Agent) Once() (time.Duration, error) {
 		return a.nextBackoff(), err
 	}
 	a.backoff = 0
+	a.St.Events = a.St.Events[sent:] // received by the portal
 	a.confirmUpdate()
 	syncPortalCA(a.Client.PortalRoot(), a.Log)
 	a.St.LastCheckin = a.now().Unix()
@@ -120,10 +127,13 @@ func (a *Agent) handle(env *protocol.Envelope) {
 // previous configuration in force and schedules a retry of this one.
 func (a *Agent) apply(cfg *protocol.Config, env *protocol.Envelope) {
 	now := a.now().Unix()
+	a.setProtection(cfg)
 	summary, applyErr := a.Applier.Apply(cfg)
 	a.St.Applied = protocol.Applied{Version: cfg.Version, Status: "applied", At: &now}
 	if applyErr == nil {
 		a.St.RetryConfig, a.St.RetryAt, a.St.RetryCount = nil, 0, 0
+		a.St.LastConfig = env
+		a.lastDrift = now
 		a.Log("configuration %d applied: %s", cfg.Version, summary)
 		return
 	}
@@ -192,6 +202,8 @@ func (a *Agent) nextBackoff() time.Duration {
 // A configuration just applied is reported at once.
 func (a *Agent) Run(stop <-chan struct{}) bool {
 	a.Log("SohobOTP agent %s started for endpoint %s (%s)", inventory.Version, a.St.EndpointID, a.St.PortalURL)
+	a.started()
+	defer a.ended()
 	for {
 		applied := a.St.Applied
 		wait, err := a.Once()
@@ -203,11 +215,9 @@ func (a *Agent) Run(stop <-chan struct{}) bool {
 		if a.Updated != "" {
 			return true // the service manager starts the new version
 		}
-		select {
-		case <-stop:
+		if a.sleep(stop, wait) {
 			a.Log("SohobOTP agent stopped")
 			return false
-		case <-time.After(wait):
 		}
 	}
 }

@@ -20,6 +20,18 @@ import (
 // PublicKey is the release public key (base64), set at build time. Empty: updates disabled.
 var PublicKey = ""
 
+// Fingerprint is a short name for the release key built into this agent (the first 8 bytes of
+// its SHA-256, hex), "" when the build has none. It is reported to the portal, which shows the
+// computers that cannot update themselves.
+func Fingerprint() string {
+	raw, err := base64.StdEncoding.DecodeString(PublicKey)
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:8])
+}
+
 // Manifest describes one signed agent binary.
 type Manifest struct {
 	Version   string `json:"version"`
@@ -32,7 +44,7 @@ type Manifest struct {
 
 var (
 	versionRe = regexp.MustCompile(`^\d{1,4}\.\d{1,4}\.\d{1,4}$`)
-	platforms = map[string]bool{"linux/amd64": true, "linux/arm64": true, "windows/amd64": true}
+	platforms = map[string]bool{"linux/amd64": true, "linux/arm64": true, "windows/amd64": true, "windows/arm64": true}
 )
 
 // Message is the exact byte string a release signature covers.

@@ -1578,5 +1578,106 @@ check('debian package: the downloaded agent inside, root only (0700), with a new
     && $builtToken !== $debSettings['token'] && 'root' === $setup['owner']);
 check('debian package: tar checksums valid', [] !== $data && [] === array_filter(array_merge($control, $data), static fn (array $entry): bool => !$entry['sum_ok']));
 
+// ---------------------------------------------------------------- Tamper protection: policy switch, uninstall code, alerts
+$admin->get('/portal/index.php?r=endpoint-group&id=' . $endpointGroupId);
+check('tamper protection: the switch is on the computer policy page, off by default', str_contains($admin->body, 'name="tamper_protection" value="1">') && str_contains($admin->body, 'uninstall code'));
+$admin->get('/portal/index.php?r=endpoint-group');
+$admin->post('/portal/index.php?r=endpoint-group', ['name' => 'Guarded PCs', 'tamper_protection' => '1'] + $groupInput($endpointGroupId, true));
+$guardedGroup = array_values(array_filter((new Portal\Endpoints())->groups(), static fn (array $g): bool => 'Guarded PCs' === $g['name']))[0] ?? null;
+check('tamper protection: saved with a new computer policy', 303 === $admin->status && null !== $guardedGroup && true === Portal\Endpoints::effectivePolicy($guardedGroup['policy'])['tamper_protection'], (string) $admin->status);
+$admin->get('/portal/index.php?r=endpoint-group&id=' . ($guardedGroup['id'] ?? ''));
+check('tamper protection: shown ticked when the policy is opened again', str_contains($admin->body, 'name="tamper_protection" value="1" checked>'));
+[, $guardedToken] = (new Portal\Endpoints())->createToken($guardedGroup['id'], 'tamper e2e', 1, 1, 'e2e');
+$agentHttp->bind = '127.0.0.13';
+$guardedPc = new AgentSim();
+$guardedInv = ['hostname' => 'guarded-pc', 'os' => 'windows', 'arch' => 'amd64', 'agent_version' => '0.3.0', 'protected' => true];
+$guardedPc->id = $agentCall('enroll', $guardedPc->enrollRequest($guardedToken, $guardedInv))['endpoint_id'] ?? null;
+$reply = $agentCall('checkin', ['inventory' => $guardedInv, 'applied' => ['version' => 0, 'status' => 'none']], $guardedPc);
+$guardedCode = (new Portal\Endpoints())->uninstallCode((string) $guardedPc->id);
+$guardedConfig = null;
+try {
+    $guardedConfig = $guardedPc->openConfig($reply['config'] ?? [], (new Portal\Endpoints())->publicKey(), 0, 'windows');
+} catch (\Throwable $error) {
+    check('tamper protection: config opens', false, $error->getMessage() . ' ' . $agentHttp->body);
+}
+check('tamper protection: the computer gets the switch and the hash of its uninstall code over the agent API',
+    true === ($guardedConfig['policy']['tamper_protection'] ?? null) && Portal\Endpoints::uninstallCodeHash((string) $guardedPc->id, $guardedCode) === ($guardedConfig['policy']['uninstall_code_hash'] ?? '')
+    && !str_contains($agentHttp->body, $guardedCode));
+$guardedUrl = '/portal/index.php?r=endpoint&id=' . $guardedPc->id;
+$admin->get($guardedUrl);
+check('computer page: protected, no alerts, the code is not on the page', str_contains($admin->body, '<h2>Tamper protection</h2>') && str_contains($admin->body, 'status-success">protected</span>')
+    && str_contains($admin->body, 'No alerts from this computer') && !str_contains($admin->body, $guardedCode) && str_contains($admin->body, 'cannot update itself'));
+$applied1 = ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()];
+$tamperEvents = [
+    ['id' => '00000000000000e1', 'at' => time() - 60, 'kind' => 'uninstall_refused', 'detail' => 'someone tried to uninstall the agent: wrong uninstall code <script>alert(1)</script>'],
+    ['id' => '00000000000000e2', 'at' => time() - 20, 'kind' => 'signin_removed', 'detail' => 'SohobOTP Sign-in had been removed; put back'],
+];
+$agentCall('checkin', ['inventory' => $guardedInv, 'applied' => $applied1, 'events' => $tamperEvents], $guardedPc);
+$agentCall('checkin', ['inventory' => $guardedInv, 'applied' => $applied1, 'events' => $tamperEvents], $guardedPc);
+$admin->get($guardedUrl);
+check('computer page: the alerts, each once, newest first, escaped', 1 === substr_count($admin->body, 'wrong uninstall code &lt;script&gt;') && !str_contains($admin->body, '<script>alert(1)')
+    && strpos($admin->body, 'SohobOTP Sign-in was removed from the computer') < strpos($admin->body, 'tried to uninstall the agent without the right code')
+    && str_contains($admin->body, 'Alerts from this computer (2 new)') && str_contains($admin->body, 'Tamper alert (2 new)'), '');
+$admin->get('/portal/index.php?r=endpoints&health=attention');
+check('computers list: a computer with new alerts needs attention; protected shown', str_contains($admin->body, 'guarded-pc') && str_contains($admin->body, 'Tamper alert (2 new)') && str_contains($admin->body, '>protected</span>'));
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('tamper alerts: in the audit trail, once each', 2 === substr_count($auditText, '"action":"endpoint.tamper"') && str_contains($auditText, 'agent:' . $guardedPc->id));
+$admin->get($guardedUrl);
+$admin->post($guardedUrl, ['op' => 'uninstall-code']);
+check('uninstall code: shown once after "Show the uninstall code", with the command, not cached', 200 === $admin->status && str_contains($admin->body, '<code class="secret-once">' . $guardedCode . '</code>')
+    && str_contains($admin->body, 'sohobotp-agent.exe" uninstall --code ' . $guardedCode) && 'no-store' === ($admin->headers['cache-control'][0] ?? ''), (string) $admin->status);
+$admin->get($guardedUrl);
+check('uninstall code: gone when the page is opened again', !str_contains($admin->body, $guardedCode));
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('uninstall code: who looked at it is in the audit trail, the code is not', str_contains($auditText, 'endpoint.uninstall_code_view') && !str_contains($auditText, $guardedCode));
+$helper->get($guardedUrl);
+$helper->post($guardedUrl, ['op' => 'uninstall-code']);
+check('uninstall code: not for the help desk role', !str_contains($helper->body, $guardedCode) && !str_contains($helper->body, 'secret-once'), (string) $helper->status);
+$admin->get($guardedUrl);
+$admin->post($guardedUrl, ['op' => 'uninstall-code'], [], false);
+check('uninstall code: refused without the CSRF token', 400 === $admin->status && !str_contains($admin->body, $guardedCode));
+$admin->get($guardedUrl);
+$admin->post($guardedUrl, ['op' => 'alerts-seen']);
+$admin->get($guardedUrl);
+check('alerts: marked as seen, the computer no longer needs attention, the alerts stay listed', !str_contains($admin->body, 'Tamper alert') && !str_contains($admin->body, '(2 new)')
+    && str_contains($admin->body, 'SohobOTP Sign-in was removed from the computer'));
+$admin->post($guardedUrl, ['op' => 'uninstall-code-new']);
+$guardedCode2 = (new Portal\Endpoints())->uninstallCode((string) $guardedPc->id);
+check('uninstall code: "New code" replaces it and shows the new one', $guardedCode2 !== $guardedCode && str_contains($admin->body, $guardedCode2) && !str_contains($admin->body, $guardedCode));
+$reply = $agentCall('checkin', ['inventory' => $guardedInv, 'applied' => $applied1], $guardedPc);
+check('uninstall code: the computer gets the new hash at its next check-in', is_array($reply['config'] ?? null)
+    && Portal\Endpoints::uninstallCodeHash((string) $guardedPc->id, $guardedCode2) === ($guardedPc->openConfig($reply['config'], (new Portal\Endpoints())->publicKey(), 1, 'windows')['policy']['uninstall_code_hash'] ?? ''));
+$agentCall('checkin', ['inventory' => ['agent_version' => '0.2.0', 'protected' => false] + $guardedInv, 'applied' => ['version' => 2] + $applied1], $guardedPc);
+$admin->get($guardedUrl);
+check('computer page: an agent too old for tamper protection is called not protected', str_contains($admin->body, 'status-failure">not protected</span>') && str_contains($admin->body, 'is too old'));
+$admin->get('/portal/index.php?r=endpoint&id=' . $downloaded->id);
+check('computer page: tamper protection off for a policy without it, no code button', str_contains($admin->body, 'status-info">off</span>') && !str_contains($admin->body, 'value="uninstall-code"'));
+
+// ---------------------------------------------------------------- Group Policy kit
+$admin->get('/portal/index.php?r=agent-download');
+check('Group Policy kit: offered on the Add a computer page', str_contains($admin->body, 'Group Policy kit') && str_contains($admin->body, 'r=gpo-kit'));
+$kitForm = ['group_id' => $guardedGroup['id'], 'label' => 'e2e kit', 'days' => '90', 'max_uses' => '500', 'approval' => 'directory', 'portal' => 'https://otp.example.test', 'ca_pem' => ''];
+$tokensBefore = count((new Portal\Endpoints())->tokens());
+$admin->post('/portal/index.php?r=gpo-kit', $kitForm);
+$kitZip = $admin->body;
+check('Group Policy kit: a zip download, not cached', 200 === $admin->status && 'application/zip' === ($admin->headers['content-type'][0] ?? '') && str_starts_with($kitZip, "PK\x03\x04")
+    && str_contains($admin->headers['content-disposition'][0] ?? '', 'attachment; filename="SohobOTP-GroupPolicy-') && 'no-store' === ($admin->headers['cache-control'][0] ?? '')
+    && (int) ($admin->headers['content-length'][0] ?? 0) === strlen($kitZip), $admin->status . ' ' . json_encode($admin->headers));
+check('Group Policy kit: holds the startup script, the read-me and the Windows agent program the portal has', str_contains($kitZip, 'SohobOTP-GroupPolicy/Install-SohobOTP.cmd')
+    && str_contains($kitZip, 'SohobOTP-GroupPolicy/Install-SohobOTP.ps1') && str_contains($kitZip, 'SohobOTP-GroupPolicy/README.txt') && str_contains($kitZip, 'SohobOTP-GroupPolicy/sohobotp-agent-arm64.exe'));
+$kitToken = array_values(array_filter((new Portal\Endpoints())->tokens(), static fn (array $t): bool => 'e2e kit' === $t['label']))[0] ?? null;
+check('Group Policy kit: its own enrolment token, for 90 days and 500 computers, new computers approved through Active Directory', $tokensBefore + 1 === count((new Portal\Endpoints())->tokens())
+    && null !== $kitToken && 500 === $kitToken['max_uses'] && 'directory' === $kitToken['approval'] && abs($kitToken['expires_at'] - time() - 90 * 86400) < 120);
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('Group Policy kit: download audited', str_contains($auditText, 'endpoint.gpo_kit'));
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=gpo-kit', ['days' => '400'] + $kitForm);
+$admin->get('/portal/index.php?r=agent-download');
+check('Group Policy kit: more than 365 days refused, with the reason', str_contains($admin->body, 'Group Policy kit: Validity must be 1 to 365 days.'));
+$helper->get('/portal/index.php?r=endpoints');
+$helper->post('/portal/index.php?r=gpo-kit', $kitForm);
+check('Group Policy kit: not for the help desk role', !str_starts_with($helper->body, 'PK') && $tokensBefore + 1 === count((new Portal\Endpoints())->tokens()), (string) $helper->status);
+check('Group Policy kit: opening its address without the form goes back to the page', in_array($admin->get('/portal/index.php?r=gpo-kit')->status, [200, 303], true) && !str_starts_with($admin->body, 'PK'));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

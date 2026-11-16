@@ -81,7 +81,9 @@ SH;
 # SohobOTP agent: on removal, undo the PAM changes and remove the service and the agent state
 set -e
 if [ "\$1" = remove ] && [ -x /usr/local/sbin/sohobotp-agent ]; then
-    /usr/local/sbin/sohobotp-agent uninstall || echo "sohobotp-agent uninstall failed: run it again by hand" >&2
+    # a computer with tamper protection needs its uninstall code (portal: Computers, the computer):
+    #   sudo SOHOBOTP_UNINSTALL_CODE=XXXX-XXXX-XXXX apt remove sohobotp-agent
+    /usr/local/sbin/sohobotp-agent uninstall \${SOHOBOTP_UNINSTALL_CODE:+--code "\$SOHOBOTP_UNINSTALL_CODE"} || echo "sohobotp-agent uninstall failed: the agent is still installed; run 'sohobotp-agent uninstall' by hand (with --code CODE on a computer with tamper protection)" >&2
 fi
 exit 0
 

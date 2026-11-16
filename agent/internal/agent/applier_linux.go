@@ -32,7 +32,7 @@ func (l linuxApplier) Apply(cfg *protocol.Config) (string, error) {
 
 func summarise(changes []linuxapply.Change) string {
 	if len(changes) == 0 {
-		return "nothing to change"
+		return NoChange
 	}
 	var parts []string
 	for _, c := range changes {

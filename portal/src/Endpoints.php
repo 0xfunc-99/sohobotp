@@ -30,6 +30,7 @@ final class Endpoints
     public const DEFAULT_POLICY = [
         'checkin_interval' => 60,
         'agent_version' => '', // self-update target ('' = no automatic update)
+        'tamper_protection' => false, // uninstall only with the computer's code, locked service, alerts (agent 0.3.0)
         'linux' => [
             'enabled'          => true,
             'radius_group_id'  => '',
@@ -95,6 +96,22 @@ final class Endpoints
         'manual'    => 'An administrator approves each machine',
         'directory' => 'Approved automatically when the computer is in Active Directory (else an administrator approves)',
     ];
+    /** What a protected agent reports (docs/agent-protocol.md section 5): kind => label. */
+    public const EVENT_KINDS = [
+        'uninstall_refused' => 'Someone tried to uninstall the agent without the right code',
+        'uninstalled'       => 'The uninstall code was entered: the agent is being removed',
+        'service_stopped'   => 'The agent service was stopped by hand',
+        'agent_killed'      => 'The agent process was killed',
+        'signin_removed'    => 'SohobOTP Sign-in was removed from the computer',
+        'settings_restored' => 'Settings were changed on the computer (the agent put them back)',
+        'protection_broken' => 'The agent could not put the computer\'s settings back',
+        'service_changed'   => 'The agent service was changed (the agent put it back)',
+    ];
+    /** Tamper protection needs at least this agent. */
+    public const TAMPER_MIN_AGENT = '0.3.0';
+    private const ALERTS_KEEP = 100;
+    /** Uninstall codes: 12 characters without look-alikes (60 random bits), shown as XXXX-XXXX-XXXX. */
+    private const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     public const RULE_TYPES = ['ou' => 'Computer is in OU (or below)', 'group' => 'Computer is member of AD group (nested included)'];
     /** How often the worker re-reads computer accounts when rules or AD approvals exist. */
     public const DIRECTORY_CHECK_SECONDS = 900;
@@ -271,6 +288,7 @@ final class Endpoints
         return [
             'checkin_interval' => $int('checkin_interval', 30, 3600, 'Check-in interval'),
             'agent_version' => $agentVersion,
+            'tamper_protection' => $flag('tamper_protection'),
             'linux' => [
                 'enabled'          => $linuxEnabled,
                 'radius_group_id'  => $linuxEnabled ? $radiusGroup : ('' !== $radiusGroup && null !== (new Radius())->group($radiusGroup) ? $radiusGroup : ''),
@@ -316,6 +334,7 @@ final class Endpoints
         return [
             'checkin_interval' => $policy['checkin_interval'] ?? $d['checkin_interval'],
             'agent_version' => (string) ($policy['agent_version'] ?? ''),
+            'tamper_protection' => !empty($policy['tamper_protection']),
             'linux' => array_replace($d['linux'], (array) ($policy['linux'] ?? [])),
             'windows' => array_replace($d['windows'], (array) ($policy['windows'] ?? [])),
         ];
@@ -325,7 +344,7 @@ final class Endpoints
     public static function policyToInput(array $policy): array
     {
         $policy = self::effectivePolicy($policy);
-        $input = ['checkin_interval' => $policy['checkin_interval'], 'agent_version' => $policy['agent_version']];
+        $input = ['checkin_interval' => $policy['checkin_interval'], 'agent_version' => $policy['agent_version'], 'tamper_protection' => $policy['tamper_protection']];
         foreach ($policy['linux'] as $key => $value) {
             $input['linux_' . $key] = $value;
         }
@@ -415,7 +434,7 @@ final class Endpoints
     }
 
     /** @return array{0: array, 1: string} the token record and the token itself (show once) */
-    public function createToken(string $groupId, string $label, int $hours, int $maxUses, string $createdBy, string $approval = 'none'): array
+    public function createToken(string $groupId, string $label, int $hours, int $maxUses, string $createdBy, string $approval = 'none', int $maxHours = 720): array
     {
         if (!isset(self::APPROVAL[$approval])) {
             throw new ValidationException('Unknown approval mode.');
@@ -423,8 +442,8 @@ final class Endpoints
         if (null === $this->group($groupId)) {
             throw new ValidationException('Choose an endpoint group.');
         }
-        if ($hours < 1 || $hours > 720) {
-            throw new ValidationException('Validity must be 1 to 720 hours.');
+        if ($hours < 1 || $hours > $maxHours) {
+            throw new ValidationException(720 === $maxHours ? 'Validity must be 1 to 720 hours.' : 'Validity must be 1 to ' . intdiv($maxHours, 24) . ' days.');
         }
         if ($maxUses < 1 || $maxUses > 10000) {
             throw new ValidationException('Maximum uses must be 1 to 10000.');
@@ -1038,6 +1057,7 @@ final class Endpoints
             });
             return ['checkin_interval' => (int) ($group['policy']['checkin_interval'] ?? 60), 'state' => 'pending', 'config' => null, 'update' => null];
         }
+        $events = self::events($request['events'] ?? null);
         [$policy, $secrets, $error] = $this->desired($endpoint, $group);
         $fingerprint = null === $policy ? '' : hash('sha256', json_encode([$endpoint['os'], $policy, $secrets], JSON_UNESCAPED_SLASHES));
         // "Install and update SohobOTP Sign-in automatically": the Sign-in version the computer
@@ -1049,8 +1069,20 @@ final class Endpoints
             $fingerprint = hash('sha256', $fingerprint . '|signin ' . (string) ($inventory['component']['version'] ?? ''));
         }
 
-        $record = self::endpointStore($id)->update(static function (array &$data) use ($inventory, $appliedVersion, $appliedStatus, $applied, $ip, $fingerprint, $error): array {
+        $fresh = [];
+        $record = self::endpointStore($id)->update(static function (array &$data) use ($inventory, $appliedVersion, $appliedStatus, $applied, $ip, $fingerprint, $error, $events, &$fresh): array {
             $now = time();
+            // events of a protected agent: each id once (the agent repeats them until a check-in succeeds)
+            $known = array_flip(array_column($data['alerts'] ?? [], 'id'));
+            foreach ($events as $event) {
+                if (!isset($known[$event['id']])) {
+                    $known[$event['id']] = true;
+                    $fresh[] = $data['alerts'][] = $event + ['received_at' => $now, 'seen' => false];
+                }
+            }
+            if (isset($data['alerts'])) {
+                $data['alerts'] = array_slice($data['alerts'], -self::ALERTS_KEEP);
+            }
             if ('' !== $inventory['os']) {
                 $inventory['os'] = $data['os']; // the OS chosen at enrolment cannot change
                 $data['inventory'] = $inventory;
@@ -1075,6 +1107,12 @@ final class Endpoints
             return $data;
         });
 
+        foreach ($fresh as $event) {
+            // failure: the audit trail's own filter then shows them with the failed sign-ins
+            Audit::default()->record('endpoint.tamper', 'uninstalled' === $event['kind'] ? 'success' : 'failure', $record['inventory']['hostname'] ?: $id, [
+                'endpoint' => $id, 'kind' => $event['kind'], 'what' => self::EVENT_KINDS[$event['kind']], 'detail' => $event['detail'], 'at' => $event['at'],
+            ]);
+        }
         $config = null;
         if (null !== $policy && $appliedVersion < $record['config']['version']) {
             $config = $this->envelope($record, $policy, $secrets);
@@ -1123,6 +1161,17 @@ final class Endpoints
      * policy is null when it cannot be built (error says why).
      */
     private function desired(array $endpoint, ?array $group): array
+    {
+        [$policy, $secrets, $error] = $this->desiredPolicy($endpoint, $group);
+        // Tamper protection: the same two fields for Linux and Windows. Left out entirely when
+        // off, so computers of other policies keep the configuration they have.
+        if (null !== $policy && null !== $group && self::effectivePolicy($group['policy'])['tamper_protection']) {
+            $policy += ['tamper_protection' => true, 'uninstall_code_hash' => $this->uninstallHash($endpoint['id'])];
+        }
+        return [$policy, $secrets, $error];
+    }
+
+    private function desiredPolicy(array $endpoint, ?array $group): array
     {
         if (null === $group) {
             return [null, [], 'The endpoint group no longer exists.'];
@@ -1332,7 +1381,131 @@ final class Endpoints
             'agent_version' => $text($raw, 'agent_version'),
             'component' => ['name' => $text($component, 'name'), 'version' => $text($component, 'version')],
             'accounts' => array_values($accounts),
+            // the release key built into the agent ('' = it cannot update itself) and whether
+            // tamper protection is in force on the machine (agent 0.3.0)
+            'release_key' => 1 === preg_match('/^[0-9a-f]{16}$/', $text($raw, 'release_key')) ? $text($raw, 'release_key') : '',
+            'protected' => true === ($raw['protected'] ?? false),
         ];
+    }
+
+    /**
+     * Events as reported by an agent, reduced to known kinds and safe sizes.
+     * @return list<array{id: string, at: int, kind: string, detail: string}>
+     */
+    public static function events(mixed $raw): array
+    {
+        $events = [];
+        foreach (is_array($raw) ? array_slice($raw, 0, 50) : [] as $e) {
+            if (!is_array($e) || !is_string($e['id'] ?? null) || !preg_match('/^[0-9a-f]{16}$/', $e['id']) || !isset(self::EVENT_KINDS[$e['kind'] ?? ''])) {
+                continue;
+            }
+            $at = is_int($e['at'] ?? null) ? $e['at'] : 0;
+            $events[] = [
+                'id' => $e['id'],
+                // the machine's clock: kept when plausible, else the time of this check-in
+                'at' => $at > time() - 90 * 86400 && $at <= time() + self::TIME_WINDOW ? $at : time(),
+                'kind' => $e['kind'],
+                'detail' => is_string($e['detail'] ?? null) ? trim(mb_substr(preg_replace('/[\x00-\x1f\x7f]/u', ' ', $e['detail']) ?? '', 0, 300)) : '',
+            ];
+        }
+        return $events;
+    }
+
+    // ------------------------------------------------------------------
+    // Tamper protection: uninstall code and alerts
+    // ------------------------------------------------------------------
+
+    /**
+     * What the agent compares a typed code with (agent/internal/tamper): PBKDF2-HMAC-SHA256,
+     * 100000 iterations, salted with the endpoint id. Codes are compared without case, dashes
+     * or spaces.
+     */
+    public static function uninstallCodeHash(string $id, string $code): string
+    {
+        $normal = strtoupper(str_replace(['-', ' ', "\t"], '', trim($code)));
+        return hash_pbkdf2('sha256', $normal, "sohobotp-uninstall-v1\n" . $id, 100000, 64);
+    }
+
+    public static function newUninstallCode(): string
+    {
+        $code = '';
+        for ($i = 0; $i < 12; $i++) {
+            $code .= self::CODE_ALPHABET[random_int(0, 31)];
+        }
+        return implode('-', str_split($code, 4));
+    }
+
+    /**
+     * The computer's uninstall code, created at first use. $new replaces it: the computer gets
+     * the new one at its next check-in, the old one works until then.
+     */
+    public function uninstallCode(string $id, bool $new = false): string
+    {
+        if (null === $this->endpoint($id)) {
+            throw new ValidationException('This endpoint does not exist.');
+        }
+        return self::endpointStore($id)->update(static function (array &$data) use ($id, $new): string {
+            if ($new || !isset($data['uninstall_code'], $data['uninstall_code_hash'])) {
+                $code = self::newUninstallCode();
+                $data['uninstall_code'] = Crypto::encrypt($code);
+                $data['uninstall_code_hash'] = self::uninstallCodeHash($id, $code);
+                $data['uninstall_code_at'] = time();
+                return $code;
+            }
+            return Crypto::decrypt($data['uninstall_code']);
+        });
+    }
+
+    /** The hash of the computer's uninstall code (the code is created if there is none yet). */
+    private function uninstallHash(string $id): string
+    {
+        $hash = self::endpointStore($id)->read()['uninstall_code_hash'] ?? null;
+        if (!is_string($hash)) {
+            $this->uninstallCode($id);
+            $hash = (string) self::endpointStore($id)->read()['uninstall_code_hash'];
+        }
+        return $hash;
+    }
+
+    /** Tamper alerts of a computer, newest first. @return list<array> */
+    public static function alerts(array $endpoint): array
+    {
+        $alerts = array_values($endpoint['alerts'] ?? []);
+        usort($alerts, static fn (array $a, array $b): int => [$b['at'], $b['received_at']] <=> [$a['at'], $a['received_at']]);
+        return $alerts;
+    }
+
+    /** @return int how many alerts were new to the administrator */
+    public function markAlertsSeen(string $id): int
+    {
+        if (null === $this->endpoint($id)) {
+            throw new ValidationException('This endpoint does not exist.');
+        }
+        return self::endpointStore($id)->update(static function (array &$data): int {
+            $count = 0;
+            foreach ($data['alerts'] ?? [] as $key => $alert) {
+                $count += empty($alert['seen']) ? 1 : 0;
+                $data['alerts'][$key]['seen'] = true;
+            }
+            return $count;
+        });
+    }
+
+    /**
+     * Where tamper protection stands for a computer:
+     * off | on (in force on the machine) | old_agent (its agent cannot do it) | waiting (not confirmed yet).
+     */
+    public function tamperState(array $endpoint): string
+    {
+        $group = $this->group((string) $endpoint['group_id']);
+        if (null === $group || !self::effectivePolicy($group['policy'])['tamper_protection']) {
+            return 'off';
+        }
+        if (!empty($endpoint['inventory']['protected'])) {
+            return 'on';
+        }
+        $version = (string) ($endpoint['inventory']['agent_version'] ?? '');
+        return AgentReleases::validVersion($version) && version_compare($version, self::TAMPER_MIN_AGENT, '<') ? 'old_agent' : 'waiting';
     }
 
     /** Account names as agents report them: user, or DOMAIN\user on Windows. */
@@ -1426,7 +1599,7 @@ final class Endpoints
 
     private static function public(array $record): array
     {
-        unset($record['cp_secret'], $record['nonces']);
+        unset($record['cp_secret'], $record['nonces'], $record['uninstall_code'], $record['uninstall_code_hash']);
         return $record;
     }
 }

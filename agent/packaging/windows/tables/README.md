@@ -15,6 +15,15 @@ upgrade), after the service is stopped and deleted and before the files are remo
 later install enrols as a new machine with its new token instead of silently reusing the
 old identity. Delete the old machine in the portal.
 
+`CheckUninstall` (type 11282, like SaveToken: deferred, SYSTEM, hidden from the log) runs
+`sohobotp-agent.exe check-uninstall "[UNINSTALLCODE]"` right after `InstallInitialize`
+(sequence 1550, before the service is stopped) on a full uninstall, not on an upgrade. On a
+computer without tamper protection it does nothing. With tamper protection the agent service
+checks the code (`msiexec /x {...} UNINSTALLCODE=XXXX-XXXX-XXXX`, or after
+`sohobotp-agent.exe uninstall --code ...`, which starts Windows Installer itself): a wrong or
+missing code ends the uninstall with an error before anything is changed, and the attempt is
+reported to the portal. UNINSTALLCODE is in MsiHiddenProperties.
+
 **Upgrades** (`Upgrade`, `LaunchCondition`, sequence rows): every build has a new ProductCode
 and the same UpgradeCode. `FindRelatedProducts` finds an installed older or same version
 (attributes 769: migrate features, min and max inclusive -> `WIX_UPGRADE_DETECTED`), which

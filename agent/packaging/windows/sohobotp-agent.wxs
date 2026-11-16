@@ -8,6 +8,9 @@
   deferred, as SYSTEM, hidden from the log) runs "sohobotp-agent.exe save-token", which keeps it
   in the agent's state folder (SYSTEM and Administrators only). The service enrols on first
   start and deletes the token. Repair and upgrade keep the existing enrolment.
+  Uninstall on a computer with tamper protection: msiexec /x ... UNINSTALLCODE=XXXX-XXXX-XXXX (the
+  custom action CheckUninstall asks the agent service to check the code before anything is removed;
+  an upgrade is not asked).
   Built with msitools (wixl): agent/packaging/windows/build-msi.sh
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
@@ -18,8 +21,8 @@
     <Media Id="1" Cabinet="agent.cab" EmbedCab="yes"/>
 
     <!-- public properties allowed into the elevated install; TOKEN never written to MSI logs -->
-    <Property Id="SecureCustomProperties" Value="PORTAL;TOKEN;PIN;CAFILE;WIX_UPGRADE_DETECTED;NEWERVERSIONDETECTED"/>
-    <Property Id="MsiHiddenProperties" Value="TOKEN"/>
+    <Property Id="SecureCustomProperties" Value="PORTAL;TOKEN;PIN;CAFILE;UNINSTALLCODE;WIX_UPGRADE_DETECTED;NEWERVERSIONDETECTED"/>
+    <Property Id="MsiHiddenProperties" Value="TOKEN;UNINSTALLCODE"/>
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">

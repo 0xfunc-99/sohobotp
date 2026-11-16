@@ -254,8 +254,33 @@ agent itself is built separately (`portal/tasks/codex-agent.md`).
   cache follows the endpoint group (off, or 1-30 days); unknown, pending, disabled and Linux
   endpoints are refused; the last sign-in request is shown on the endpoint page.
 - **Signed self-update** (4d): `portal-admin.php agent-release-add` stores releases signed
-  offline (`sohobotp-agent release sign`); the endpoint group's *Agent version* rolls them
-  out; agents verify the signature with the release key built into them.
+  offline (`sohobotp-agent release sign`, or `agent/packaging/release.sh` for a whole release
+  folder, added with `--dir`); the endpoint group's *Agent version* rolls them out; agents
+  verify the signature with the release key built into them. `portal-admin.php
+  release-key-set --key=<public key>` tells the portal the public key (stored in
+  `<data>/releases/release-public.key`, or `MULTIOTP_PORTAL_RELEASE_KEY`): it then refuses
+  other uploads, and each computer's page says whether its agent can update itself (agents
+  report the fingerprint of their release key). The private key never comes to the portal.
+- **Tamper protection** (computer policy switch, agent 0.3.0): the policy sent to the machine
+  carries `tamper_protection` and the hash of the computer's **uninstall code**
+  (`Endpoints::uninstallCode`, 12 characters, one per computer, encrypted with `portal.key`).
+  - The computer's page shows the state (protected / waiting / agent too old), *Show the
+    uninstall code* and *New code* (permission `endpoints.manage`, audited as
+    `endpoint.uninstall_code_view` / `_new`, never with the code; the page is not cached and
+    the code is only in the answer to that click).
+  - Agents report **events** (uninstall attempts, service stopped, agent killed, Sign-in
+    removed, settings put back): stored on the endpoint (last 100), written to the audit trail
+    as `endpoint.tamper`, shown as *Alerts from this computer* and as "needs attention" on the
+    Computers page until an administrator marks them as seen.
+  - What the agent does on the machine, and its limits: `agent/README.md`, *Tamper protection*;
+    wire format: docs/agent-protocol.md section 5.
+- **Group Policy kit** (`GpoKit`, on the *Add a computer* page, permission `endpoints.manage`):
+  a zip built per request with a computer startup script, the plain Windows agent programs
+  (Intel/AMD and ARM, whichever the portal has), the portal's CA certificate and a README with
+  the Group Policy steps. It carries a new enrolment token (1-365 days, up to 10000 computers,
+  Active Directory approval by default: every domain user can read a startup script). Audited
+  as `endpoint.gpo_kit` without the token. `ZipWriter` is a small zip writer (the appliance's
+  PHP has zlib, not the zip extension).
 - **SohobOTP Sign-in hardening**: its bundled engine verifies the portal certificate with
   the CA the agent writes (`portal-ca.pem`), and the shared secret is kept in a key only
   SYSTEM and Administrators can read (docs/endpoints.md, risks 2 and 4).

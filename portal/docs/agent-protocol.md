@@ -94,12 +94,13 @@ Request body:
 ```json
 {
   "inventory": { ... },
-  "applied": { "version": 3, "status": "applied", "error": "", "at": 1794150000 }
+  "applied": { "version": 3, "status": "applied", "error": "", "at": 1794150000 },
+  "events": [ { "id": "9f2c41d07ab3e655", "at": 1794150020, "kind": "uninstall_refused", "detail": "..." } ]
 }
 ```
 
 `applied.status`: `applied` | `failed` | `none` (nothing applied yet). `error` is a short text
-without secrets.
+without secrets. `events` is optional (tamper protection, section 5).
 
 Response 200:
 
@@ -203,3 +204,47 @@ Secret: `cp_shared_secret` → `multiOTPSharedSecret`.
 
 Windows: `component.name` = `multiotp-cp`, `domain` = AD domain if joined. Strings are
 limited to 255 characters, `ips` to 32 entries.
+
+Since agent 0.3.0 the inventory also has:
+
+- `release_key`: the first 8 bytes (16 hex characters) of the SHA-256 of the release public key
+  built into the agent; absent when the agent was built without one (it cannot update itself);
+- `protected`: `true` while tamper protection is in force on the machine (section 5).
+
+## 5. Tamper protection
+
+A computer policy with **Tamper protection** adds two fields to the policy of its machines
+(Linux and Windows alike; both are left out when it is off):
+
+```json
+"tamper_protection": true,
+"uninstall_code_hash": "c16b05e4423b985807e9a2cf3087d72744ec3a097f991753d6e63ad3d28ecdba"
+```
+
+- The portal keeps one **uninstall code** per endpoint (12 characters from
+  `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, shown as `XXXX-XXXX-XXXX`, encrypted with `portal.key`).
+  The machine only gets its hash: PBKDF2-HMAC-SHA256, 100000 iterations, 32 bytes, lower-case
+  hex, password = the code in upper case without dashes or spaces, salt =
+  `sohobotp-uninstall-v1\n<endpoint id>`. Test vector: endpoint `e0000000000000000001`, code
+  `ABCD-EFGH-JKLM` gives the hash above (`agent/internal/tamper`, `Endpoints::uninstallCodeHash`).
+- The agent takes both fields from every verified configuration, also when the rest of it fails
+  to apply, and reports `inventory.protected`.
+- Events (`events` in a check-in): `id` is 16 random hex characters, `at` the machine's time,
+  `detail` a text of at most 300 characters. The agent keeps at most 50, sends them at every
+  check-in and drops them when the portal answers 200; the portal stores each `id` once per
+  endpoint (the last 100), writes it to the audit trail (`endpoint.tamper`) and shows it on the
+  computer's page until an administrator marks it as seen.
+
+| `kind` | Meaning |
+|---|---|
+| `uninstall_refused` | uninstall tried without the right code (command or Windows Installer) |
+| `uninstalled` | the right code was entered; the agent may be removed for 10 minutes |
+| `service_stopped` | the service was stopped while the system kept running, then started again |
+| `agent_killed` | the agent process ended without being stopped (same system start, same version) |
+| `signin_removed` | SohobOTP Sign-in was no longer installed (installed again when the policy has its installers) |
+| `settings_restored` | sign-in settings or PAM files differed from the configuration and were put back |
+| `protection_broken` | the agent could not check or put back the settings |
+| `service_changed` | Windows: the service's start type or permissions were changed and put back |
+
+Unknown kinds are ignored by the portal; an older portal ignores `events`, an older agent
+ignores the two policy fields.
