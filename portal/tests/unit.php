@@ -742,5 +742,14 @@ check('token: a Group Policy kit may be valid for up to a year, a download for 3
     && 8760 * 3600 === (static function () use ($endpoints, $servers): int { [$t] = $endpoints->createToken($servers['id'], 'kit', 8760, 1, 'unit', 'directory', 8760); return $t['expires_at'] - $t['created_at']; })()
     && throws(static fn () => $endpoints->createToken($servers['id'], 'x', 8761, 1, 'unit', 'directory', 8760), ValidationException::class));
 
+// --- Sign-in gateway: user names typed with a prefix (.\user, PC\user, DOMAIN\user)
+$known = static fn (string $u): bool => in_array($u, ['qrtest', 'alice'], true);
+$req = static fn (string $u): string => '<multiOTP><CheckUserToken><UserId>' . $u . '</UserId><Chap/></CheckUserToken></multiOTP>';
+check('sign-in: ".\user" and "PC\user" become the SohobOTP user', $req('qrtest') === Portal\CpGateway::normaliseUserIds($req('.\qrtest'), $known)
+    && $req('qrtest') === Portal\CpGateway::normaliseUserIds($req('OTPTEST\QRtest'), $known) && $req('alice') === Portal\CpGateway::normaliseUserIds($req('./alice'), $known));
+check('sign-in: names without a prefix, unknown users and odd names are left as sent', $req('qrtest') === Portal\CpGateway::normaliseUserIds($req('qrtest'), $known)
+    && $req('PC\bob') === Portal\CpGateway::normaliseUserIds($req('PC\bob'), $known) && $req('a\b\qrtest') === Portal\CpGateway::normaliseUserIds($req('a\b\qrtest'), $known)
+    && $req('.\x y') === Portal\CpGateway::normaliseUserIds($req('.\x y'), $known));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

@@ -56,6 +56,7 @@ final class CpGateway
         }
         $policy = Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows'];
 
+        $data = self::normaliseUserIds($data, static fn (string $user): bool => (new Users())->exists($user));
         $engine = MultiotpService::get();
         $engine->SetServerSecret($endpoints->cpSecret($id));
         // Offline cache: only when the endpoint group allows it, for at most its lifetime
@@ -64,6 +65,31 @@ final class CpGateway
         $endpoints->touchCp($id, $ip);
         $engine->XmlServer($data); // sends its own headers and the XML answer
         exit;
+    }
+
+    /**
+     * Sign-in sends the user name as typed: ".\alice", "PC01\alice", "CONTOSO\alice" (the
+     * engine may show the backslash as "/"). SohobOTP users are named without that prefix (the
+     * set-up at sign-in creates "alice", directory sync uses the account name), and the engine
+     * never strips it, so ".\alice" was refused with the right code. The prefix is dropped when
+     * the name without it is a SohobOTP user and the name with it is not. The user id is plain
+     * text in the request (no hash covers it), so changing it is safe.
+     *
+     * @param callable(string): bool $exists
+     */
+    public static function normaliseUserIds(string $data, callable $exists): string
+    {
+        return (string) preg_replace_callback('#<UserId>([^<]{1,255})</UserId>#', static function (array $m) use ($exists): string {
+            $raw = html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8');
+            if (!preg_match('#^[^\\\\/]{1,64}[\\\\/]([^\\\\/]{1,128})$#u', $raw, $p)) {
+                return $m[0];
+            }
+            $short = mb_strtolower($p[1]);
+            if (null !== Users::validateName($short) || !$exists($short)) {
+                return $m[0];
+            }
+            return '<UserId>' . htmlspecialchars($short, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</UserId>';
+        }, $data);
     }
 
     private static function refuse(int $status, string $message): never
