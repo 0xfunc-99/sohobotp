@@ -113,6 +113,8 @@ function tick(): void
     if (timed('RADIUS routing refresh', static fn (): bool => (new Portal\VipMigration())->refreshIfStale(300))) {
         log_line('RADIUS routing file refreshed (user group restrictions)');
     }
+    // install links: expired ones carry a usable enrolment token until their file is deleted
+    timed('install links cleanup', static fn () => Portal\AgentLinks::cleanup(time()));
     timed('high availability', static function (): void {
         (new Portal\Ha())->tick(static fn (string $line) => log_line($line));
     });

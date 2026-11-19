@@ -1679,5 +1679,39 @@ $helper->post('/portal/index.php?r=gpo-kit', $kitForm);
 check('Group Policy kit: not for the help desk role', !str_starts_with($helper->body, 'PK') && $tokensBefore + 1 === count((new Portal\Endpoints())->tokens()), (string) $helper->status);
 check('Group Policy kit: opening its address without the form goes back to the page', in_array($admin->get('/portal/index.php?r=gpo-kit')->status, [200, 303], true) && !str_starts_with($admin->body, 'PK'));
 
+// ---------------------------------------------------------------- Install links (Linux machine fetches its agent)
+$admin->get('/portal/index.php?r=agent-download');
+check('install link: offered for Linux, not for Windows', str_contains($admin->body, 'name="link" value="linux/amd64/deb"') && !str_contains($admin->body, 'name="link" value="windows/'));
+$linkForm = ['group_id' => $endpointGroupId, 'label' => 'e2e link', 'hours' => '1', 'max_uses' => '1', 'approval' => 'none', 'portal' => 'https://otp.example.test', 'ca_pem' => $ownCa];
+$admin->post('/portal/index.php?r=agent-download', $linkForm + ['link' => 'linux/amd64/deb']);
+preg_match("#get\.php\?k=([A-Za-z0-9_-]{43})#", $admin->body, $lk);
+preg_match("#echo &\#039;([0-9a-f]{64})  sohobotp-agent\.deb#", $admin->body, $lsha);
+check('install link: shown once with the wget and SHA-256 commands, page not cached', 200 === $admin->status && isset($lk[1], $lsha[1]) && str_contains($admin->body, '--no-check-certificate')
+    && str_contains($admin->body, 'sudo apt install ./sohobotp-agent.deb') && 'no-store' === ($admin->headers['cache-control'][0] ?? ''), (string) $admin->status);
+$admin->get('/portal/index.php?r=agent-download');
+check('install link: listed as not used yet, without its address', str_contains($admin->body, 'Install links not used yet') && str_contains($admin->body, 'e2e link') && !str_contains($admin->body, $lk[1] ?? 'none'));
+$auditText = (string) file_get_contents(Portal\Config::auditFile());
+check('install link: made is audited, never with its key', str_contains($auditText, 'endpoint.agent_link_create') && !str_contains($auditText, $lk[1] ?? 'none'));
+$fetcher = new Browser($base);
+$fetcher->bind = '127.0.0.21';
+$fetcher->get('/portal/get.php?k=' . ($lk[1] ?? ''));
+$linkDeb = $fetcher->body;
+check('install link: anyone with the link gets the .deb once, matching the SHA-256 shown', 200 === $fetcher->status && str_starts_with($linkDeb, "!<arch>\n") && hash('sha256', $linkDeb) === ($lsha[1] ?? '')
+    && str_contains($fetcher->headers['content-disposition'][0] ?? '', '_amd64.deb'), (string) $fetcher->status);
+check('install link: the second time it is refused', 404 === $fetcher->get('/portal/get.php?k=' . ($lk[1] ?? ''))->status && str_contains($fetcher->body, 'already used'));
+check('install link: use is audited', str_contains((string) file_get_contents(Portal\Config::auditFile()), 'endpoint.agent_link_used'));
+$guesser = new Browser($base);
+$guesser->bind = '127.0.0.22';
+for ($i = 0; $i <= Portal\Config::ipMaxFailures(); $i++) {
+    $guesser->get('/portal/get.php?k=' . rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='));
+}
+check('install link: guessing keys gets an address blocked', 429 === $guesser->status, (string) $guesser->status);
+$admin->get('/portal/index.php?r=agent-download');
+$admin->post('/portal/index.php?r=agent-download', $linkForm + ['link' => 'windows/amd64']);
+check('install link: refused for Windows', 400 === $admin->status && str_contains($admin->body, 'Install links are for Linux'));
+$helper->get('/portal/index.php?r=agent-download');
+$helper->post('/portal/index.php?r=agent-download', $linkForm + ['link' => 'linux/amd64/deb']);
+check('install link: not for the help desk role', !str_contains($helper->body, 'get.php?k='), (string) $helper->status);
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

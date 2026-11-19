@@ -351,13 +351,22 @@ final class EndpointsController extends Controller
             'portal' => 'https://' . self::host(), 'ca_pem' => AgentBundle::detectCa(),
         ];
         $error = null;
+        $link = null; // an install link just made: shown once on the page
         if ($this->isPost()) {
             foreach (['platform' => 32, 'group_id' => 32, 'label' => 100, 'hours' => 4, 'max_uses' => 6, 'approval' => 16, 'portal' => 300] as $key => $max) {
                 $values[$key] = $this->post($key, $max);
             }
+            // "Install link" buttons send the platform as "link": the file is kept behind a one-time address
+            $asLink = '' !== $this->post('link', 32);
+            if ($asLink) {
+                $values['platform'] = $this->post('link', 32);
+            }
             $values['ca_pem'] = mb_substr((string) ($_POST['ca_pem'] ?? ''), 0, 70000);
             try {
                 [$platform, $format, $downloadLabel] = AgentBundle::DOWNLOADS[$values['platform']] ?? ['', '', ''];
+                if ($asLink && !str_starts_with($platform, 'linux/')) {
+                    throw new ValidationException('Install links are for Linux machines. On Windows, download the agent and double-click it.');
+                }
                 $program = $programs[$platform] ?? null;
                 if (null === $program) {
                     throw new ValidationException('Choose Windows or Linux. A greyed-out choice means the portal has no agent program for it yet.');
@@ -373,30 +382,52 @@ final class EndpointsController extends Controller
                     $values['approval'] ?: 'none'
                 );
                 $trailer = AgentBundle::trailer($portal, $plain, $endpoints->pin(), $caPem);
-                $this->audit->record('endpoint.agent_download', 'success', $token['label'], [
-                    'token' => $token['id'], 'group' => $token['group_id'], 'platform' => $platform, 'format' => $format, 'portal' => $portal,
-                    'agent' => $program['source'] . ('' !== $program['version'] ? ' ' . $program['version'] : ''), 'with_ca' => '' !== $caPem,
-                    'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
-                ]);
-                [$os, $arch] = explode('/', $platform);
-                $deb = 'deb' === $format ? AgentDeb::build($program['file'], $trailer, $arch, $program['version'], time()) : null;
-                $name = null !== $deb ? AgentDeb::fileName($token['id'], $arch)
-                    : 'sohobotp-agent-' . $token['id'] . ('windows' === $os ? ('arm64' === $arch ? '-arm64' : '') . '.exe' : ('arm64' === $arch ? '-arm64' : ''));
-                while (ob_get_level() > 0) {
-                    ob_end_clean();
-                }
-                header('Content-Type: ' . (null !== $deb ? 'application/vnd.debian.binary-package' : 'application/octet-stream'));
-                header('Content-Disposition: attachment; filename="' . $name . '"');
-                header('Content-Length: ' . (null !== $deb ? strlen($deb) : $program['size'] + strlen($trailer)));
-                header('Cache-Control: no-store');
-                header('X-Content-Type-Options: nosniff');
-                if (null !== $deb) {
-                    echo $deb;
+                if ($asLink) {
+                    [$os, $arch] = explode('/', $platform);
+                    $deb = 'deb' === $format ? AgentDeb::build($program['file'], $trailer, $arch, $program['version'], time()) : null;
+                    $made = AgentLinks::create(
+                        $deb ?? ((string) file_get_contents($program['file']) . $trailer),
+                        null !== $deb ? AgentDeb::fileName($token['id'], $arch) : 'sohobotp-agent-' . $token['id'] . ('arm64' === $arch ? '-arm64' : ''),
+                        null !== $deb ? 'application/vnd.debian.binary-package' : 'application/octet-stream',
+                        $token['expires_at'],
+                        ['label' => $token['label'], 'token_id' => $token['id'], 'platform' => $platform, 'format' => $format, 'created_by' => $this->admin['username']],
+                        time()
+                    );
+                    $this->audit->record('endpoint.agent_link_create', 'success', $token['label'], [
+                        'token' => $token['id'], 'group' => $token['group_id'], 'platform' => $platform, 'format' => $format, 'portal' => $portal,
+                        'agent' => $program['source'] . ('' !== $program['version'] ? ' ' . $program['version'] : ''), 'with_ca' => '' !== $caPem,
+                        'sha256' => $made['sha256'], 'expires_at' => $made['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
+                    ]);
+                    $url = $portal . '/portal/get.php?k=' . $made['key'];
+                    $link = $made + ['url' => $url, 'format' => $format, 'label' => $downloadLabel, 'group' => $endpoints->group($token['group_id'])['name'] ?? '',
+                        'commands' => AgentLinks::commands($url, $made['sha256'], $format, '' !== $caPem), 'approval' => $token['approval']];
+                    header('Cache-Control: no-store');
                 } else {
-                    readfile($program['file']);
-                    echo $trailer;
+                    $this->audit->record('endpoint.agent_download', 'success', $token['label'], [
+                        'token' => $token['id'], 'group' => $token['group_id'], 'platform' => $platform, 'format' => $format, 'portal' => $portal,
+                        'agent' => $program['source'] . ('' !== $program['version'] ? ' ' . $program['version'] : ''), 'with_ca' => '' !== $caPem,
+                        'expires_at' => $token['expires_at'], 'max_uses' => $token['max_uses'], 'approval' => $token['approval'],
+                    ]);
+                    [$os, $arch] = explode('/', $platform);
+                    $deb = 'deb' === $format ? AgentDeb::build($program['file'], $trailer, $arch, $program['version'], time()) : null;
+                    $name = null !== $deb ? AgentDeb::fileName($token['id'], $arch)
+                        : 'sohobotp-agent-' . $token['id'] . ('windows' === $os ? ('arm64' === $arch ? '-arm64' : '') . '.exe' : ('arm64' === $arch ? '-arm64' : ''));
+                    while (ob_get_level() > 0) {
+                        ob_end_clean();
+                    }
+                    header('Content-Type: ' . (null !== $deb ? 'application/vnd.debian.binary-package' : 'application/octet-stream'));
+                    header('Content-Disposition: attachment; filename="' . $name . '"');
+                    header('Content-Length: ' . (null !== $deb ? strlen($deb) : $program['size'] + strlen($trailer)));
+                    header('Cache-Control: no-store');
+                    header('X-Content-Type-Options: nosniff');
+                    if (null !== $deb) {
+                        echo $deb;
+                    } else {
+                        readfile($program['file']);
+                        echo $trailer;
+                    }
+                    exit;
                 }
-                exit;
             } catch (ValidationException $invalid) {
                 $error = $invalid->getMessage();
                 http_response_code(400);
@@ -409,6 +440,8 @@ final class EndpointsController extends Controller
             'values' => $values,
             'pin' => $endpoints->pin(),
             'error' => $error,
+            'link' => $link,
+            'openLinks' => AgentLinks::open(time()),
         ]);
     }
 

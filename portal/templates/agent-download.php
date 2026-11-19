@@ -1,5 +1,19 @@
 <?php defined('PORTAL_ROOT') || exit; ?>
 <?php $missing = array_keys(array_filter($programs, static fn (?array $p): bool => null === $p)); ?>
+<?php if (null !== $link): ?>
+  <section class="panel" id="install-link">
+    <h2>Install link for <?= e($link['label']) ?></h2>
+    <p>On the Linux machine (computer policy <strong><?= e($link['group']) ?></strong>), paste these two lines in the terminal. The link works <strong>once</strong>, until <?= e(format_time($link['expires_at'])) ?>.</p>
+    <pre><code><?= e(implode("\n", $link['commands'])) ?></code></pre>
+    <ul class="hint">
+      <li>The first line downloads the agent<?= str_contains($link['commands'][0], '--no-check-certificate') ? ' (the portal uses its own certificate, so wget is told not to check it)' : '' ?>; the second checks its SHA-256 before installing it, so a file changed on the way is never installed.</li>
+      <li>No <code>sudo</code> on the machine? Use <code>su -c "<?= e('deb' === $link['format'] ? 'apt install $PWD/sohobotp-agent.deb' : '$PWD/sohobotp-agent install') ?>"</code> for the install part.</li>
+      <?php if ('none' !== $link['approval']): ?><li>New machines from this link wait for approval (Computers): approve it after the install.</li><?php endif; ?>
+      <li>This page shows the link only now. A link that went astray: revoke its token under <a href="<?= e(route('endpoint-enrol')) ?>">Enrol endpoints</a>.</li>
+    </ul>
+    <p class="hint">The link alone: <code><?= e($link['url']) ?></code></p>
+  </section>
+<?php endif; ?>
 <form method="post" action="<?= e(route('agent-download')) ?>" class="form narrow">
   <?= csrf_field() ?>
   <fieldset>
@@ -36,6 +50,12 @@
         <button type="submit" name="platform" value="<?= e($key) ?>" class="<?= 'program' === $format && str_starts_with($platform, 'linux/') ? 'button' : 'button-primary' ?>"<?= null === $program ? ' disabled' : '' ?>><?= 'deb' === $format ? 'Download' : 'Download for' ?> <?= e($label) ?></button>
       <?php endforeach; ?>
     </div>
+    <p class="hint">Or let a Linux machine fetch the agent itself: you get a one-time link and two lines to paste in its terminal.</p>
+    <div class="actions">
+      <?php foreach (Portal\AgentBundle::DOWNLOADS as $key => [$platform, $format, $label]): if (!str_starts_with($platform, 'linux/')) { continue; } $program = $programs[$platform]; ?>
+        <button type="submit" name="link" value="<?= e($key) ?>" class="button"<?= null === $program ? ' disabled' : '' ?>>Install link: <?= e($label) ?></button>
+      <?php endforeach; ?>
+    </div>
     <ul class="hint">
       <?php foreach (Portal\AgentBundle::PLATFORMS as $platform => $label): $program = $programs[$platform]; ?>
         <li><?= e($label) ?>: <?= null === $program ? 'no agent program on this portal yet' : e('agent ' . ('' !== $program['version'] ? $program['version'] . ', ' : '') . $program['source'] . ', ' . number_format($program['size'] / 1048576, 1) . ' MB') ?></li>
@@ -46,6 +66,23 @@
     <?php endif; ?>
   </fieldset>
 </form>
+
+<?php if ([] !== $openLinks): ?>
+  <section class="panel">
+    <h2>Install links not used yet</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Label</th><th>For</th><th>Made by</th><th>Made</th><th>Expires</th></tr></thead>
+        <tbody>
+          <?php foreach ($openLinks as $l): ?>
+            <tr><td><?= e($l['label']) ?></td><td><?= e($l['platform'] . ('deb' === $l['format'] ? ' (.deb)' : '')) ?></td><td><?= e($l['created_by']) ?></td><td class="nowrap"><?= e(format_time($l['created_at'])) ?></td><td class="nowrap"><?= e(format_time($l['expires_at'])) ?></td></tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Each link works once. To stop one, revoke its token under <a href="<?= e(route('endpoint-enrol')) ?>">Enrol endpoints</a> (same label).</p>
+  </section>
+<?php endif; ?>
 
 <section class="panel" id="gpo">
   <h2>Many Windows computers at once: Group Policy kit</h2>

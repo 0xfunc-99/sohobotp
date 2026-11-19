@@ -755,5 +755,28 @@ check('inventory: Windows 11 named by its build (ProductName still says Windows 
     && 'Windows 10 Pro' === Endpoints::windowsName('Windows 10 Pro', '19045') && 'Windows Server 2022 Standard' === Endpoints::windowsName('Windows Server 2022 Standard', '20348')
     && 'Windows 11 Pro' === Endpoints::inventory(['os' => 'windows', 'os_name' => 'Windows 10 Pro', 'kernel' => '22631'])['os_name']);
 
+// --- Install links (one-time address for a Linux machine to fetch its agent)
+$t0 = time();
+$meta = ['label' => 'unit link', 'token_id' => 'abcdefabcdef', 'platform' => 'linux/arm64', 'format' => 'deb', 'created_by' => 'unit'];
+$made = Portal\AgentLinks::create("!<arch>\npackage bytes", 'sohobotp-agent-x_arm64.deb', 'application/vnd.debian.binary-package', $t0 + 3600, $meta, $t0);
+check('install link: a long random key, SHA-256 of the file, the key itself not stored', 1 === preg_match('/^[A-Za-z0-9_-]{43}$/', $made['key']) && hash('sha256', "!<arch>\npackage bytes") === $made['sha256']
+    && !str_contains((string) file_get_contents(Config::dataDir() . '/agent-links.json'), $made['key']) && 1 === count(Portal\AgentLinks::open($t0)));
+check('install link: wrong or malformed keys give nothing', null === Portal\AgentLinks::take(str_repeat('A', 43), $t0) && null === Portal\AgentLinks::take('../../etc', $t0));
+$taken = Portal\AgentLinks::take($made['key'], $t0 + 10);
+check('install link: gives the file once, then never again; the file is deleted', "!<arch>\npackage bytes" === ($taken['content'] ?? null) && 'unit link' === $taken['record']['label']
+    && null === Portal\AgentLinks::take($made['key'], $t0 + 11) && [] === glob(Portal\AgentLinks::dir() . '/*.bin') && [] === Portal\AgentLinks::open($t0 + 11));
+$late = Portal\AgentLinks::create('x', 'f', 'application/octet-stream', $t0 + 60, $meta, $t0);
+check('install link: refused after it expires', null === Portal\AgentLinks::take($late['key'], $t0 + 61));
+$stale = Portal\AgentLinks::create('y', 'f', 'application/octet-stream', $t0 + 60, $meta, $t0);
+Portal\AgentLinks::cleanup($t0 + 61);
+check('install link: cleanup deletes the file of an expired link (it holds a token)', [] === glob(Portal\AgentLinks::dir() . '/*.bin'));
+Portal\AgentLinks::cleanup($t0 + 2 * 86400);
+check('install link: expired and used links are forgotten after a day', [] === (new Portal\JsonStore(Config::dataDir() . '/agent-links.json'))->read());
+[$get, $install] = Portal\AgentLinks::commands('https://otp.example.test/portal/get.php?k=K', str_repeat('a', 64), 'deb', true);
+check('install link: commands download with wget, check the SHA-256, then install', "wget -q --no-check-certificate -O sohobotp-agent.deb 'https://otp.example.test/portal/get.php?k=K'" === $get
+    && "echo '" . str_repeat('a', 64) . "  sohobotp-agent.deb' | sha256sum -c - && sudo apt install ./sohobotp-agent.deb" === $install
+    && !str_contains(Portal\AgentLinks::commands('https://x/portal/get.php?k=K', 'b', 'program', false)[0], 'no-check-certificate')
+    && str_ends_with(Portal\AgentLinks::commands('https://x/portal/get.php?k=K', 'b', 'program', false)[1], 'chmod +x sohobotp-agent && sudo ./sohobotp-agent install'));
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

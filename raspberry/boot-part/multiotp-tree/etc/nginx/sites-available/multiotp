@@ -57,9 +57,9 @@ server {
             fastcgi_pass unix:/var/run/php5-fpm.sock;
     }
 
-    # multiOTP management portal: allowlist. Only /portal/, portal/index.php, portal/agent.php, portal/cp.php, portal/api.php
+    # multiOTP management portal: allowlist. Only /portal/, portal/index.php, portal/agent.php, portal/cp.php, portal/api.php, portal/get.php
     # and portal/assets/ are public; source, templates, CLI, tests, docs, task files and README are not.
-    location ~ ^/portal/(?!$|index\.php$|agent\.php$|cp\.php$|ha\.php$|enrol\.php$|api\.php|assets/) {
+    location ~ ^/portal/(?!$|index\.php$|agent\.php$|cp\.php$|ha\.php$|enrol\.php$|get\.php$|api\.php|assets/) {
       deny all;
       return 404;
     }
