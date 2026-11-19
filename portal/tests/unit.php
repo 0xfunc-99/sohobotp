@@ -751,5 +751,9 @@ check('sign-in: names without a prefix, unknown users and odd names are left as 
     && $req('PC\bob') === Portal\CpGateway::normaliseUserIds($req('PC\bob'), $known) && $req('a\b\qrtest') === Portal\CpGateway::normaliseUserIds($req('a\b\qrtest'), $known)
     && $req('.\x y') === Portal\CpGateway::normaliseUserIds($req('.\x y'), $known));
 
+check('inventory: Windows 11 named by its build (ProductName still says Windows 10)', 'Windows 11 Pro' === Endpoints::windowsName('Windows 10 Pro', '26200')
+    && 'Windows 10 Pro' === Endpoints::windowsName('Windows 10 Pro', '19045') && 'Windows Server 2022 Standard' === Endpoints::windowsName('Windows Server 2022 Standard', '20348')
+    && 'Windows 11 Pro' === Endpoints::inventory(['os' => 'windows', 'os_name' => 'Windows 10 Pro', 'kernel' => '22631'])['os_name']);
+
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

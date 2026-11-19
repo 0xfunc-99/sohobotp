@@ -3,6 +3,7 @@
 package inventory
 
 import (
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -16,6 +17,10 @@ func platform(inv *protocol.Inventory) {
 		display, _, _ := k.GetStringValue("DisplayVersion")
 		build, _, _ := k.GetStringValue("CurrentBuild")
 		k.Close()
+		// Windows 11 still says "Windows 10 ..." in ProductName: its build (22000 or later) tells
+		if n, err := strconv.Atoi(build); err == nil && n >= 22000 && strings.HasPrefix(name, "Windows 10 ") {
+			name = "Windows 11 " + strings.TrimPrefix(name, "Windows 10 ")
+		}
 		inv.OSName = name
 		inv.OSVersion = strings.TrimSpace(display + " " + build)
 		inv.Kernel = build

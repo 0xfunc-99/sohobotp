@@ -1372,7 +1372,7 @@ final class Endpoints
         return [
             'hostname' => $text($raw, 'hostname'),
             'os' => array_key_exists($text($raw, 'os'), self::OS) ? $text($raw, 'os') : '',
-            'os_name' => $text($raw, 'os_name'),
+            'os_name' => self::windowsName($text($raw, 'os_name'), $text($raw, 'kernel')),
             'os_version' => $text($raw, 'os_version'),
             'kernel' => $text($raw, 'kernel'),
             'arch' => $text($raw, 'arch'),
@@ -1506,6 +1506,16 @@ final class Endpoints
         }
         $version = (string) ($endpoint['inventory']['agent_version'] ?? '');
         return AgentReleases::validVersion($version) && version_compare($version, self::TAMPER_MIN_AGENT, '<') ? 'old_agent' : 'waiting';
+    }
+
+    /**
+     * Windows 11 still calls itself "Windows 10 ..." in the registry value agents read
+     * (ProductName); its build number (22000 or later) tells it apart.
+     */
+    public static function windowsName(string $name, string $build): string
+    {
+        return str_starts_with($name, 'Windows 10 ') && ctype_digit($build) && (int) $build >= 22000
+            ? 'Windows 11 ' . substr($name, strlen('Windows 10 ')) : $name;
     }
 
     /** Account names as agents report them: user, or DOMAIN\user on Windows. */
