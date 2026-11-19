@@ -207,11 +207,8 @@ namespace
 
 namespace SohobotpEnrol
 {
-	bool CheckLocalPassword(const std::wstring& user, const std::wstring& domain, const std::wstring& password)
+	bool IsLocalAccount(const std::wstring& domain)
 	{
-		if (user.empty() || password.empty()) {
-			return false;
-		}
 		WCHAR computer[MAX_COMPUTERNAME_LENGTH + 1] = {};
 		DWORD size = ARRAYSIZE(computer);
 		GetComputerNameW(computer, &size);
@@ -225,7 +222,12 @@ namespace SohobotpEnrol
 				NetApiBufferFree(joined);
 			}
 		}
-		if (!local) {
+		return local;
+	}
+
+	bool CheckLocalPassword(const std::wstring& user, const std::wstring& domain, const std::wstring& password)
+	{
+		if (user.empty() || password.empty() || !IsLocalAccount(domain)) {
 			return false;
 		}
 		HANDLE token = nullptr;

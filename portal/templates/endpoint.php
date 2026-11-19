@@ -133,8 +133,10 @@
                 <td>
                   <?php if ($a['has_user']): ?>
                     <a href="<?= e(route('user', ['u' => $a['user']])) ?>"><?= e($a['user']) ?></a>
+                  <?php elseif (null === $a['fixed'] && ($a['needs_code'] || $a['needs_code_admin']) && $qrSetup['domain' === $a['kind'] ? 'domain' : 'local']): ?>
+                    <span class="status status-info">none yet</span> <span class="muted">sets up a code with the QR at the first Windows sign-in</span>
                   <?php elseif (null === $a['fixed'] && ($a['needs_code'] || $a['needs_code_admin'])): ?>
-                    <span class="status status-failure">none</span> <span class="muted">cannot sign in where it needs a code</span>
+                    <span class="status status-failure">none</span> <span class="muted">cannot sign in where it needs a code<?= 'linux' === $endpoint['os'] ? ': create its SohobOTP user and scan the QR in the portal' : '' ?></span>
                   <?php else: ?>
                     <span class="muted">none</span>
                   <?php endif; ?>

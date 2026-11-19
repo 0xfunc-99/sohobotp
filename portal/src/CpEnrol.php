@@ -13,7 +13,7 @@ defined('PORTAL_ROOT') || exit;
  *   start   {user, password}: the directory password is checked here (LDAP bind as the user),
  *           then the same rules as the self-service page (SelfEnrol::refusal: only users with no
  *           authenticator in use, only once). Answer: scan + the QR code as a module matrix (the
- *           sign-in screen only draws it) + the key; or not_needed / refused.
+ *           sign-in screen only draws it) + the key; or not_needed / bad_password (wrong directory password) / refused.
  *   start   {user, local: true} (policy "Also local Windows accounts"): a local account whose
  *           Windows password the computer checked itself (the password is not sent). Only an
  *           account this computer reported, with no code yet, and no directory user of that
@@ -110,7 +110,8 @@ final class CpEnrol
                 $engine->SetUser($user['user']);
                 if (!$engine->CheckUserLdapPassword($engine->GetUserSynchronizedDn(), (string) ($req['password'] ?? ''))) {
                     $audit->record('self_enrol.sign_in', 'failure', $user['user'], ['reason' => 'wrong directory password', 'via' => 'sign-in screen', 'endpoint' => $id]);
-                    $reply(['status' => 'not_needed']); // Windows itself refuses the wrong password afterwards
+                    // Sign-in 1.0.4 then says "wrong password" (older versions treat it as not_needed)
+                    $reply(['status' => 'bad_password']);
                 }
                 if (null !== ($refusal = (new SelfEnrol())->refusal($user))) {
                     $reply(['status' => 'not_needed']);

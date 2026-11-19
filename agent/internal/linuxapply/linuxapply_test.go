@@ -434,3 +434,17 @@ func TestRHELIncludeBecomesSubstackAndIsRestored(t *testing.T) {
 		t.Fatal("RHEL files not restored byte for byte")
 	}
 }
+
+func TestWaitingNamesProtectedServicesNotInstalled(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "etc/pam.d"), 0o755)
+	os.WriteFile(filepath.Join(root, "etc/pam.d/sshd"), []byte("@include common-auth\n"), 0o644)
+	a := &Applier{Root: root}
+	got := a.Waiting(&protocol.LinuxPolicy{Enabled: true, Services: []string{"sshd", "sudo", "su"}})
+	if len(got) != 2 || got[0] != filepath.Join(root, "etc/pam.d/sudo") || got[1] != filepath.Join(root, "etc/pam.d/su") {
+		t.Fatalf("waiting %v", got)
+	}
+	if a.Waiting(&protocol.LinuxPolicy{Enabled: false, Services: []string{"sudo"}}) != nil {
+		t.Fatal("2FA off: nothing to wait for")
+	}
+}

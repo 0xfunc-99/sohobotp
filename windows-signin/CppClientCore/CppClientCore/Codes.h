@@ -65,3 +65,5 @@
 
 #define MULTIOTP_USERLOCKED							((HRESULT)0x88809042)
 #define MULTIOTP_USERDELAYED						((HRESULT)0x88809043)
+// SohobOTP: the code field was empty and the password is wrong (sign-in set-up check)
+#define SOHOBOTP_WRONG_PASSWORD						((HRESULT)0x88809044)

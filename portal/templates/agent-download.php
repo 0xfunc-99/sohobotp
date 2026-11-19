@@ -7,7 +7,7 @@
     <pre><code><?= e(implode("\n", $link['commands'])) ?></code></pre>
     <ul class="hint">
       <li>The first line downloads the agent<?= str_contains($link['commands'][0], '--no-check-certificate') ? ' (the portal uses its own certificate, so wget is told not to check it)' : '' ?>; the second checks its SHA-256 before installing it, so a file changed on the way is never installed.</li>
-      <li>No <code>sudo</code> on the machine? Use <code>su -c "<?= e('deb' === $link['format'] ? 'apt install $PWD/sohobotp-agent.deb' : '$PWD/sohobotp-agent install') ?>"</code> for the install part.</li>
+      <li>The install runs as root: with <code>sudo</code> when the machine has it, otherwise <code>su</code> asks for the root password.</li>
       <?php if ('none' !== $link['approval']): ?><li>New machines from this link wait for approval (Computers): approve it after the install.</li><?php endif; ?>
       <li>This page shows the link only now. A link that went astray: revoke its token under <a href="<?= e(route('endpoint-enrol')) ?>">Enrol endpoints</a>.</li>
     </ul>

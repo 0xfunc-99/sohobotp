@@ -66,6 +66,9 @@ type State struct {
 	Running *RunMarker `json:"running,omitempty"`
 	// Stopped is set when the service is stopped by hand (not at shutdown).
 	Stopped *RunMarker `json:"stopped,omitempty"`
+	// Files the configuration in force will protect once they exist (Linux: /etc/pam.d/sudo of a
+	// sudo installed later): when one appears, the configuration is applied again.
+	WaitingFor []string `json:"waiting_for,omitempty"`
 	// when an event was last raised, by kind and detail: the same one is not repeated for an hour
 	EventSeen map[string]int64 `json:"event_seen,omitempty"`
 }

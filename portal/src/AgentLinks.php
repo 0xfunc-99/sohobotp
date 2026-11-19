@@ -122,9 +122,11 @@ final class AgentLinks
         $file = 'deb' === $format ? 'sohobotp-agent.deb' : 'sohobotp-agent';
         $get = 'wget -q' . ($selfSigned ? ' --no-check-certificate' : '') . ' -O ' . $file . " '" . $url . "'";
         $check = "echo '" . $sha256 . '  ' . $file . "' | sha256sum -c -";
+        // as root: with sudo when the machine has it, else su (a minimal Debian has no sudo)
+        $asRoot = static fn (string $command): string => 'if command -v sudo >/dev/null; then sudo ' . $command . '; else su -c "' . $command . '"; fi';
         return 'deb' === $format
-            ? [$get, $check . ' && sudo apt install ./' . $file]
-            : [$get, $check . ' && chmod +x ' . $file . ' && sudo ./' . $file . ' install'];
+            ? [$get, $check . ' && ' . $asRoot('apt install $PWD/' . $file)]
+            : [$get, $check . ' && chmod +x ' . $file . ' && ' . $asRoot('$PWD/' . $file . ' install')];
     }
 
     /** portal/get.php: hand out the file of a link, once. */

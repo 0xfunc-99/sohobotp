@@ -774,9 +774,9 @@ Portal\AgentLinks::cleanup($t0 + 2 * 86400);
 check('install link: expired and used links are forgotten after a day', [] === (new Portal\JsonStore(Config::dataDir() . '/agent-links.json'))->read());
 [$get, $install] = Portal\AgentLinks::commands('https://otp.example.test/portal/get.php?k=K', str_repeat('a', 64), 'deb', true);
 check('install link: commands download with wget, check the SHA-256, then install', "wget -q --no-check-certificate -O sohobotp-agent.deb 'https://otp.example.test/portal/get.php?k=K'" === $get
-    && "echo '" . str_repeat('a', 64) . "  sohobotp-agent.deb' | sha256sum -c - && sudo apt install ./sohobotp-agent.deb" === $install
+    && "echo '" . str_repeat('a', 64) . "  sohobotp-agent.deb' | sha256sum -c - && if command -v sudo >/dev/null; then sudo apt install \$PWD/sohobotp-agent.deb; else su -c \"apt install \$PWD/sohobotp-agent.deb\"; fi" === $install
     && !str_contains(Portal\AgentLinks::commands('https://x/portal/get.php?k=K', 'b', 'program', false)[0], 'no-check-certificate')
-    && str_ends_with(Portal\AgentLinks::commands('https://x/portal/get.php?k=K', 'b', 'program', false)[1], 'chmod +x sohobotp-agent && sudo ./sohobotp-agent install'));
+    && str_ends_with(Portal\AgentLinks::commands('https://x/portal/get.php?k=K', 'b', 'program', false)[1], 'chmod +x sohobotp-agent && if command -v sudo >/dev/null; then sudo $PWD/sohobotp-agent install; else su -c "$PWD/sohobotp-agent install"; fi'));
 
 echo "\n" . ($count - $failures) . "/$count checks passed\n";
 exit($failures > 0 ? 1 : 0);

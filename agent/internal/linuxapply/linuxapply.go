@@ -495,3 +495,19 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// Waiting lists the PAM files of services the policy protects that are not installed yet (for
+// example sudo on a minimal Debian). The agent applies the policy again when one appears.
+func (a *Applier) Waiting(p *protocol.LinuxPolicy) []string {
+	if !p.Enabled {
+		return nil
+	}
+	var waiting []string
+	for _, svc := range p.Services {
+		path := "/etc/pam.d/" + svc
+		if _, err := os.Stat(a.p(path)); errors.Is(err, os.ErrNotExist) {
+			waiting = append(waiting, a.p(path))
+		}
+	}
+	return waiting
+}

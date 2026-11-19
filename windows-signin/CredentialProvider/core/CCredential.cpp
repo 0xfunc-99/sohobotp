@@ -785,6 +785,9 @@ HRESULT CCredential::GetSerialization(
 				else if (_piStatus == MULTIOTP_USERDELAYED) {
 					errorMessage = L"User is delayed";
 				}
+				else if (_piStatus == SOHOBOTP_WRONG_PASSWORD) {
+					errorMessage = isGerman ? L"Der Benutzername oder das Kennwort ist falsch." : L"The user name or password is incorrect.";
+				}
 				ShowErrorMessage(errorMessage, errorCode);
 				_util.ResetScenario(this, _pCredProvCredentialEvents);
 				*pcpgsr = CPGSR_NO_CREDENTIAL_NOT_FINISHED;
@@ -1179,11 +1182,22 @@ HRESULT CCredential::Connect(__in IQueryContinueWithStatus* pqcws)
 			return S_OK;
 		}
 		// a local account: this computer checks its Windows password and sends only "verified"
-		const bool localVerified = !_config->isSecondStep
+		const bool localAccount = SohobotpEnrol::IsLocalAccount(_config->credential.domain);
+		const bool localVerified = !_config->isSecondStep && localAccount
 			&& SohobotpEnrol::CheckLocalPassword(_config->credential.username, _config->credential.domain, std::wstring(_config->credential.password.c_str()));
-		if (!_config->isSecondStep
-			&& SohobotpEnrol::Request("start", _config->credential.username, std::wstring(_config->credential.password.c_str()), L"", answer, localVerified)
-			&& answer.status == "scan")
+		const bool started = !_config->isSecondStep
+			&& SohobotpEnrol::Request("start", _config->credential.username, std::wstring(_config->credential.password.c_str()), L"", answer, localVerified);
+		// The code field is empty and the password is wrong (this computer checked it for a local
+		// account, the portal for a directory user without a code yet): say so, rather than
+		// "wrong one-time password", which sent users looking for a code they do not have yet.
+		if (started && std::wstring(_config->credential.otp.c_str()).empty()
+			&& (answer.status == "bad_password" || (localAccount && !localVerified && answer.status == "not_needed")))
+		{
+			ReleaseDebugPrint("SohobOTP: no code typed and the password is wrong");
+			_piStatus = SOHOBOTP_WRONG_PASSWORD;
+			return S_OK;
+		}
+		if (started && answer.status == "scan")
 		{
 			HBITMAP qr = SohobotpEnrol::QrBitmap(answer.qr, 200);
 			if (qr != nullptr)

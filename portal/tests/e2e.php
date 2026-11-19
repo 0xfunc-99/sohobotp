@@ -918,7 +918,7 @@ check('sign-in set-up: group setting saved', 303 === $admin->status);
 $winPolicy = Portal\Endpoints::effectivePolicy((new Portal\Endpoints())->group($endpointGroupId)['policy'])['windows'];
 check('sign-in set-up: in the policy sent to the agent', true === $winPolicy['enrol_at_signin']);
 [$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'bob', 'password' => 'wrong-password']);
-check('sign-in set-up: wrong directory password gives no QR code (Windows refuses the password itself)', 'not_needed' === ($ans['status'] ?? ''));
+check('sign-in set-up: wrong directory password gives no QR code, and says the password is wrong', 'bad_password' === ($ans['status'] ?? ''));
 [$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'cp.tester', 'password' => 'x']);
 check('sign-in set-up: a user not from the directory gets no QR code', 'not_needed' === ($ans['status'] ?? ''));
 [$st, , $sealedStart] = $cpEnrol('another-secret-0123456789abcdef', ['step' => 'start', 'user' => 'bob', 'password' => 'bob-test-password']);
@@ -984,6 +984,10 @@ $winAccounts = [['name' => 'Administrator', 'kind' => 'local', 'admin' => true],
 $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
 $admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
 check('computer users: Windows accounts listed, Active Directory user shown as such', str_contains($admin->body, 'EXAMPLE\\carol') && str_contains($admin->body, 'Active Directory'));
+// the policy lets directory users set up their code at sign-in (QR), not local accounts
+check('computer users: a directory user without a code is told about the QR at sign-in, a local account is warned',
+    ((new Portal\Users())->exists('carol') || str_contains($admin->body, 'sets up a code with the QR at the first Windows sign-in'))
+    && str_contains($admin->body, 'cannot sign in where it needs a code</span>'));
 $admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'accounts', 'needs_code' => ['Administrator', 'EXAMPLE\\carol'], 'needs_code_admin' => ['Administrator']]);
 $winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
 $winPushed = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows');
@@ -1687,7 +1691,7 @@ $admin->post('/portal/index.php?r=agent-download', $linkForm + ['link' => 'linux
 preg_match("#get\.php\?k=([A-Za-z0-9_-]{43})#", $admin->body, $lk);
 preg_match("#echo &\#039;([0-9a-f]{64})  sohobotp-agent\.deb#", $admin->body, $lsha);
 check('install link: shown once with the wget and SHA-256 commands, page not cached', 200 === $admin->status && isset($lk[1], $lsha[1]) && str_contains($admin->body, '--no-check-certificate')
-    && str_contains($admin->body, 'sudo apt install ./sohobotp-agent.deb') && 'no-store' === ($admin->headers['cache-control'][0] ?? ''), (string) $admin->status);
+    && str_contains($admin->body, 'else su -c &quot;apt install $PWD/sohobotp-agent.deb&quot;') && 'no-store' === ($admin->headers['cache-control'][0] ?? ''), (string) $admin->status);
 $admin->get('/portal/index.php?r=agent-download');
 check('install link: listed as not used yet, without its address', str_contains($admin->body, 'Install links not used yet') && str_contains($admin->body, 'e2e link') && !str_contains($admin->body, $lk[1] ?? 'none'));
 $auditText = (string) file_get_contents(Portal\Config::auditFile());

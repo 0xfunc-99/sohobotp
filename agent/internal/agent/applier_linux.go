@@ -30,6 +30,15 @@ func (l linuxApplier) Apply(cfg *protocol.Config) (string, error) {
 	return summarise(changes), nil
 }
 
+// Waiting: protected services not installed yet (see Agent.watchInstalls).
+func (l linuxApplier) Waiting(cfg *protocol.Config) []string {
+	var p protocol.LinuxPolicy
+	if err := json.Unmarshal(cfg.Policy, &p); err != nil {
+		return nil
+	}
+	return l.a.Waiting(&p)
+}
+
 func summarise(changes []linuxapply.Change) string {
 	if len(changes) == 0 {
 		return NoChange

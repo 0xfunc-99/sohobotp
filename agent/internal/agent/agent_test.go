@@ -240,3 +240,42 @@ func TestPlainHTTPRefused(t *testing.T) {
 	}
 	_ = strconv.Itoa
 }
+
+// waitApplier names a file the configuration will protect once it exists.
+type waitApplier struct {
+	recordApplier
+	path string
+}
+
+func (w *waitApplier) Waiting(*protocol.Config) []string {
+	if _, err := os.Stat(w.path); err != nil {
+		return []string{w.path}
+	}
+	return nil
+}
+
+func TestProtectedProgramInstalledLaterIsProtected(t *testing.T) {
+	a, _, _ := setup(t)
+	w := &waitApplier{path: filepath.Join(t.TempDir(), "sudo")}
+	a.Applier = w
+	a.Once()
+	if len(w.got) != 1 || len(a.St.WaitingFor) != 1 {
+		t.Fatalf("first apply: %d applies, waiting for %v", len(w.got), a.St.WaitingFor)
+	}
+	a.Once()
+	if len(w.got) != 1 {
+		t.Fatal("applied again although nothing was installed")
+	}
+	os.WriteFile(w.path, []byte("auth include common-auth\n"), 0o644) // sudo installed
+	a.Once()
+	if len(w.got) != 2 || len(a.St.WaitingFor) != 0 || a.St.Applied.Status != "applied" || a.St.Applied.Version != 1 {
+		t.Fatalf("not applied again after the install: %d applies, waiting %v, %+v", len(w.got), a.St.WaitingFor, a.St.Applied)
+	}
+	if w.got[1].Secrets["radius_secret"] != "Radius-Secret-0123" {
+		t.Fatal("secrets not opened on the second apply")
+	}
+	a.Once()
+	if len(w.got) != 2 {
+		t.Fatal("applied a third time")
+	}
+}

@@ -31,6 +31,10 @@ namespace SohobotpEnrol
 	// computer that is not in a domain) and password is its correct Windows password.
 	bool CheckLocalPassword(const std::wstring& user, const std::wstring& domain, const std::wstring& password);
 
+	// A local account of this computer: ".", the computer name, or a bare name on a computer
+	// that is not in a domain.
+	bool IsLocalAccount(const std::wstring& domain);
+
 	// White background, black modules, quiet zone of 4 modules, about targetPixels wide.
 	HBITMAP QrBitmap(const std::vector<std::string>& rows, int targetPixels);
 }

@@ -151,6 +151,11 @@ final class EndpointsController extends Controller
             'radiusClient' => $radiusClient,
             'accounts' => $endpoints->accountsView($endpoint),
             'promptsOn' => '3' !== substr((string) (Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows']['cpus_credui'] ?? '3e'), 0, 1),
+            // accounts without a SohobOTP user that set up their code with the QR at the Windows sign-in screen
+            'qrSetup' => (static function (array $w, bool $windows): array {
+                $on = $windows && !empty($w['enrol_at_signin']);
+                return ['domain' => $on, 'local' => $on && !empty($w['enrol_local'])];
+            })(Endpoints::effectivePolicy($endpoints->group($endpoint['group_id'])['policy'] ?? [])['windows'], 'windows' === $endpoint['os']),
             'canManage' => $this->can('endpoints.manage'),
             'canCreateUsers' => $this->can('users.manage'),
             'tamper' => $endpoints->tamperState($endpoint),

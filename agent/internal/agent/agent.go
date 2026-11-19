@@ -96,6 +96,8 @@ func (a *Agent) Once() (time.Duration, error) {
 		a.handle(reply.Config)
 	} else if a.St.RetryConfig != nil && a.now().Unix() >= a.St.RetryAt {
 		a.retry()
+	} else {
+		a.watchInstalls()
 	}
 	if reply.Update != nil && a.Updated == "" {
 		a.update(reply.Update)
@@ -134,6 +136,10 @@ func (a *Agent) apply(cfg *protocol.Config, env *protocol.Envelope) {
 		a.St.RetryConfig, a.St.RetryAt, a.St.RetryCount = nil, 0, 0
 		a.St.LastConfig = env
 		a.lastDrift = now
+		a.St.WaitingFor = nil
+		if w, ok := a.Applier.(waiter); ok {
+			a.St.WaitingFor = w.Waiting(cfg)
+		}
 		a.Log("configuration %d applied: %s", cfg.Version, summary)
 		return
 	}
@@ -161,6 +167,38 @@ func (a *Agent) retry() {
 	}
 	a.Log("retrying configuration %d (attempt %d)", version, a.St.RetryCount+1)
 	a.apply(cfg, env)
+}
+
+// waiter is an Applier that names files the configuration will protect once they exist.
+type waiter interface {
+	Waiting(cfg *protocol.Config) []string
+}
+
+// watchInstalls applies the configuration in force again when a program it protects has been
+// installed since (sudo after the agent, on a minimal system), so it is protected at once and
+// not only at the next change of the policy.
+func (a *Agent) watchInstalls() {
+	appeared := ""
+	for _, path := range a.St.WaitingFor {
+		if _, err := os.Stat(path); err == nil {
+			appeared = path
+			break
+		}
+	}
+	if appeared == "" || a.St.LastConfig == nil || a.St.Applied.Status != "applied" {
+		return
+	}
+	portalKey, err := a.St.PortalPublicKey()
+	if err != nil {
+		return
+	}
+	cfg, err := protocol.OpenConfig(a.St.LastConfig, portalKey, a.St.EndpointID, runtime.GOOS, a.St.Applied.Version-1, a.Keys.BoxPub, a.Keys.BoxPriv)
+	if err != nil || cfg.Version != a.St.Applied.Version {
+		a.St.WaitingFor = nil
+		return
+	}
+	a.Log("%s was installed: applying configuration %d again to protect it", appeared, cfg.Version)
+	a.apply(cfg, a.St.LastConfig)
 }
 
 // retryDelay: 1, 2, 4, 8, 16 then every 30 minutes.
