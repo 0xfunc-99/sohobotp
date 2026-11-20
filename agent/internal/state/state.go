@@ -69,6 +69,8 @@ type State struct {
 	// Files the configuration in force will protect once they exist (Linux: /etc/pam.d/sudo of a
 	// sudo installed later): when one appears, the configuration is applied again.
 	WaitingFor []string `json:"waiting_for,omitempty"`
+	// the lost-or-stolen order already carried out (its id), "" when the computer is not lost
+	LostDone string `json:"lost_done,omitempty"`
 	// when an event was last raised, by kind and detail: the same one is not repeated for an hour
 	EventSeen map[string]int64 `json:"event_seen,omitempty"`
 }

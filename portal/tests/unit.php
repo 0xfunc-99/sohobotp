@@ -488,6 +488,25 @@ putenv('MULTIOTP_PORTAL_RADIUS_ROUTE=' . $routeFile);
 @unlink(Config::dataDir() . '/vip-migration.json');
 $radius = new Radius();
 $migration = new VipMigration();
+
+// --- lost or stolen Linux computer: its RADIUS logins are rejected, its agent gets the order
+[, $lostToken] = $endpoints->createToken($servers['id'], 'lost', 1, 1, 'unit');
+$pendingAgent = new AgentSim();
+$pendingAgent->id = $endpoints->enroll($pendingAgent->enrollRequest($lostToken, $linInventory), '192.0.2.95', 'portal.example.test')['endpoint_id'];
+$pendingAgent->openConfig($checkin($pendingAgent, $none, null, '192.0.2.95')['config'], $portalKey, 0);
+$endpoints->setLost($pendingAgent->id, ['note' => "car\nboot", 'sign_out' => false, 'by' => 'unit']);
+$lostRecord = $endpoints->endpoint($pendingAgent->id);
+$lostShort = Radius::shortname($radius->client($lostRecord['radius_client_id']));
+$routed = json_decode((string) @file_get_contents($routeFile), true);
+check('lost Linux computer: RADIUS rejects every login from it (no user group allowed)', [] === ($routed['restrict'][$lostShort] ?? null), json_encode($routed));
+check('lost: note kept on one line', 'car boot' === $lostRecord['lost']['note'] && false === $lostRecord['lost']['sign_out']);
+$reply = $checkin($pendingAgent, ['version' => 1, 'status' => 'applied', 'error' => '', 'at' => time()], null, '192.0.2.95');
+$config = $pendingAgent->openConfig($reply['config'], $portalKey, 1);
+check('lost Linux computer: its configuration carries the order', ['id' => $lostRecord['lost']['id'], 'sign_out' => false] === ($config['policy']['lost'] ?? null) && true === $config['policy']['enabled']);
+$endpoints->setLost($pendingAgent->id, null);
+$routed = json_decode((string) @file_get_contents($routeFile), true);
+check('found: RADIUS accepts its logins again', !isset($routed['restrict'][$lostShort]) && !isset($endpoints->endpoint($pendingAgent->id)['lost']));
+$endpoints->deleteEndpoint($pendingAgent->id);
 $vipServer = ['address_1' => '192.0.2.50', 'port_1' => '1812', 'secret_1' => 'Vip-Secret-123456', 'response_window' => '10', 'message_authenticator' => 'yes'];
 check('VIP: host names refused (IPv4 only)', throws(static fn () => $radius->saveVip(['address_1' => 'vip.example.com'] + $vipServer), ValidationException::class));
 check('VIP: secret with a quote refused', throws(static fn () => $radius->saveVip(['secret_1' => 'abc"defghij'] + $vipServer), ValidationException::class));
@@ -747,6 +766,18 @@ $known = static fn (string $u): bool => in_array($u, ['qrtest', 'alice'], true);
 $req = static fn (string $u): string => '<multiOTP><CheckUserToken><UserId>' . $u . '</UserId><Chap/></CheckUserToken></multiOTP>';
 check('sign-in: ".\user" and "PC\user" become the SohobOTP user', $req('qrtest') === Portal\CpGateway::normaliseUserIds($req('.\qrtest'), $known)
     && $req('qrtest') === Portal\CpGateway::normaliseUserIds($req('OTPTEST\QRtest'), $known) && $req('alice') === Portal\CpGateway::normaliseUserIds($req('./alice'), $known));
+// --- Sign-in gateway: the signed refusal for a lost computer (what the engine's client verifies)
+$cpEngine = MultiotpService::get();
+$lostSecret = 'Endpoint-Secret-0123456789abcdef';
+$challenge = 'MOSH' . md5('unit challenge');
+$lostReq = static fn (string $secret, string $command): string => '<?xml version="1.0"?><multiOTP version="4.0"><ServerChallenge>' . $cpEngine->Encrypt('ServerChallenge', $challenge, $secret)
+    . '</ServerChallenge><' . $command . '><UserId>alice</UserId></' . $command . '></multiOTP>';
+$refusal = (string) Portal\CpGateway::lostRefusal($lostReq($lostSecret, 'CheckUserToken'), $lostSecret);
+check('lost: refusal signed for the request (md5 of command, secret, challenge), error 38', str_contains($refusal, '<ServerPassword>' . md5('CheckUserToken' . $lostSecret . $challenge) . '</ServerPassword>')
+    && str_contains($refusal, '<ErrorCode>38</ErrorCode>') && 38 === _MULTIOTP_USER_DISABLED_);
+check('lost: other commands signed with their own name', str_contains((string) Portal\CpGateway::lostRefusal($lostReq($lostSecret, 'ReadUserData'), $lostSecret), md5('ReadUserData' . $lostSecret . $challenge)));
+check('lost: no signed answer to a request made with another secret, or no request', null === Portal\CpGateway::lostRefusal($lostReq('Other-Secret-0123456789abcdef', 'CheckUserToken'), $lostSecret)
+    && null === Portal\CpGateway::lostRefusal('<multiOTP/>', $lostSecret));
 check('sign-in: names without a prefix, unknown users and odd names are left as sent', $req('qrtest') === Portal\CpGateway::normaliseUserIds($req('qrtest'), $known)
     && $req('PC\bob') === Portal\CpGateway::normaliseUserIds($req('PC\bob'), $known) && $req('a\b\qrtest') === Portal\CpGateway::normaliseUserIds($req('a\b\qrtest'), $known)
     && $req('.\x y') === Portal\CpGateway::normaliseUserIds($req('.\x y'), $known));

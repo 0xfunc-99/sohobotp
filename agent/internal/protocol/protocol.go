@@ -115,7 +115,16 @@ const (
 	EventSettingsRestored = "settings_restored" // settings changed outside the agent, put back
 	EventProtectionBroken = "protection_broken" // the agent could not put the settings back
 	EventServiceChanged   = "service_changed"   // the service's start type or permissions were changed, put back
+	EventLostDone         = "lost_done"         // a lost-or-stolen order was carried out (detail: "order <id>: ...")
 )
+
+// LostOrder: the computer was reported lost or stolen in the portal. The agent erases
+// SohobOTP Sign-in's offline copy of code data and, with SignOut, signs everyone out, once
+// per ID. The portal refuses every sign-in on the computer meanwhile.
+type LostOrder struct {
+	ID      string `json:"id"`
+	SignOut bool   `json:"sign_out"`
+}
 
 // MaxEvents bounds the events kept on the machine and sent at a check-in.
 const MaxEvents = 50
@@ -182,6 +191,7 @@ type LinuxPolicy struct {
 	// Set from the computer's page in the portal ("Users on this computer").
 	ExcludedUsersByService map[string][]string `json:"excluded_users_by_service,omitempty"`
 	SSHKeysNeedCode        bool                `json:"ssh_keys_need_code"`
+	Lost                   *LostOrder          `json:"lost,omitempty"`
 	Protection                                 // tamper_protection, uninstall_code_hash
 }
 
@@ -217,6 +227,7 @@ type WindowsPolicy struct {
 	// these SHA-256 values (this policy is signed by the portal key). Empty: install by hand.
 	SigninPackages map[string]Package `json:"signin_packages,omitempty"` // amd64 | arm64
 	VCRedist       *Package           `json:"vcredist,omitempty"`        // Visual C++ runtime x64 (Sign-in's PHP engine)
+	Lost           *LostOrder         `json:"lost,omitempty"`            // lost or stolen (cache_enabled is then false)
 	Protection                        // tamper_protection, uninstall_code_hash
 }
 

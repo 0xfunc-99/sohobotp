@@ -92,6 +92,18 @@ final class EndpointsController extends Controller
                         $this->audit->record('endpoint.enable', 'success', $name, ['endpoint' => $endpoint['id']]);
                         Session::flash('success', 'Endpoint enabled. It receives new secrets at its next check-in.');
                         break;
+                    case 'lost':
+                        $signOut = '1' === $this->post('sign_out', 1);
+                        $endpoints->setLost($endpoint['id'], ['note' => $this->post('note', 300), 'sign_out' => $signOut, 'by' => (string) $this->admin['username']]);
+                        $this->audit->record('endpoint.lost', 'success', $name, ['endpoint' => $endpoint['id'], 'sign_out' => $signOut, 'note' => $this->post('note', 300)]);
+                        Session::flash('success', 'Marked as lost or stolen: from now on nobody can sign in on this computer, even with the right code.'
+                            . ('online' === $endpoints->health($endpoint) ? ' The computer gets the order within a minute or two.' : ' It gets the order as soon as it goes online.'));
+                        break;
+                    case 'found':
+                        $endpoints->setLost($endpoint['id'], null);
+                        $this->audit->record('endpoint.found', 'success', $name, ['endpoint' => $endpoint['id']]);
+                        Session::flash('success', 'Marked as found: sign-ins with a code are allowed again (at its next check-in for the offline cache).');
+                        break;
                     case 'accounts':
                         $exempt = $endpoints->setCodeExempt($endpoint['id'], array_map('strval', (array) ($_POST['needs_code'] ?? [])), array_map('strval', (array) ($_POST['needs_code_admin'] ?? [])));
                         $this->audit->record('endpoint.code_exempt', 'success', $name, ['endpoint' => $endpoint['id'],

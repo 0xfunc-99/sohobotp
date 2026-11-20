@@ -901,6 +901,57 @@ check('CP gateway: with offline cache, the laptop stores the user after a login'
 preg_match('/^autolock_time=(\d+)/m', $cached, $m);
 check('cached copy expires within the group lifetime (3 days)', isset($m[1]) && (int) $m[1] <= time() + 3 * 86400 + 60 && (int) $m[1] > time(), $m[1] ?? 'no autolock_time');
 
+// ---------------------------------------------------------------- lost or stolen computer
+// The laptop now holds an offline copy of cp.tester. Control: when the portal answers with a
+// plain 403 (what a disabled computer gets), the CP client falls back to that copy and the
+// right code signs in. A lost computer must get a refusal the client obeys instead.
+$lostCode = next_code($cpSeed, $cpStep);
+$result = $cpClient($linuxUrl, $cpSecret, $laptop)->CheckUserToken('cp.tester', $lostCode);
+check('(control) a plain 403 makes Sign-in use its offline copy: the right code works', 0 === $result, "result $result");
+$admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
+check('lost: the computer page offers "Mark as lost or stolen"', str_contains($admin->body, 'Mark as lost or stolen'));
+$admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'lost', 'note' => 'stolen from a car', 'sign_out' => '1']);
+check('lost: marked', 303 === $admin->status);
+$lostRecord = (new Portal\Endpoints())->endpoint($windows->id)['lost'] ?? null;
+check('lost: order stored with the note and sign-out', is_array($lostRecord) && true === $lostRecord['sign_out'] && 'stolen from a car' === $lostRecord['note'] && 16 === strlen($lostRecord['id']));
+$result = $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserToken('cp.tester', $lostCode);
+check('lost: the right code is refused, the offline copy is not used', Portal\CpGateway::LOST_ERROR === $result, "result $result");
+check('lost: the refusal is signed (not "server auth failed")', Portal\CpGateway::LOST_ERROR === $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', $lostCode));
+check('lost: a request with another secret gets no signed answer', _MULTIOTP_SERVER_AUTH_FAILED_ <= $cpClient($gatewayUrl, 'ClientServerSecret', $laptop)->CheckUserTokenOnServer('cp.tester', $lostCode));
+$enrolLost = (new Browser($base))->raw('POST', '/portal/cp.php?e=' . $windows->id . '&a=enrol', 'x', ['Content-Type' => 'text/plain']);
+check('lost: no set-up of a code at the sign-in screen (403)', 403 === $enrolLost->status, (string) $enrolLost->status);
+$lostState = (new Portal\Endpoints())->endpoint($windows->id)['lost'];
+check('lost: sign-in attempts counted with user and address', $lostState['attempts'] >= 3 && 'cp.tester' === $lostState['last_attempt']['user']);
+check('lost: one alert for the attempts of this user and address', 1 === count(array_filter(Portal\Endpoints::alerts((new Portal\Endpoints())->endpoint($windows->id)), static fn (array $a): bool => 'lost_signin' === $a['kind'])));
+$applied = ['version' => (int) $winConfig['version'], 'status' => 'applied', 'error' => '', 'at' => time()];
+$lostReply = $agentCall('checkin', ['inventory' => $windowsInventory, 'applied' => $applied], $windows);
+$lostConfig = [];
+try {
+    $lostConfig = $windows->openConfig($lostReply['config'] ?? [], $portalKeyHttp, (int) $winConfig['version'], 'windows');
+} catch (Throwable $error) {
+    check('lost: a new configuration opens', false, $error->getMessage());
+}
+check('lost: the configuration turns the offline copy off and carries the order', false === ($lostConfig['policy']['cache_enabled'] ?? null)
+    && ($lostConfig['policy']['lost'] ?? null) === ['id' => $lostRecord['id'], 'sign_out' => true]);
+$agentCall('checkin', ['inventory' => $windowsInventory, 'applied' => ['version' => (int) ($lostConfig['version'] ?? 0)] + $applied,
+    'events' => [['id' => bin2hex(random_bytes(8)), 'at' => time(), 'kind' => 'lost_done', 'detail' => 'order ' . $lostRecord['id'] . ': offline copy erased (2 files), 1 sessions signed out']]], $windows);
+check('lost: the agent reported the order carried out', null !== ((new Portal\Endpoints())->endpoint($windows->id)['lost']['done_at'] ?? null));
+$admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
+check('lost: the computer page shows it lost, the order done and the attempts', str_contains($admin->body, 'Lost or stolen') && str_contains($admin->body, 'got the order') && str_contains($admin->body, 'stolen from a car'));
+$admin->get('/portal/index.php?r=endpoints');
+check('lost: the computer list marks it', str_contains($admin->body, 'lost or stolen'));
+$admin->get('/portal/index.php?r=endpoint&id=' . $windows->id);
+$admin->post('/portal/index.php?r=endpoint&id=' . $windows->id, ['op' => 'found']);
+check('found: sign-ins allowed again', 303 === $admin->status && !isset((new Portal\Endpoints())->endpoint($windows->id)['lost']));
+$result = $cpClient($gatewayUrl, $cpSecret, $laptop)->CheckUserTokenOnServer('cp.tester', next_code($cpSeed, $cpStep));
+check('found: the right code is accepted again', 0 === $result, "result $result");
+$foundReply = $agentCall('checkin', ['inventory' => $windowsInventory, 'applied' => ['version' => (int) ($lostConfig['version'] ?? 0)] + $applied], $windows);
+$foundConfig = $windows->openConfig($foundReply['config'] ?? [], $portalKeyHttp, (int) ($lostConfig['version'] ?? 0), 'windows');
+check('found: the configuration has no order and the group\'s offline cache again', !isset($foundConfig['policy']['lost']) && true === $foundConfig['policy']['cache_enabled']);
+$auditText = (string) json_encode(Portal\Audit::default()->search([], 1, 200));
+check('lost: marked, attempts, order done and found are in the audit trail', str_contains($auditText, 'endpoint.lost"') && str_contains($auditText, 'endpoint.lost_signin')
+    && str_contains($auditText, 'endpoint.lost_done') && str_contains($auditText, 'endpoint.found'));
+
 // ---------------------------------------------------------------- set-up of the code on the Windows sign-in screen (cp.php?a=enrol)
 $cpEnrol = static function (string $secret, array $req, ?string $sealed = null) use ($base, $windows): array {
     $req += ['v' => 1, 't' => time(), 'n' => bin2hex(random_bytes(16))];

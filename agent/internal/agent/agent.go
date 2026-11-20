@@ -131,6 +131,7 @@ func (a *Agent) apply(cfg *protocol.Config, env *protocol.Envelope) {
 	now := a.now().Unix()
 	a.setProtection(cfg)
 	summary, applyErr := a.Applier.Apply(cfg)
+	a.obeyLost(cfg) // also when the rest failed: the offline copy goes in any case
 	a.St.Applied = protocol.Applied{Version: cfg.Version, Status: "applied", At: &now}
 	if applyErr == nil {
 		a.St.RetryConfig, a.St.RetryAt, a.St.RetryCount = nil, 0, 0

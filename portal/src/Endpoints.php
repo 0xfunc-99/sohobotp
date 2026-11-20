@@ -106,7 +106,11 @@ final class Endpoints
         'settings_restored' => 'Settings were changed on the computer (the agent put them back)',
         'protection_broken' => 'The agent could not put the computer\'s settings back',
         'service_changed'   => 'The agent service was changed (the agent put it back)',
+        'lost_done'         => 'Lost or stolen: the computer got the order (offline codes erased, sign-ins refused)',
+        'lost_signin'       => 'Someone tried to sign in on this lost or stolen computer',
     ];
+    /** Lost-or-stolen sign-in attempts: one alert per user and address at most every 10 minutes. */
+    private const LOST_ALERT_EVERY = 600;
     /** Tamper protection needs at least this agent. */
     public const TAMPER_MIN_AGENT = '0.3.0';
     private const ALERTS_KEEP = 100;
@@ -565,6 +569,99 @@ final class Endpoints
         });
         $this->syncRadiusClients(fn (array $e): bool => $e['id'] === $id);
         return self::public($endpoint);
+    }
+
+    /**
+     * Lost or stolen: nobody signs in on the computer any more, even with the right code. It
+     * stays enrolled, so it keeps checking in (its address is recorded: where it is) and its
+     * agent receives the order.
+     * - Windows: cp.php answers SohobOTP Sign-in with a SIGNED refusal, which Sign-in obeys.
+     *   (A disabled computer gets a new secret and a plain 403, and Sign-in then falls back to
+     *   its offline copy of the user's code data, so a correct code would still work offline.)
+     *   Its configuration turns the offline copy off; the agent erases it and, when asked,
+     *   signs everyone out.
+     * - Linux: FreeRADIUS rejects every login from the computer's RADIUS client (routing
+     *   file, VipMigration::export); the agent signs everyone out when asked.
+     * Limit: a Windows computer that never reaches the portal again can use an offline copy
+     * until it expires (policy "offline cache days").
+     *
+     * @param ?array{note: string, sign_out: bool, by: string} $lost null: found, sign-ins allowed again
+     */
+    public function setLost(string $id, ?array $lost): array
+    {
+        $note = null === $lost ? '' : trim(mb_substr(preg_replace('/[\x00-\x1f\x7f]/u', ' ', $lost['note']) ?? '', 0, 300));
+        $endpoint = self::endpointStore($id)->update(static function (array &$data) use ($lost, $note): array {
+            if ([] === $data) {
+                throw new ValidationException('This endpoint does not exist.');
+            }
+            if ('active' !== $data['status']) {
+                throw new ValidationException('Only an active computer can be marked lost or stolen (a disabled computer cannot sign anyone in).');
+            }
+            if (null === $lost) {
+                unset($data['lost']);
+            } elseif (empty($data['lost'])) {
+                $data['lost'] = [
+                    'id' => bin2hex(random_bytes(8)), 'at' => time(), 'by' => $lost['by'], 'note' => $note,
+                    'sign_out' => $lost['sign_out'], 'done_at' => null, 'attempts' => 0, 'last_attempt' => null,
+                ];
+            }
+            return $data;
+        });
+        (new VipMigration())->export(); // RADIUS: reject or accept the computer's logins again
+        return self::public($endpoint);
+    }
+
+    public static function isLost(array $endpoint): bool
+    {
+        return !empty($endpoint['lost']);
+    }
+
+    /**
+     * RADIUS clients of lost Linux computers (FreeRADIUS shortname => no allowed user group,
+     * so every login is rejected). @return array<string, list<string>>
+     */
+    public function lostRadiusClients(Radius $radius): array
+    {
+        $out = [];
+        foreach ($this->endpoints() as $endpoint) {
+            if (self::isLost($endpoint) && '' !== ($endpoint['radius_client_id'] ?? '')) {
+                $client = $radius->client($endpoint['radius_client_id']);
+                if (null !== $client) {
+                    $out[Radius::shortname($client)] = [];
+                }
+            }
+        }
+        return $out;
+    }
+
+    /** A sign-in tried on a lost computer (cp.php): counted, and an alert for the administrator. */
+    public function lostAttempt(string $id, string $user, string $ip): void
+    {
+        $now = time();
+        $alert = self::endpointStore($id)->update(static function (array &$data) use ($user, $ip, $now): bool {
+            if (empty($data['lost'])) {
+                return false;
+            }
+            $data['lost']['attempts'] = (int) ($data['lost']['attempts'] ?? 0) + 1;
+            $previous = $data['lost']['last_attempt'] ?? null;
+            $data['lost']['last_attempt'] = ['at' => $now, 'ip' => $ip, 'user' => $user];
+            if (is_array($previous) && $previous['user'] === $user && $previous['ip'] === $ip && $previous['at'] > $now - self::LOST_ALERT_EVERY) {
+                return false;
+            }
+            $data['alerts'][] = [
+                'id' => bin2hex(random_bytes(8)), 'at' => $now, 'kind' => 'lost_signin',
+                'detail' => ('' !== $user ? 'User ' . $user : 'Unknown user') . ' from ' . $ip,
+                'received_at' => $now, 'seen' => false,
+            ];
+            $data['alerts'] = array_slice($data['alerts'], -self::ALERTS_KEEP);
+            return true;
+        });
+        if ($alert) {
+            $record = self::endpointStore($id)->read();
+            Audit::default()->record('endpoint.lost_signin', 'failure', ($record['inventory']['hostname'] ?? '') ?: $id, [
+                'endpoint' => $id, 'user' => $user, 'address' => $ip,
+            ]);
+        }
     }
 
     public function moveEndpoint(string $id, string $groupId): array
@@ -1078,6 +1175,9 @@ final class Endpoints
                 if (!isset($known[$event['id']])) {
                     $known[$event['id']] = true;
                     $fresh[] = $data['alerts'][] = $event + ['received_at' => $now, 'seen' => false];
+                    if ('lost_done' === $event['kind'] && !empty($data['lost']) && str_starts_with($event['detail'], 'order ' . $data['lost']['id'])) {
+                        $data['lost']['done_at'] = $now;
+                    }
                 }
             }
             if (isset($data['alerts'])) {
@@ -1108,6 +1208,10 @@ final class Endpoints
         });
 
         foreach ($fresh as $event) {
+            if ('lost_done' === $event['kind']) {
+                Audit::default()->record('endpoint.lost_done', 'success', $record['inventory']['hostname'] ?: $id, ['endpoint' => $id]);
+                continue;
+            }
             // failure: the audit trail's own filter then shows them with the failed sign-ins
             Audit::default()->record('endpoint.tamper', 'uninstalled' === $event['kind'] ? 'success' : 'failure', $record['inventory']['hostname'] ?: $id, [
                 'endpoint' => $id, 'kind' => $event['kind'], 'what' => self::EVENT_KINDS[$event['kind']], 'detail' => $event['detail'], 'at' => $event['at'],
@@ -1167,6 +1271,14 @@ final class Endpoints
         // off, so computers of other policies keep the configuration they have.
         if (null !== $policy && null !== $group && self::effectivePolicy($group['policy'])['tamper_protection']) {
             $policy += ['tamper_protection' => true, 'uninstall_code_hash' => $this->uninstallHash($endpoint['id'])];
+        }
+        // Lost or stolen: the agent erases Sign-in's offline copy and, when asked, signs
+        // everyone out (once per order id); no new offline copy is made.
+        if (null !== $policy && self::isLost($endpoint)) {
+            if ('windows' === $endpoint['os']) {
+                $policy['cache_enabled'] = false;
+            }
+            $policy['lost'] = ['id' => $endpoint['lost']['id'], 'sign_out' => (bool) $endpoint['lost']['sign_out']];
         }
         return [$policy, $secrets, $error];
     }

@@ -17,6 +17,45 @@
     </div>
   </section>
 <?php endif; ?>
+<?php $lost = $endpoint['lost'] ?? null; $offline = Portal\Endpoints::effectivePolicy($group['policy'] ?? [])['windows']; ?>
+<?php if (null !== $lost): ?>
+  <section class="panel" id="lost">
+    <div class="alert alert-error" role="alert">
+      <p><strong>Lost or stolen</strong> since <?= e(format_time($lost['at'])) ?> (marked by <?= e($lost['by']) ?>)<?= '' !== $lost['note'] ? ': ' . e($lost['note']) : '' ?></p>
+      <p>Nobody can sign in on this computer, even with the right code.</p>
+    </div>
+    <dl class="details">
+      <dt>The computer</dt><dd><?php if (null !== $lost['done_at']): ?>got the order <?= e(format_time($lost['done_at'])) ?>: <?= 'windows' === $endpoint['os'] ? 'the offline codes were erased' : 'its logins are refused' ?><?= $lost['sign_out'] ? ' and everyone was signed out' : '' ?>.
+        <?php else: ?><span class="status status-failure">waiting</span> it has not got the order yet: it does at its next check-in (when it goes online).<?php endif; ?></dd>
+      <dt>Last seen</dt><dd><?= null !== $endpoint['last_seen'] ? e(format_time($endpoint['last_seen'])) . ' from <code>' . e($endpoint['last_ip']) . '</code>' : 'never' ?>
+        <?php if ('windows' === $endpoint['os'] && null !== ($endpoint['cp_last_seen'] ?? null)): ?><br><span class="muted">last sign-in request <?= e(format_time($endpoint['cp_last_seen'])) ?> from <code><?= e($endpoint['cp_last_ip']) ?></code></span><?php endif; ?></dd>
+      <dt>Sign-in attempts</dt><dd><?= (int) $lost['attempts'] ?><?php if (is_array($lost['last_attempt'])): ?> — last <?= e(format_time($lost['last_attempt']['at'])) ?> from <code><?= e($lost['last_attempt']['ip']) ?></code><?= '' !== $lost['last_attempt']['user'] ? ' as <strong>' . e($lost['last_attempt']['user']) . '</strong>' : '' ?><?php endif; ?>
+        <?php if ('linux' === $endpoint['os']): ?><br><span class="muted">Counted for Windows sign-ins; Linux logins are refused by RADIUS (RADIUS → Diagnostics lists them).</span><?php endif; ?></dd>
+    </dl>
+    <?php if ('windows' === $endpoint['os'] && null === $lost['done_at'] && $offline['cache_enabled']): ?>
+      <p class="hint">Until it gets the order, a copy of the code data kept for offline sign-in lets a user who has the right code sign in <strong>while the computer stays offline</strong>, for up to <?= (int) $offline['cache_days'] ?> days after their last online sign-in (computer policy "offline cache"). As soon as it reaches the network, it is refused and the copy is erased.</p>
+    <?php endif; ?>
+    <?php if ($canManage): ?>
+      <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>#lost" class="inline" data-confirm="Mark this computer as found? Sign-ins with a SohobOTP code are allowed on it again.">
+        <?= csrf_field() ?><input type="hidden" name="op" value="found"><button type="submit" class="button-small">It was found: allow sign-ins again</button></form>
+    <?php endif; ?>
+  </section>
+<?php elseif ('active' === $endpoint['status'] && $canManage): ?>
+  <section class="panel" id="lost">
+    <h2>Lost or stolen?</h2>
+    <p>Refuse every sign-in on this computer, even with the right password and code. The computer stays in the portal: it keeps reporting where it connects from, and sign-in attempts are shown here.</p>
+    <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>#lost" data-confirm="Mark this computer as lost or stolen? Nobody will be able to sign in on it, even with the right code.">
+      <?= csrf_field() ?><input type="hidden" name="op" value="lost">
+      <label for="lost-note">Note (optional)</label>
+      <input type="text" id="lost-note" name="note" maxlength="300" placeholder="e.g. stolen from a car on 20 November, police report 1234">
+      <label class="choice"><input type="checkbox" name="sign_out" value="1" checked> Also sign out everyone who is signed in on it now (unsaved work is lost)</label>
+      <div class="actions"><button type="submit" class="button-small button-danger">Mark as lost or stolen</button></div>
+    </form>
+    <?php if ('windows' === $endpoint['os'] && $offline['cache_enabled']): ?>
+      <p class="hint">Its policy keeps an offline copy of the code data (up to <?= (int) $offline['cache_days'] ?> days). A computer that never goes online again can use that copy offline until it expires; it is erased as soon as the computer reaches the network. Turn the offline cache off in the computer policy where this matters more than signing in without network.</p>
+    <?php endif; ?>
+  </section>
+<?php endif; ?>
 <section class="panel">
   <h2>Machine</h2>
   <dl class="details">
@@ -195,7 +234,7 @@
           <?= csrf_field() ?><input type="hidden" name="op" value="unlock-group"><button type="submit" class="button-small">Let AD rules choose the group</button></form>
       <?php endif; ?>
       <?php if ('active' === $endpoint['status']): ?>
-        <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>" class="inline" data-confirm="Disable this endpoint? Its agent will be refused and its secrets revoked; the machine keeps its last configuration.">
+        <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>" class="inline" data-confirm="<?= null !== $lost ? 'This computer is marked lost or stolen: keep it that way instead. A disabled computer cannot be sent a signed refusal, so it would fall back to its offline copy. Disable anyway?' : 'Disable this endpoint? Its agent will be refused and its secrets revoked; the machine keeps its last configuration.' ?>">
           <?= csrf_field() ?><input type="hidden" name="op" value="disable"><button type="submit" class="button-small">Disable</button></form>
       <?php else: ?>
         <form method="post" action="<?= e(route('endpoint', ['id' => $endpoint['id']])) ?>" class="inline">

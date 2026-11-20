@@ -43,6 +43,7 @@
             <td><?= e(Portal\Endpoints::OS[$r['os']] ?? $r['os']) ?><?php if ('' !== $inv['os_name']): ?><br><span class="muted"><?= e(trim($inv['os_name'] . ' ' . $inv['os_version'])) ?></span><?php endif; ?></td>
             <td><?= e($names[$r['group_id']] ?? '?') ?><?php if (str_starts_with($r['assigned_by'] ?? '', 'rule:')): ?><br><span class="muted">by AD rule</span><?php endif; ?></td>
             <td><span class="status status-<?= e($healthClass[$r['health']]) ?>"><?= e($healthLabel[$r['health']]) ?></span>
+              <?php if (!empty($r['lost'])): ?><br><span class="status status-denied" title="Marked lost or stolen: every sign-in is refused">lost or stolen</span><?php endif; ?>
               <?php if (null !== $r['attention']): ?><br><span class="status status-failure" title="<?= e($r['attention']) ?>">needs attention</span><?php endif; ?></td>
             <td class="nowrap"><?= e(format_time($r['last_seen'])) ?></td>
             <td><?= (int) $r['applied']['version'] ?> / <?= (int) $r['config']['version'] ?>

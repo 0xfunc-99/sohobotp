@@ -248,3 +248,34 @@ A computer policy with **Tamper protection** adds two fields to the policy of it
 
 Unknown kinds are ignored by the portal; an older portal ignores `events`, an older agent
 ignores the two policy fields.
+
+## 6. Lost or stolen
+
+An administrator can mark an active computer **lost or stolen** (its page). The portal then
+refuses every sign-in on it and adds an order to its policy (Linux and Windows):
+
+```json
+"lost": {"id": "<16 hex characters>", "sign_out": true}
+```
+
+and, on Windows, `"cache_enabled": false`. The agent carries each order (`id`) out once, also
+when the rest of the configuration fails: Windows erases SohobOTP Sign-in's offline copy
+(`users\*.db`, `tokens\*.db` in the folder named by `multiOTPPath`); with `sign_out`, every
+session with a user is signed out (Windows `WTSLogoffSession`; Linux `loginctl
+terminate-session` for every user except root). It then sends the event `lost_done` with the
+detail `order <id>[: what was done]`, which the portal shows as "got the order". When the
+computer is found, the policy has no `lost` field and the agent forgets the order.
+
+The refusals do not need the agent:
+
+- **Windows**: `cp.php` answers every Sign-in request of a lost computer with error 38 (user
+  disabled), signed like a real answer (`ServerPassword` = md5(command . secret . challenge)).
+  The client stops at it. A 403, or an answer it cannot verify, makes the client fall back to
+  its offline copy, so a lost computer keeps its secret (a disabled one does not). Each attempt
+  is counted (user, address) and raises an alert `lost_signin` (once per user and address per
+  10 minutes) and an audit entry `endpoint.lost_signin`.
+- **Linux**: the computer's RADIUS client gets an empty list of allowed user groups in the
+  FreeRADIUS routing file, so FreeRADIUS rejects all its logins.
+
+A Windows computer that never reaches the portal again can use its offline copy until it
+expires (policy "offline cache days").

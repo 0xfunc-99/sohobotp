@@ -171,6 +171,11 @@ final class VipMigration
                 }
             }
         }
+        // lost or stolen Linux computers: no user group is allowed, every login is rejected
+        // (and nothing is forwarded to Symantec VIP for them)
+        $lost = (new Endpoints())->lostRadiusClients($radius);
+        $restrict = array_merge($restrict, $lost);
+        $clients = array_values(array_diff($clients, array_keys($lost)));
         $route = ['enabled' => [] !== $clients, 'clients' => (object) array_fill_keys($clients, 1), 'sohobotp' => (object) $sohobotp,
             'restrict' => (object) $restrict, 'groups' => (object) $groups, 'at' => time()];
         $file = self::routeFile();

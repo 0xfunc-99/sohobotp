@@ -155,6 +155,17 @@ CP / pam_radius version, applied config version, last apply result and errors.
 The portal marks an endpoint **offline** after 3 missed intervals and shows it on the
 dashboard.
 
+## Lost or stolen computers
+
+The computer's page has **Mark as lost or stolen** (optional note, optional "sign out everyone
+now"). From then on nobody signs in on it, even with the right password and code; it stays
+enrolled, so it keeps reporting the address it connects from, and sign-in attempts (user,
+address) appear on its page and in the audit trail. Windows: the portal sends a signed refusal
+and the agent erases the offline copy of code data; Linux: RADIUS rejects its logins. **It was
+found** allows sign-ins again. Details: agent-protocol.md section 6. Do not disable a lost
+computer instead: a disabled computer cannot be sent a signed refusal, and Sign-in then falls
+back to its offline copy.
+
 ## Portal
 
 - Pages: Endpoints (list, filters, offline), endpoint detail (inventory, applied config,
