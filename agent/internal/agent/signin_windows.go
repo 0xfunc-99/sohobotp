@@ -60,7 +60,11 @@ func ensureSignin(p *protocol.WindowsPolicy) (string, error) {
 	if packageSource == nil {
 		return "", errors.New("cannot download installers (no portal connection)")
 	}
+	if err := state.EnsureDir(); err != nil { // the installers inherit its permissions
+		return "", err
+	}
 	dir := filepath.Join(state.Dir(), "packages") // SYSTEM and Administrators only, like the agent state
+	_ = os.RemoveAll(dir)                         // nothing left from an earlier run is used
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

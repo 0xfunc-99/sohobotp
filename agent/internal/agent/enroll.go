@@ -45,7 +45,7 @@ func Enroll(e Enrolment) (*state.State, error) {
 	st := &state.State{PortalURL: e.Portal, Applied: protocol.Applied{Status: "none"}}
 	if e.CAFile != "" {
 		// keep a copy next to the state: the original file may move
-		if err := os.MkdirAll(state.Dir(), 0o700); err != nil {
+		if err := state.EnsureDir(); err != nil { // restricted folder, never one another account made
 			return nil, err
 		}
 		dst := filepath.Join(state.Dir(), "portal-ca.pem")
@@ -54,7 +54,7 @@ func Enroll(e Enrolment) (*state.State, error) {
 		}
 		st.CAFile = dst
 	} else if e.CAPEM != "" {
-		if err := os.MkdirAll(state.Dir(), 0o700); err != nil {
+		if err := state.EnsureDir(); err != nil { // restricted folder, never one another account made
 			return nil, err
 		}
 		dst := filepath.Join(state.Dir(), "portal-ca.pem")

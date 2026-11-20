@@ -164,12 +164,18 @@ func (s *State) PortalPublicKey() (ed25519.PublicKey, error) {
 
 // Exists tells whether the agent is enrolled on this machine.
 func Exists() bool {
+	if vetDir(Dir()) != nil {
+		return false
+	}
 	_, err := os.Stat(path())
 	return err == nil
 }
 
 // Load reads the state.
 func Load() (*State, error) {
+	if err := vetDir(Dir()); err != nil {
+		return nil, err
+	}
 	raw, err := os.ReadFile(path())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
