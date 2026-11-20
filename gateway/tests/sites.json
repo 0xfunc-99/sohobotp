@@ -1,0 +1,4 @@
+[
+  {"id": "app", "name": "Test console", "listen": 8081, "upstream": "http://site:8000", "allow": ["alice"], "hours": 8, "user_header": "X-WEBAUTH-USER"},
+  {"id": "other", "name": "Other site", "listen": 8082, "upstream": "http://site:8000", "allow": ["*"]}
+]

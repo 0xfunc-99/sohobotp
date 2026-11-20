@@ -1,0 +1,4 @@
+[
+  {"id": "prometheus", "name": "Prometheus", "listen": 9091, "upstream": "http://prometheus:9090", "allow": ["*"], "hours": 8},
+  {"id": "grafana", "name": "Grafana", "listen": 3001, "upstream": "http://grafana:3000", "allow": ["*"], "hours": 8, "user_header": "X-WEBAUTH-USER"}
+]
