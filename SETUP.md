@@ -212,22 +212,32 @@ The installer is then `WixInstall\multiOTPCredentialProviderInstaller\bin\x64\Re
 Create the break-glass account (`net user breakglass <password> /add` as administrator), keep a
 second session open while testing.
 
-**Easiest: let the agent install SohobOTP Sign-in.** Once, on the portal server, add the
-installers from this kit (and Microsoft's Visual C++ runtime, from
-https://aka.ms/vs/17/release/vc_redist.x64.exe):
+**Easiest: let the agent install SohobOTP Sign-in.** The agent runs these installers as SYSTEM,
+so it accepts only installers signed with the same offline release key as the agent itself.
+On the computer that keeps the release key, sign each installer from this kit (and Microsoft's
+Visual C++ runtime, from https://aka.ms/vs/17/release/vc_redist.x64.exe, with its file version):
+
+```bash
+K=~/SohobOTP-release-key/release-private.key
+sohobotp-agent release sign-package --key $K --file windows-signin/SohobOTPSignIn.msi --kind signin --arch amd64 --version 1.0.2.0 --out SohobOTPSignIn.msi.sig.json
+sohobotp-agent release sign-package --key $K --file windows-signin/arm64/SohobOTPSignIn_arm64.msi --kind signin --arch arm64 --version 1.0.2.0 --out SohobOTPSignIn_arm64.msi.sig.json
+sohobotp-agent release sign-package --key $K --file vc_redist.x64.exe --kind vcredist --arch amd64 --version 14.40.33810.0 --out vc_redist.x64.exe.sig.json
+```
+
+Then, on the portal server, add each installer with its signature file (or upload both on the
+page **Computers → Windows sign-in installers**):
 
 ```bash
 A="sudo docker exec sohobotp php /usr/local/bin/multiotp/portal/bin/portal-admin.php"
-sudo docker cp windows-signin/SohobOTPSignIn.msi sohobotp:/tmp/ && $A signin-package-add --file=/tmp/SohobOTPSignIn.msi --kind=signin/amd64 --version=1.0.2.0
-sudo docker cp windows-signin/arm64/SohobOTPSignIn_arm64.msi sohobotp:/tmp/ && $A signin-package-add --file=/tmp/SohobOTPSignIn_arm64.msi --kind=signin/arm64 --version=1.0.2.0
-sudo docker cp vc_redist.x64.exe sohobotp:/tmp/ && $A signin-package-add --file=/tmp/vc_redist.x64.exe --kind=vcredist --version=14
+sudo docker cp windows-signin/SohobOTPSignIn.msi sohobotp:/tmp/ && sudo docker cp SohobOTPSignIn.msi.sig.json sohobotp:/tmp/
+$A signin-package-add --file=/tmp/SohobOTPSignIn.msi --signature=/tmp/SohobOTPSignIn.msi.sig.json
 ```
 
 Then tick **Install and update SohobOTP Sign-in automatically** in the computer policy. A
 double-click on the agent from **Add a computer** now installs the agent, the Visual C++ runtime
 (if missing) and SohobOTP Sign-in for the computer's processor (Windows on ARM included), and
-writes its settings. The agent checks each installer against the SHA-256 in the signed policy.
-Adding a newer Sign-in later (`--version=1.0.3.0`) updates those computers at their next
+writes its settings. The agent checks each installer's release signature, size and SHA-256.
+Adding a newer Sign-in later (signed with `--version 1.0.3.0`) updates those computers at their next
 check-in; an older one is never installed over a newer one. The computer's page shows the
 installed version. Steps 1 and 2 below are then not needed.
 

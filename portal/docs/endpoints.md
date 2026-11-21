@@ -53,7 +53,8 @@ get the **offline cache** of SohobOTP Sign-in.
 
 ## Windows: SohobOTP Sign-in (fork of the multiOTP Credential Provider)
 
-The agent installs the CP MSI if missing (hosted by the portal, signature checked) and
+The agent installs the CP MSI if missing (hosted by the portal; it runs only an installer
+signed with the offline release key built into the agent, like its own updates) and
 writes its registry values under
 `HKEY_CLASSES_ROOT\CLSID\{B3D2C6A1-5E7F-4C21-9A6E-0D4F5C8B7A31}`:
 

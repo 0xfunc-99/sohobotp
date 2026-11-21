@@ -126,7 +126,9 @@ func usage() {
   forget             delete the agent state only (the Windows MSI runs it on uninstall)
   version
   release keygen --out DIR                       create the OFFLINE release key (keep it off the portal)
-  release sign --key FILE --file BIN --version X.Y.Z --os linux|windows --arch amd64|arm64 [--out manifest.json]`)
+  release sign --key FILE --file BIN --version X.Y.Z --os linux|windows --arch amd64|arm64 [--out manifest.json]
+  release sign-package --key FILE --file MSI|EXE --kind signin|vcredist --arch amd64|arm64 --version X.Y.Z.W [--out FILE.sig.json]
+                                                 sign a SohobOTP Sign-in or Visual C++ installer the agent installs by itself`)
 }
 
 func install(args []string) error {
@@ -373,7 +375,7 @@ func uninstall(args []string) error {
 // releaseCmd: offline release signing for self-update (stage 4d).
 func releaseCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("release keygen|sign")
+		return errors.New("release keygen|sign|sign-package")
 	}
 	switch args[0] {
 	case "keygen":
@@ -429,6 +431,48 @@ func releaseCmd(args []string) error {
 			return nil
 		}
 		return os.WriteFile(*out, append(raw, '\n'), 0o644)
+	case "sign-package":
+		fs := flag.NewFlagSet("release sign-package", flag.ContinueOnError)
+		keyFile := fs.String("key", "", "release-private.key")
+		file := fs.String("file", "", "installer to sign (SohobOTPSignIn.msi, vc_redist.x64.exe)")
+		kind := fs.String("kind", "", "signin or vcredist")
+		arch := fs.String("arch", "amd64", "amd64 or arm64 (vcredist: amd64)")
+		version := fs.String("version", "", "its version (Sign-in: ProductVersion, e.g. 1.0.4.0; vcredist: FileVersion)")
+		out := fs.String("out", "", "signature file (default: stdout)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		key, err := readReleaseKey(*keyFile)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(*file)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		m := &release.PackageManifest{Kind: *kind, Arch: *arch, Version: *version, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+		if err := release.SignPackage(m, key); err != nil {
+			return err
+		}
+		raw, _ := json.MarshalIndent(m, "", "  ")
+		if *out == "" {
+			fmt.Println(string(raw))
+			return nil
+		}
+		return os.WriteFile(*out, append(raw, '\n'), 0o644)
 	}
-	return errors.New("release keygen|sign")
+	return errors.New("release keygen|sign|sign-package")
+}
+
+func readReleaseKey(path string) (ed25519.PrivateKey, error) {
+	rawKey, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(rawKey)))
+	if err != nil || len(seed) != ed25519.SeedSize {
+		return nil, errors.New("invalid release key file")
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
 }

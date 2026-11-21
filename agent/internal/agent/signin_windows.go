@@ -74,6 +74,9 @@ func ensureSignin(p *protocol.WindowsPolicy) (string, error) {
 		if err := validPackage(p.VCRedist); err != nil {
 			return "", fmt.Errorf("Visual C++ runtime: %w", err)
 		}
+		if err := checkPackageSignature("vcredist", "amd64", p.VCRedist); err != nil {
+			return "", fmt.Errorf("Visual C++ runtime: %w", err)
+		}
 		file, err := fetchInstaller(dir, "vc_redist.x64.exe", protocol.PackageRequest{Kind: "vcredist", Arch: "amd64", SHA256: p.VCRedist.SHA256}, p.VCRedist)
 		if err != nil {
 			return "", fmt.Errorf("Visual C++ runtime: %w", err)

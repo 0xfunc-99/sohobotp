@@ -95,8 +95,11 @@ final class CpEnrol
         if ('start' === $req['step']) {
             $local = true === ($req['local'] ?? false);
             if ($local) {
-                if (empty($policy['enrol_local']) || !self::reportedLocalAccount($endpoint, $username)
-                    || (null !== $user && ($user['synchronized'] || null !== (new SelfEnrol())->refusal($user)))) {
+                // Only NEW users: the computer itself vouches for a local account (its inventory, its
+                // password check), so it must never set the code of a SohobOTP user that already
+                // exists, e.g. one an administrator created and whose QR code is not used yet: a
+                // compromised computer could then take over that user's code everywhere.
+                if (empty($policy['enrol_local']) || !self::reportedLocalAccount($endpoint, $username) || null !== $user) {
                     $reply(['status' => 'not_needed']); // the normal sign-in decides
                 }
             } else {
@@ -157,6 +160,10 @@ final class CpEnrol
                 $reply(['status' => 'expired', 'message' => 'Too many wrong codes. Sign in again to get a new QR code.']);
             }
             $reply(['status' => 'wrong_code', 'message' => 'This code is not correct. Type the code the app shows now.']);
+        }
+        if (!empty($pending['create']) && null !== $user) {
+            self::forget($pendingKey);
+            $reply(['status' => 'not_needed']); // a local account's user appeared meanwhile: never take it over
         }
         if (null === $user) {
             // local account (start checked it): its SohobOTP user, created now that the first code is right

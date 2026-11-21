@@ -24,10 +24,11 @@
  *       agent program for the "Download agent" page (os: linux|windows, arch: amd64|arm64); a signed
  *       release for the same platform is preferred when there is one
  *       signed agent releases for self-update (sign them OFFLINE: sohobotp-agent release sign)
- *   php portal/bin/portal-admin.php signin-package-add --file=SohobOTPSignIn.msi --kind=signin/amd64 --version=1.0.2.0
+ *   php portal/bin/portal-admin.php signin-package-add --file=SohobOTPSignIn.msi --signature=SohobOTPSignIn.msi.sig.json
  *       installers the agent installs by itself on Windows (computer policy "Install and update
- *       SohobOTP Sign-in automatically"); kinds: signin/amd64, signin/arm64 (SohobOTPSignIn_arm64.msi),
- *       vcredist (vc_redist.x64.exe, --version=14); adding a newer Sign-in updates those computers
+ *       SohobOTP Sign-in automatically"), each with its signature file from the OFFLINE release key
+ *       (sohobotp-agent release sign-package --kind signin|vcredist --arch amd64|arm64 --version ...);
+ *       agents run only installers signed with their release key; adding a newer Sign-in updates those computers
  *   php portal/bin/portal-admin.php signin-package-list
  *   php portal/bin/portal-admin.php anonymous-stats [--state=on|off|status] [--once]
  *       multiOTP's weekly anonymous statistics (sent during a login, off by default in SohobOTP);
@@ -85,7 +86,7 @@ $command = $argv[1] ?? 'help';
 // --name=value options after the command (getopt() would stop at the command word)
 $options = [];
 foreach (array_slice($argv, 2) as $arg) {
-    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest|os|arch|kind|version|key|dir)=(.*)$/s', $arg, $m)) {
+    if (preg_match('/^--(username|role|display-name|email|mfa-user|state|file|manifest|os|arch|kind|version|key|dir|signature)=(.*)$/s', $arg, $m)) {
         $options[$m[1]] = $m[2];
     } elseif ('--once' === $arg) {
         $options['once'] = true;
@@ -269,7 +270,11 @@ try {
             break;
 
         case 'signin-package-add':
-            $added = Portal\SigninPackages::add((string) ($options['file'] ?? ''), (string) ($options['kind'] ?? ''), (string) ($options['version'] ?? ''));
+            $signed = json_decode((string) @file_get_contents((string) ($options['signature'] ?? ''), false, null, 0, 8192), true);
+            if (!is_array($signed)) {
+                fail('--signature=FILE: the installer\'s signature file (sohobotp-agent release sign-package).');
+            }
+            $added = Portal\SigninPackages::add((string) ($options['file'] ?? ''), $signed);
             $audit->record('signin.package_add', 'success', $added['kind'], ['version' => $added['version'], 'sha256' => $added['sha256'], 'size' => $added['size']]);
             out('Installer stored: ' . Portal\SigninPackages::KINDS[$added['kind']]['label'] . ' ' . $added['version'] . ' (' . $added['size'] . ' bytes, SHA-256 ' . $added['sha256'] . ').');
             break;

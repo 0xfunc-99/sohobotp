@@ -67,6 +67,22 @@ final class Browser
         return $this->request('POST', $path, $body, ['Content-Type' => 'multipart/form-data; boundary=' . $boundary]);
     }
 
+    /** @param array<string, array{0: string, 1: string}> $files field => [path, file name] */
+    public function postFiles(string $path, array $fields, array $files): self
+    {
+        $fields['_csrf'] ??= $this->csrf();
+        $boundary = '----e2e' . bin2hex(random_bytes(8));
+        $body = '';
+        foreach ($fields as $name => $value) {
+            $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n";
+        }
+        foreach ($files as $field => [$file, $fileName]) {
+            $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$field\"; filename=\"$fileName\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+                . file_get_contents($file) . "\r\n";
+        }
+        return $this->request('POST', $path, $body . "--$boundary--\r\n", ['Content-Type' => 'multipart/form-data; boundary=' . $boundary]);
+    }
+
     public function raw(string $method, string $path, ?string $body, array $headers): self
     {
         return $this->request($method, $path, $body, $headers);
@@ -580,6 +596,23 @@ $help->post('/portal/index.php?r=login', ['username' => 'helper', 'password' => 
 $help->get('/portal/index.php?r=mfa');
 $help->post('/portal/index.php?r=mfa', ['code' => next_code($helperSecret, $helperStep)]);
 check('helpdesk signed in again', 303 === $help->status && str_contains($help->location(), 'r=dashboard'), $help->location());
+// a user linked to a super administrator's second factor: only a super administrator changes it
+(new Portal\Users())->create(['user' => 'boss.token', 'display_name' => 'Second factor of the boss', 'token_serial' => '']);
+$bossId = (new Portal\AdminRepository())->create(['username' => 'boss', 'role' => 'superadmin', 'mfa_user' => 'boss.token'], 'Boss passphrase 2026! long', false, 'test')['id'];
+check('admin MFA link: found for its user', 'boss' === ((new Portal\AdminRepository())->linkedToMfaUser('Boss.Token')['username'] ?? ''));
+$help->get('/portal/index.php?r=user&u=boss.token');
+$help->post('/portal/index.php?r=user-action', ['u' => 'boss.token', 'op' => 'recovery-codes']);
+$helpCodes = 1 === preg_match('/<li><code>\d{4} \d{4}<\/code><\/li>/', $help->body);
+$help->get('/portal/index.php?r=user&u=boss.token');
+check('admin MFA link: help desk gets no recovery codes for a super administrator\'s second factor', !$helpCodes && str_contains($help->body, 'only a super administrator can change it'), substr(strip_tags($help->body), 0, 300));
+$help->post('/portal/index.php?r=user-action', ['u' => 'boss.token', 'op' => 'enroll']);
+check('admin MFA link: help desk cannot enrol a new authenticator for it', !str_contains($help->body, 'otpauth://'));
+$help->get('/portal/index.php?r=dashboard');
+$admin->get('/portal/index.php?r=user&u=boss.token');
+$admin->post('/portal/index.php?r=user-action', ['u' => 'boss.token', 'op' => 'recovery-codes']);
+check('admin MFA link: a super administrator still can', 1 === preg_match('/<li><code>\d{4} \d{4}<\/code><\/li>/', $admin->body));
+(new Portal\JsonStore(Portal\Config::dataDir() . '/admins.json'))->update(static function (array &$data) use ($bossId): void { unset($data['admins'][$bossId]); });
+(new Portal\Users())->delete('boss.token');
 $help->get('/portal/index.php?r=users');
 check('helpdesk sees users, no create, no bulk delete', 200 === $help->status && !str_contains($help->body, 'New user') && !str_contains($help->body, 'value="delete"') && str_contains($help->body, 'value="unlock"'));
 $help->get('/portal/index.php?r=user-new');
@@ -1101,12 +1134,27 @@ check('installers page: lists the installers and the computers by Sign-in versio
 $admin->get('/portal/index.php?r=signin-packages');
 $upload = tempnam(sys_get_temp_dir(), 'msi');
 file_put_contents($upload, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" . str_repeat("\x01", 320000));
-$admin->postFile('/portal/index.php?r=signin-packages', ['kind' => 'signin/amd64', 'version' => '1.0.3.0'], 'installer', $upload, 'SohobOTPSignIn.msi');
-check('installers page: upload a newer Sign-in from the browser', 303 === $admin->status && '1.0.3.0' === (Portal\SigninPackages::all()['signin/amd64']['version'] ?? ''), (string) $admin->status);
-$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
-check('installers page: the computers are offered the newer one at their next check-in', '1.0.3.0' === ($windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows')['policy']['signin_packages']['amd64']['version'] ?? ''));
+$signPackage = static function (string $file, string $arch, string $version): string {
+    $sig = tempnam(sys_get_temp_dir(), 'sig');
+    file_put_contents($sig, (string) shell_exec('php ' . escapeshellarg(__DIR__ . '/sign-package.php') . ' ' . escapeshellarg($file) . " signin $arch " . escapeshellarg($version)));
+    return $sig;
+};
+$admin->postFile('/portal/index.php?r=signin-packages', [], 'installer', $upload, 'SohobOTPSignIn.msi');
+check('installers page: an installer without its signature file refused', 400 === $admin->status && str_contains($admin->body, 'signature file') && '1.0.2.0' === (Portal\SigninPackages::all()['signin/amd64']['version'] ?? ''), (string) $admin->status);
 $admin->get('/portal/index.php?r=signin-packages');
-$admin->postFile('/portal/index.php?r=signin-packages', ['kind' => 'signin/amd64', 'version' => '1.0 /qn'], 'installer', $upload, 'SohobOTPSignIn.msi');
+$goodSig = $signPackage($upload, 'amd64', '1.0.3.0');
+$admin->postFiles('/portal/index.php?r=signin-packages', [], ['installer' => [$upload, 'SohobOTPSignIn.msi'], 'signature' => [$goodSig, 'SohobOTPSignIn.msi.sig.json']]);
+check('installers page: upload a newer Sign-in with its signature file from the browser', 303 === $admin->status && '1.0.3.0' === (Portal\SigninPackages::all()['signin/amd64']['version'] ?? '')
+    && '' !== (Portal\SigninPackages::all()['signin/amd64']['signature'] ?? ''), (string) $admin->status);
+unlink($goodSig);
+$winReply = $agentCall('checkin', ['inventory' => ['accounts' => $winAccounts] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+$offered = $windows->openConfig($winReply['config'] ?? [], $portalKeyHttp, 0, 'windows')['policy']['signin_packages']['amd64'] ?? [];
+check('installers page: the computers are offered the newer one at their next check-in, with its release signature', '1.0.3.0' === ($offered['version'] ?? '')
+    && ($offered['signature'] ?? '') === (Portal\SigninPackages::all()['signin/amd64']['signature'] ?? '-'));
+$admin->get('/portal/index.php?r=signin-packages');
+$badVersion = $signPackage($upload, 'amd64', '1.0 /qn');
+$admin->postFiles('/portal/index.php?r=signin-packages', [], ['installer' => [$upload, 'SohobOTPSignIn.msi'], 'signature' => [$badVersion, 'SohobOTPSignIn.msi.sig.json']]);
+unlink($badVersion);
 check('installers page: a version that is not numbers refused', 400 === $admin->status && str_contains($admin->body, 'numbers and dots'));
 $helper->get('/portal/index.php?r=signin-packages');
 check('installers page: not for the help desk role', !str_contains($helper->body, 'name="installer"'));
@@ -1130,6 +1178,17 @@ check('local sign-in set-up: an account the computer did not report gets nothing
 $agentCall('checkin', ['inventory' => ['accounts' => array_merge($winAccounts, [['name' => 'carol', 'kind' => 'local']])] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
 [$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'carol', 'password' => '', 'local' => true]);
 check('local sign-in set-up: never for a name that is a directory user (local carol, AD carol)', 'not_needed' === ($ans['status'] ?? ''));
+(new Portal\Users())->create(['user' => 'vpn-new', 'display_name' => 'VPN user, QR code not used yet', 'token_serial' => '']);
+$vpnEngine = Portal\MultiotpService::get();
+$vpnEngine->SetUser('vpn-new');
+$vpnSeedBefore = (string) $vpnEngine->GetUserTokenSeed();
+$agentCall('checkin', ['inventory' => ['accounts' => array_merge($winAccounts, [['name' => 'carol', 'kind' => 'local'], ['name' => 'vpn-new', 'kind' => 'local']])] + $windowsInventory, 'applied' => ['version' => 0, 'status' => 'none', 'error' => '', 'at' => null]], $windows);
+[$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'vpn-new', 'password' => '', 'local' => true]);
+Portal\MultiotpService::reset();
+$vpnEngine = Portal\MultiotpService::get();
+$vpnEngine->SetUser('vpn-new');
+check('local sign-in set-up: never for an existing SohobOTP user, even one never used (its code is not taken over)', 'not_needed' === ($ans['status'] ?? '') && $vpnSeedBefore === (string) $vpnEngine->GetUserTokenSeed(), json_encode($ans));
+(new Portal\Users())->delete('vpn-new');
 [$st, $ans] = $cpEnrol($cpSecret, ['step' => 'start', 'user' => 'OTPTEST\\svc-print', 'password' => '', 'local' => true]);
 $svcSeed = base32_decode((string) ($ans['secret'] ?? ''));
 check('local sign-in set-up: reported local account without a code gets its QR code, no password sent, no user yet', 'scan' === ($ans['status'] ?? '')
@@ -1186,6 +1245,7 @@ $reader = $cpClient($gatewayUrl, $readSecret, sys_get_temp_dir() . '/cp-reader-'
 $readBack = (string) $reader->ReadUserDataOnServer('cp.tester');
 check('CP ReadUserData: answers for a known user', str_contains($readBack, 'algorithm'), substr($readBack, 0, 80));
 check('CP ReadUserData: never returns the token seed, PIN or recovery codes', !preg_match('/^(token_seed|user_pin|scratch_passwords|seed_password)\b/m', $readBack) && !str_contains($readBack, bin2hex($cpSeed)));
+check('CP ReadUserData: no personal details (e-mail, phone, directory DN, last sign-in)', !preg_match('/^(email|sms|description|display_name|synchronized_dn|user_principal_name|last_login)\b/m', $readBack), substr($readBack, 0, 200));
 
 // ---------------------------------------------------------------- directory down / wrong password: users untouched
 $directory = new Portal\Directory();

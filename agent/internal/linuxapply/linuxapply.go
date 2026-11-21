@@ -36,6 +36,31 @@ const (
 // Services the agent may protect, in a fixed order.
 var Services = []string{"sshd", "sudo", "login", "su"}
 
+// companions are other PAM services the same command uses: on Debian and Ubuntu "sudo -i"
+// authenticates through /etc/pam.d/sudo-i, which includes common-auth but not sudo, so
+// protecting only /etc/pam.d/sudo let "sudo -i" give root with the password alone. A companion
+// that already includes its service (RHEL: "auth include sudo") needs nothing.
+var companions = map[string][]string{"sudo": {"sudo-i"}}
+
+// pamFiles lists every PAM service file the agent may change, each with the policy service
+// that turns it on.
+func pamFiles() [][2]string {
+	var out [][2]string
+	for _, svc := range Services {
+		out = append(out, [2]string{svc, svc})
+		for _, c := range companions[svc] {
+			out = append(out, [2]string{c, svc})
+		}
+	}
+	return out
+}
+
+// includesService: the file already authenticates through svc's own file (auth include/substack svc).
+func includesService(content, svc string) bool {
+	re := regexp.MustCompile(`(?m)^\s*(auth\s+(include|substack)\s+|@include\s+)` + regexp.QuoteMeta(svc) + `\s*$`)
+	return re.MatchString(content)
+}
+
 var (
 	nameRe     = regexp.MustCompile(`(?i)^[a-z_][a-z0-9_.-]{0,31}\$?$`)
 	hostRe     = regexp.MustCompile(`^[A-Za-z0-9.:-]{1,253}$`)
@@ -153,7 +178,7 @@ func ModuleFile(p *protocol.LinuxPolicy, radiusFile string) string {
 	// users who skip the code only for some services (pam_succeed_if: all conditions must hold)
 	for _, svc := range Services {
 		if users := p.ExcludedUsersByService[svc]; len(users) > 0 {
-			skip = append(skip, "user in "+strings.Join(users, ":")+" service in "+svc)
+			skip = append(skip, "user in "+strings.Join(users, ":")+" service in "+strings.Join(append([]string{svc}, companions[svc]...), ":"))
 		}
 	}
 	var b strings.Builder
@@ -238,11 +263,12 @@ func (a *Applier) Plan(p *protocol.LinuxPolicy, secret string) ([]Change, error)
 			wanted[s] = true
 		}
 	}
-	for _, svc := range Services {
-		path := "/etc/pam.d/" + svc
+	for _, f := range pamFiles() {
+		file, svc := f[0], f[1]
+		path := "/etc/pam.d/" + file
 		raw, err := os.ReadFile(a.p(path))
 		if errors.Is(err, os.ErrNotExist) {
-			if wanted[svc] && svc == "sshd" {
+			if wanted[svc] && file == "sshd" {
 				return nil, errors.New("SSH is protected by the policy but /etc/pam.d/sshd does not exist (is openssh-server installed?)")
 			}
 			continue
@@ -251,8 +277,8 @@ func (a *Applier) Plan(p *protocol.LinuxPolicy, secret string) ([]Change, error)
 			return nil, err
 		}
 		next := WithoutInclude(string(raw))
-		if wanted[svc] {
-			if next, err = WithInclude(svc, next); err != nil {
+		if wanted[svc] && (file == svc || !includesService(next, svc)) {
+			if next, err = WithInclude(file, next); err != nil {
 				return nil, err
 			}
 		}

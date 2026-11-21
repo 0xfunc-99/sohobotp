@@ -169,7 +169,7 @@ func TestModuleFilePerServiceExclusions(t *testing.T) {
 auth [success=5 default=ignore] pam_succeed_if.so quiet user in root:deploy
 auth [success=4 default=ignore] pam_succeed_if.so quiet user ingroup mfa-breakglass
 auth [success=3 default=ignore] pam_succeed_if.so quiet user in backup:svc service in sshd
-auth [success=2 default=ignore] pam_succeed_if.so quiet user in alina service in sudo
+auth [success=2 default=ignore] pam_succeed_if.so quiet user in alina service in sudo:sudo-i
 auth [success=1 default=ignore] pam_succeed_if.so quiet user in backup:svc service in login
 auth required pam_radius_auth.so conf=/etc/pam_radius_auth.conf prompt=code force_prompt
 `
@@ -446,5 +446,62 @@ func TestWaitingNamesProtectedServicesNotInstalled(t *testing.T) {
 	}
 	if a.Waiting(&protocol.LinuxPolicy{Enabled: false, Services: []string{"sudo"}}) != nil {
 		t.Fatal("2FA off: nothing to wait for")
+	}
+}
+
+const debianSudoI = `#%PAM-1.0
+
+# Set up user limits from /etc/security/limits.conf.
+session    required   pam_limits.so
+
+@include common-auth
+@include common-account
+@include common-session
+`
+
+const rhelSudoI = `#%PAM-1.0
+auth       include      sudo
+account    include      sudo
+password   include      sudo
+session    optional     pam_keyinit.so force revoke
+session    include      sudo
+`
+
+// TestSudoLoginShellProtectedToo: Debian's /etc/pam.d/sudo-i ("sudo -i") includes common-auth,
+// not sudo: it gets the code too, and is restored byte for byte when sudo is no longer protected.
+func TestSudoLoginShellProtectedToo(t *testing.T) {
+	dir := debian(t)
+	if err := os.WriteFile(filepath.Join(dir, "/etc/pam.d/sudo-i"), []byte(debianSudoI), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &Applier{Root: dir, Sys: &fakeSystem{}}
+	if _, err := a.Apply(policy(), secret); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(t, dir, "/etc/pam.d/sudo-i"), "@include common-auth\n"+marker+"\n"+includeLine+"\n@include common-account") {
+		t.Fatalf("sudo -i not protected:\n%s", read(t, dir, "/etc/pam.d/sudo-i"))
+	}
+	p := policy()
+	p.Services = []string{"sshd"}
+	if _, err := a.Apply(p, secret); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, dir, "/etc/pam.d/sudo-i") != debianSudoI {
+		t.Fatal("sudo-i not restored when sudo is no longer protected")
+	}
+}
+
+// TestSudoLoginShellIncludingSudoUntouched: RHEL's sudo-i includes sudo: the code is asked once.
+func TestSudoLoginShellIncludingSudoUntouched(t *testing.T) {
+	dir := debian(t)
+	if err := os.WriteFile(filepath.Join(dir, "/etc/pam.d/sudo-i"), []byte(rhelSudoI), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &Applier{Root: dir, Sys: &fakeSystem{}}
+	if _, err := a.Apply(policy(), secret); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, dir, "/etc/pam.d/sudo-i") != rhelSudoI {
+		t.Fatal("a sudo-i that includes sudo must not be changed")
 	}
 }

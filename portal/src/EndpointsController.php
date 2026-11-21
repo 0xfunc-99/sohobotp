@@ -535,15 +535,18 @@ final class EndpointsController extends Controller
         $this->requirePermission('endpoints.manage');
         $error = null;
         if ($this->isPost()) {
-            $kind = $this->post('kind', 32);
-            $version = $this->post('version', 32);
             $file = $_FILES['installer'] ?? null;
+            $sigFile = $_FILES['signature'] ?? null;
             try {
                 if (!is_array($file) || UPLOAD_ERR_OK !== ($file['error'] ?? UPLOAD_ERR_NO_FILE) || !is_uploaded_file((string) $file['tmp_name'])) {
                     throw new ValidationException(is_array($file) && in_array($file['error'] ?? 0, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
                         ? 'The file is too large for this server.' : 'Choose the installer file.');
                 }
-                $added = SigninPackages::add((string) $file['tmp_name'], $kind, $version);
+                if (!is_array($sigFile) || UPLOAD_ERR_OK !== ($sigFile['error'] ?? UPLOAD_ERR_NO_FILE) || !is_uploaded_file((string) $sigFile['tmp_name'])
+                    || !is_array($signed = json_decode((string) file_get_contents((string) $sigFile['tmp_name'], false, null, 0, 8192), true))) {
+                    throw new ValidationException('Choose the installer\'s signature file (.sig.json, made with the release key: sohobotp-agent release sign-package).');
+                }
+                $added = SigninPackages::add((string) $file['tmp_name'], $signed);
                 $this->audit->record('signin.package_add', 'success', $added['kind'], ['version' => $added['version'], 'sha256' => $added['sha256'], 'size' => $added['size'], 'via' => 'portal']);
                 Session::flash('success', SigninPackages::KINDS[$added['kind']]['label'] . ' ' . $added['version'] . ' added. Computers whose policy installs Sign-in automatically get it at their next check-in.');
                 $this->redirect('signin-packages');

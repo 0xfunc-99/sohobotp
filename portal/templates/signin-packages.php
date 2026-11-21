@@ -15,7 +15,7 @@
 
 <section class="panel">
   <div class="panel-head">
-    <div><h2>Installers on this portal</h2><p class="panel-sub">The agent checks each download against the size and SHA-256 shown here (sent in the signed policy).</p></div>
+    <div><h2>Installers on this portal</h2><p class="panel-sub">The agent installs only installers signed with the release key built into it (kept offline, never on this portal), and checks each download against the size and SHA-256 shown here.</p></div>
     <span class="status <?= $signinCount > 0 ? 'status-success' : '' ?>"><?= $signinCount > 0 ? 'ready' : 'none yet' ?></span>
   </div>
   <table>
@@ -27,7 +27,7 @@
           <?php if (null === $p): ?>
             <td colspan="4"><span class="status">not added</span><?= 'vcredist' === $kind ? ' <span class="muted">computers without the runtime cannot get Sign-in automatically</span>' : '' ?></td>
           <?php else: ?>
-            <td><?= e($p['version']) ?></td>
+            <td><?= e($p['version']) ?><?php if ('' === $p['signature']): ?> <span class="status status-failure" title="Added before installers had to be signed: computers do not get it. Add it again with its signature file.">not signed</span><?php endif; ?></td>
             <td><?= e(number_format($p['size'] / 1048576, 1)) ?> MB</td>
             <td><?= $p['added_at'] > 0 ? e(format_time($p['added_at'])) : '—' ?></td>
             <td><code title="<?= e($p['sha256']) ?>"><?= e(substr($p['sha256'], 0, 16)) ?>…</code></td>
@@ -63,14 +63,10 @@
   <?= csrf_field() ?>
   <fieldset>
     <legend>Add or replace an installer</legend>
-    <label>Installer
-      <select name="kind">
-        <?php foreach (Portal\SigninPackages::KINDS as $kind => $meta): ?><option value="<?= e($kind) ?>"><?= e($meta['label']) ?></option><?php endforeach; ?>
-      </select></label>
     <label>File <input type="file" name="installer" accept=".msi,.exe" required>
       <small>From the setup kit: <code>windows-signin/SohobOTPSignIn.msi</code> (Intel/AMD) or <code>windows-signin/arm64/SohobOTPSignIn_arm64.msi</code> (ARM). The Visual C++ runtime: <code>vc_redist.x64.exe</code> from Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe).</small></label>
-    <label>Version <input name="version" maxlength="32" placeholder="1.0.2.0" inputmode="decimal" autocomplete="off">
-      <small>SohobOTP Sign-in: its version, as Windows shows it under Settings → Apps (for example <code>1.0.2.0</code>). Visual C++ runtime: leave empty, it is read from the file. A computer never gets a version older than the one it has.</small></label>
+    <label>Signature file <input type="file" name="signature" accept=".json" required>
+      <small>Made on the computer that keeps the release key: <code>sohobotp-agent release sign-package --key release-private.key --file SohobOTPSignIn.msi --kind signin --arch amd64 --version 1.0.2.0 --out SohobOTPSignIn.msi.sig.json</code> (Visual C++ runtime: <code>--kind vcredist</code> and its file version). It names the installer and its version. A computer never gets a version older than the one it has.</small></label>
     <div class="actions"><button type="submit" class="button-primary">Add installer</button></div>
   </fieldset>
 </form>
@@ -78,8 +74,8 @@
 <details class="panel">
   <summary>From the command line (portal server)</summary>
   <pre><code>A="sudo docker exec sohobotp php /usr/local/bin/multiotp/portal/bin/portal-admin.php"
-sudo docker cp SohobOTPSignIn.msi sohobotp:/tmp/ &amp;&amp; $A signin-package-add --file=/tmp/SohobOTPSignIn.msi --kind=signin/amd64 --version=1.0.2.0
-sudo docker cp SohobOTPSignIn_arm64.msi sohobotp:/tmp/ &amp;&amp; $A signin-package-add --file=/tmp/SohobOTPSignIn_arm64.msi --kind=signin/arm64 --version=1.0.2.0
-sudo docker cp vc_redist.x64.exe sohobotp:/tmp/ &amp;&amp; $A signin-package-add --file=/tmp/vc_redist.x64.exe --kind=vcredist
+sudo docker cp SohobOTPSignIn.msi sohobotp:/tmp/ &amp;&amp; sudo docker cp SohobOTPSignIn.msi.sig.json sohobotp:/tmp/
+$A signin-package-add --file=/tmp/SohobOTPSignIn.msi --signature=/tmp/SohobOTPSignIn.msi.sig.json
+(the same for SohobOTPSignIn_arm64.msi and vc_redist.x64.exe, each with its .sig.json)
 $A signin-package-list</code></pre>
 </details>

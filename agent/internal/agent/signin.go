@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"multiotp-portal/agent/internal/protocol"
+	"multiotp-portal/agent/internal/release"
 )
 
 // SohobOTP Sign-in installed by the agent (computer policy "Install and update SohobOTP Sign-in
@@ -72,6 +73,13 @@ func verifyPackage(data []byte, p *protocol.Package) error {
 	return nil
 }
 
+// checkPackageSignature: the installer must be signed with the release key built into this
+// agent (the portal's own signature on the policy is not enough: it would let whoever controls
+// the portal run any program as SYSTEM on every computer).
+func checkPackageSignature(kind, arch string, p *protocol.Package) error {
+	return release.VerifyPackage(&release.PackageManifest{Kind: kind, Arch: arch, Version: p.Version, SHA256: strings.ToLower(p.SHA256), Size: p.Size, Signature: p.Signature}, release.PublicKey)
+}
+
 // signinPlan decides what to do for this machine: the installer to run (nil: nothing) and a
 // note for the log. installed is the installed Sign-in version ("" when not installed).
 func signinPlan(p *protocol.WindowsPolicy, arch, installed string) (*protocol.Package, string, error) {
@@ -86,6 +94,9 @@ func signinPlan(p *protocol.WindowsPolicy, arch, installed string) (*protocol.Pa
 		return nil, "", fmt.Errorf("SohobOTP Sign-in is not installed and the portal has no installer for %s", arch)
 	}
 	if err := validPackage(&pkg); err != nil {
+		return nil, "", err
+	}
+	if err := checkPackageSignature("signin", arch, &pkg); err != nil {
 		return nil, "", err
 	}
 	switch {

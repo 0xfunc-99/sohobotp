@@ -83,6 +83,13 @@ final class CpGateway
         // Offline cache: only when the endpoint group allows it, for at most its lifetime
         $engine->SetServerCacheLevel($policy['cache_enabled'] ? 1 : 0);
         $engine->SetServerCacheLifetime($policy['cache_enabled'] ? 86400 * (int) $policy['cache_days'] : 0);
+        if (preg_match('#<ReadUserData[\s>]#i', $data)) {
+            // Sign-in reads a user's token settings; the engine's answer leaves out only the
+            // encrypted attributes. Any endpoint can ask about any user, so personal details
+            // (e-mail, phone, directory DN, ...) are left out too: a compromised laptop must not
+            // be a way to read the user directory. Read only: nothing is written with this list.
+            $engine->SetAttributesToEncrypt(rtrim((string) $engine->GetAttributesToEncrypt(), '*') . '*' . implode('*', self::PRIVATE_ATTRIBUTES) . '*');
+        }
         $endpoints->touchCp($id, $ip);
         $engine->XmlServer($data); // sends its own headers and the XML answer
         exit;
@@ -152,6 +159,15 @@ final class CpGateway
             . '<ErrorDescription>ERROR: This computer is reported lost or stolen</ErrorDescription>' . "\n"
             . '</multiOTP>';
     }
+
+    /** User attributes never sent to an endpoint (ReadUserData). */
+    public const PRIVATE_ATTRIBUTES = [
+        'email', 'sms', 'description', 'display_name', 'group', 'user_principal_name', 'language',
+        'synchronized', 'synchronized_dn', 'synchronized_server', 'synchronized_channel', 'synchronized_time',
+        'last_login', 'user_last_login', 'last_error', 'last_failed_time', 'last_success_credential',
+        'last_failed_credential', 'last_cached_credential', 'create_host', 'last_update_host',
+        'token_serial', 'private_id', 'key_id', 'mosid', 'mouid', 'push_gateway',
+    ];
 
     /** _MULTIOTP_USER_DISABLED_: an error the client stops at (22..69), without deleting the cached user. */
     public const LOST_ERROR = 38;

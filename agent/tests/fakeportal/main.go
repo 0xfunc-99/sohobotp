@@ -39,6 +39,7 @@ import (
 	"golang.org/x/crypto/nacl/box"
 
 	"multiotp-portal/agent/internal/protocol"
+	"multiotp-portal/agent/internal/release"
 	"multiotp-portal/agent/internal/tamper"
 )
 
@@ -67,13 +68,25 @@ type portal struct {
 	nonces        map[string]bool
 }
 
+// testReleaseKey is the TEST release key (a fixed seed, public on purpose): the CI builds its
+// test agents with the public half. Real agents are built with the offline release key.
+var testReleaseKey = func() ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("SohobOTP fake portal test release key: never for real agents"))
+	return ed25519.NewKeyFromSeed(seed[:])
+}()
+
 func main() {
 	dir := flag.String("dir", ".", "output folder")
 	addr := flag.String("addr", "127.0.0.1:8443", "listen address")
 	signinMSI := flag.String("signin-msi", "", "SohobOTP Sign-in installer the policy tells the agent to install")
 	signinVersion := flag.String("signin-version", "", "its version (ProductVersion)")
 	tamperCode := flag.String("tamper-code", "", "turn tamper protection on, with this uninstall code")
+	printKey := flag.Bool("print-test-release-key", false, "print the public TEST release key (build the test agents with it) and exit")
 	flag.Parse()
+	if *printKey {
+		fmt.Println(b64.EncodeToString(testReleaseKey.Public().(ed25519.PublicKey)))
+		return
+	}
 	if err := os.MkdirAll(*dir, 0o755); err != nil {
 		log.Fatal(err)
 	}
@@ -226,7 +239,14 @@ func (p *portal) config(id string, ep *endpoint) *protocol.Envelope {
 			sum := sha256.Sum256(p.signinMSI)
 			// the CI runner is x64; the real portal names one installer per processor
 			wp := policy.(protocol.WindowsPolicy)
-			wp.SigninPackages = map[string]protocol.Package{"amd64": {Version: p.signinVersion, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(p.signinMSI))}}
+			pkg := protocol.Package{Version: p.signinVersion, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(p.signinMSI))}
+			// signed like the real release (the test agents are built with this test key)
+			m := &release.PackageManifest{Kind: "signin", Arch: "amd64", Version: pkg.Version, SHA256: pkg.SHA256, Size: pkg.Size}
+			if err := release.SignPackage(m, testReleaseKey); err != nil {
+				log.Printf("cannot sign the Sign-in installer: %v", err)
+			}
+			pkg.Signature = m.Signature
+			wp.SigninPackages = map[string]protocol.Package{"amd64": pkg}
 			policy = wp
 		}
 		if p.tamperCode != "" {

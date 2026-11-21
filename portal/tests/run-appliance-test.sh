@@ -93,6 +93,16 @@ docker exec -d "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/po
 sleep 1
 docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-vip.php" || STATUS=1
 
+echo "== RADIUS helper: a link in the web server's folder never hands a root folder over"
+docker exec "$NAME" sh -c '
+  ok() { echo "ok   $1"; }; fail() { echo "FAIL $1"; FAILED=1; }; FAILED=0
+  su -s /bin/sh www-data -c "mv /etc/multiotp/radius-route /etc/multiotp/radius-route.real && ln -s /usr/local/sbin /etc/multiotp/radius-route"
+  su -s /bin/sh www-data -c "sudo -n /usr/local/sbin/multiotp-portal-radius apply" 2>&1 | grep -q "is a link: refused" && ok "apply refuses a linked routing folder" || fail "apply did not refuse the link"
+  [ "$(stat -c %U:%a /usr/local/sbin)" = root:755 ] && ok "/usr/local/sbin still root 755" || fail "/usr/local/sbin taken over: $(stat -c %U:%a /usr/local/sbin)"
+  su -s /bin/sh www-data -c "rm /etc/multiotp/radius-route && mv /etc/multiotp/radius-route.real /etc/multiotp/radius-route"
+  exit $FAILED
+' || STATUS=1
+
 echo "== Database: MariaDB on the appliance, migration, 100,000 users (last: the appliance stays on MariaDB)"
 docker exec "$NAME" su -s /bin/sh www-data -c "php /usr/local/bin/multiotp/portal/tests/appliance-db.php" || STATUS=1
 docker exec "$NAME" sh -c '[ "$(stat -c %U /usr/local/sbin/sohobotp-db)" = root ]' && echo "ok   database helper owned by root" || { echo "FAIL database helper owner"; STATUS=1; }

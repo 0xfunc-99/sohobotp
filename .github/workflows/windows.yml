@@ -13,7 +13,12 @@ jobs:
       - name: SohobOTP Sign-in uses one provider id everywhere (code, installer, agent)
         run: python3 windows-signin/check-ids.py
       - name: Agent tests and builds (Linux and Windows binaries)
-        run: sh agent/tests/run-in-docker.sh
+        # built with the fake portal's TEST release key: Sign-in installers the fake portal hands
+        # out are signed with it (agents install only installers signed with their release key)
+        run: |
+          RELEASE_PUBLIC_KEY=$(docker run --rm -v "$PWD":/src -w /src/agent golang:1.22.10-bookworm go run -buildvcs=false ./tests/fakeportal --print-test-release-key)
+          export RELEASE_PUBLIC_KEY
+          sh agent/tests/run-in-docker.sh
       - name: Agent MSI
         run: sh agent/packaging/windows/build-msi.sh
       - name: Agent 0.3.1 and its MSI (upgrade test)

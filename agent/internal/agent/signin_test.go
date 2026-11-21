@@ -1,13 +1,26 @@
 package agent
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"strings"
 	"testing"
 
 	"multiotp-portal/agent/internal/protocol"
+	"multiotp-portal/agent/internal/release"
 )
+
+// testReleaseKey stands for the offline release key in these tests.
+var testReleaseKey = ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+
+// withReleaseKey builds the agent "with" the test release key for one test.
+func withReleaseKey(t *testing.T) {
+	old := release.PublicKey
+	release.PublicKey = base64.StdEncoding.EncodeToString(testReleaseKey.Public().(ed25519.PublicKey))
+	t.Cleanup(func() { release.PublicKey = old })
+}
 
 func TestVersionLess(t *testing.T) {
 	for _, c := range []struct {
@@ -23,13 +36,20 @@ func TestVersionLess(t *testing.T) {
 	}
 }
 
-func pkgFor(data string, version string) protocol.Package {
+// pkgFor: a Sign-in installer for arch, signed with the test release key.
+func pkgFor(data, version, arch string) protocol.Package {
 	sum := sha256.Sum256([]byte(data))
-	return protocol.Package{Version: version, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+	p := protocol.Package{Version: version, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+	m := &release.PackageManifest{Kind: "signin", Arch: arch, Version: p.Version, SHA256: p.SHA256, Size: p.Size}
+	if release.SignPackage(m, testReleaseKey) == nil {
+		p.Signature = m.Signature
+	}
+	return p
 }
 
 func TestSigninPlan(t *testing.T) {
-	p := &protocol.WindowsPolicy{SigninPackages: map[string]protocol.Package{"amd64": pkgFor("x64 msi", "1.0.2.0"), "arm64": pkgFor("arm msi", "1.0.2.0")}}
+	withReleaseKey(t)
+	p := &protocol.WindowsPolicy{SigninPackages: map[string]protocol.Package{"amd64": pkgFor("x64 msi", "1.0.2.0", "amd64"), "arm64": pkgFor("arm msi", "1.0.2.0", "arm64")}}
 	cases := []struct {
 		name, arch, installed string
 		install               bool
@@ -58,14 +78,14 @@ func TestSigninPlan(t *testing.T) {
 	if _, _, err := signinPlan(bad, "amd64", ""); err == nil {
 		t.Error("an installer without a valid SHA-256 must be refused")
 	}
-	injected := &protocol.WindowsPolicy{SigninPackages: map[string]protocol.Package{"amd64": pkgFor("x", `1.0" /qn TRANSFORMS=evil`)}}
+	injected := &protocol.WindowsPolicy{SigninPackages: map[string]protocol.Package{"amd64": pkgFor("x", `1.0" /qn TRANSFORMS=evil`, "amd64")}}
 	if _, _, err := signinPlan(injected, "amd64", ""); err == nil {
 		t.Error("a version that is not dotted numbers must be refused")
 	}
 }
 
 func TestVerifyPackage(t *testing.T) {
-	p := pkgFor("the real installer", "1.0.2.0")
+	p := pkgFor("the real installer", "1.0.2.0", "amd64")
 	if err := verifyPackage([]byte("the real installer"), &p); err != nil {
 		t.Errorf("good installer refused: %v", err)
 	}
@@ -74,5 +94,28 @@ func TestVerifyPackage(t *testing.T) {
 	}
 	if err := verifyPackage([]byte("short"), &p); err == nil {
 		t.Error("wrong size accepted")
+	}
+}
+
+// TestSigninPlanNeedsReleaseSignature: the policy (signed by the portal) is not enough: an
+// installer runs only with the offline release key's signature, for this processor.
+func TestSigninPlanNeedsReleaseSignature(t *testing.T) {
+	withReleaseKey(t)
+	unsigned := pkgFor("evil msi", "9.0.0.0", "amd64")
+	unsigned.Signature = ""
+	other := pkgFor("x64 msi", "1.0.2.0", "arm64") // signed, but for ARM
+	_, otherKey, _ := ed25519.GenerateKey(nil)
+	forged := pkgFor("evil msi", "9.0.0.0", "amd64")
+	m := &release.PackageManifest{Kind: "signin", Arch: "amd64", Version: forged.Version, SHA256: forged.SHA256, Size: forged.Size}
+	_ = release.SignPackage(m, otherKey)
+	forged.Signature = m.Signature
+	for name, pkg := range map[string]protocol.Package{"unsigned": unsigned, "signed for another processor": other, "signed with another key": forged} {
+		if got, _, err := signinPlan(&protocol.WindowsPolicy{SigninPackages: map[string]protocol.Package{"amd64": pkg}}, "amd64", ""); got != nil || err == nil {
+			t.Errorf("%s installer accepted", name)
+		}
+	}
+	release.PublicKey = ""
+	if got, _, err := signinPlan(&protocol.WindowsPolicy{SigninPackages: map[string]protocol.Package{"amd64": pkgFor("x64 msi", "1.0.2.0", "amd64")}}, "amd64", ""); got != nil || err == nil {
+		t.Error("an agent built without a release key must install nothing by itself")
 	}
 }

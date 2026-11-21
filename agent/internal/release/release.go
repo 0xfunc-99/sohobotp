@@ -129,3 +129,70 @@ func parts(v string) [3]int {
 	}
 	return out
 }
+
+// PackageManifest describes an installer the agent runs as SYSTEM (SohobOTP Sign-in, the Visual
+// C++ runtime), signed with the same offline release key as the agent itself: the portal only
+// passes it on, so neither a compromised portal nor a portal administrator can make computers
+// run another program.
+type PackageManifest struct {
+	Kind      string `json:"kind"` // signin | vcredist
+	Arch      string `json:"arch"` // amd64 | arm64 (vcredist: amd64)
+	Version   string `json:"version"`
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	Signature string `json:"signature"`
+}
+
+var packageVersionRe = regexp.MustCompile(`^\d{1,5}(\.\d{1,5}){1,3}$`)
+
+// Message is the exact byte string a package signature covers.
+func (m *PackageManifest) Message() []byte {
+	return []byte(fmt.Sprintf("sohobotp-package-v1\n%s\n%s\n%s\n%s\n%d", m.Kind, m.Arch, m.Version, strings.ToLower(m.SHA256), m.Size))
+}
+
+// Validate checks the manifest fields (not the signature).
+func (m *PackageManifest) Validate() error {
+	switch m.Kind + "/" + m.Arch {
+	case "signin/amd64", "signin/arm64", "vcredist/amd64":
+	default:
+		return fmt.Errorf("unsupported installer %s/%s", m.Kind, m.Arch)
+	}
+	if !packageVersionRe.MatchString(m.Version) {
+		return fmt.Errorf("invalid installer version %q", m.Version)
+	}
+	if raw, err := hex.DecodeString(m.SHA256); err != nil || len(raw) != sha256.Size {
+		return errors.New("invalid sha256")
+	}
+	if m.Size <= 0 || m.Size > 200<<20 {
+		return errors.New("invalid size")
+	}
+	return nil
+}
+
+// SignPackage fills the signature with the release private key.
+func SignPackage(m *PackageManifest, key ed25519.PrivateKey) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	m.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(key, m.Message()))
+	return nil
+}
+
+// VerifyPackage checks an installer's manifest against the release public key (base64).
+func VerifyPackage(m *PackageManifest, publicKey string) error {
+	if publicKey == "" {
+		return errors.New("this agent build has no release key: it installs no programs by itself")
+	}
+	pub, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return errors.New("the built-in release key is invalid")
+	}
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	sig, err := base64.StdEncoding.DecodeString(m.Signature)
+	if err != nil || !ed25519.Verify(pub, m.Message(), sig) {
+		return fmt.Errorf("the %s installer %s is not signed with the release key built into this agent: not installed", m.Kind, m.Version)
+	}
+	return nil
+}

@@ -236,6 +236,9 @@ type Package struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"` // hex
 	Size    int64  `json:"size"`
+	// Signature: Ed25519 by the offline release key over release.PackageManifest.Message
+	// (kind, arch, version, SHA-256, size). The agent runs nothing without it.
+	Signature string `json:"signature,omitempty"`
 }
 
 // PackageRequest is the body of a=package (signed): which installer to download.

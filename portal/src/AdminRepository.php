@@ -49,6 +49,22 @@ final class AdminRepository
         return null;
     }
 
+    /**
+     * The administrator whose second factor is checked against this SohobOTP user ("multiotp"
+     * mode), or null. Such a user's code is that administrator's portal second factor: whoever
+     * can enrol it, print its recovery codes or change its login format can pass that step.
+     */
+    public function linkedToMfaUser(string $user): ?array
+    {
+        $user = mb_strtolower(trim($user));
+        foreach ($this->store->read()['admins'] ?? [] as $admin) {
+            if ('multiotp' === ($admin['mfa_mode'] ?? null) && '' !== $user && mb_strtolower((string) ($admin['mfa_user'] ?? '')) === $user) {
+                return $admin;
+            }
+        }
+        return null;
+    }
+
     public function count(): int
     {
         return count($this->store->read()['admins'] ?? []);

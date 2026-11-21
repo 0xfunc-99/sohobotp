@@ -9,6 +9,22 @@ defined('PORTAL_ROOT') || exit;
 final class UsersController extends Controller
 {
     private const PER_PAGE = 50;
+    /** Operations that change or reveal what passes a user's code (or remove the user). */
+    private const MFA_LINKED_OPS = ['enable', 'disable', 'delete', 'login-format', 'enroll', 'recovery-codes', 'self-enrol-again', 'resync', 'assign-token', 'remove-token'];
+
+    /**
+     * A user linked to an administrator's portal second factor is changed only by a super
+     * administrator: otherwise the help desk could print its recovery codes (or enrol a new
+     * authenticator) and pass a super administrator's second factor with a stolen password.
+     */
+    private function guardMfaLinked(string $name): void
+    {
+        $linked = (new AdminRepository())->linkedToMfaUser($name);
+        if (null !== $linked && 'superadmin' !== ($this->admin['role'] ?? '')) {
+            throw new ValidationException('This user is the second factor of portal administrator ' . $linked['username'] . ': only a super administrator can change it.');
+        }
+    }
+
     private const BULK = ['unlock' => 'users.unlock', 'enable' => 'users.manage', 'disable' => 'users.manage', 'delete' => 'users.manage',
         'to-sohobotp' => 'users.manage', 'to-vip' => 'users.manage'];
     public const BULK_LABELS = ['unlock' => 'Unlock', 'enable' => 'Enable', 'disable' => 'Disable', 'delete' => 'Delete',
@@ -141,6 +157,9 @@ final class UsersController extends Controller
         $this->requirePermission($permission);
 
         try {
+            if (in_array($op, self::MFA_LINKED_OPS, true)) {
+                $this->guardMfaLinked($name);
+            }
             switch ($op) {
                 case 'unlock':
                     $users->unlock($name);
@@ -252,6 +271,9 @@ final class UsersController extends Controller
             try {
                 if (!$users->exists($name)) {
                     throw new ValidationException('missing');
+                }
+                if ('unlock' !== $op) {
+                    $this->guardMfaLinked($name);
                 }
                 match ($op) {
                     'unlock'  => $users->unlock($name),

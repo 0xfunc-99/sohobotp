@@ -42,6 +42,18 @@ vip_bak() { printf '%s/%s' "$VIP_BACKUP_DIR" "$(basename "$1")"; }
 say() { printf '%s\n' "$*"; }
 fail() { say "ERROR: $*"; exit 1; }
 
+# The candidates live in a folder the web server owns: each one is copied once into a root-only
+# temporary file, and that copy is what gets checked and installed (the original could be
+# swapped between the check and the install). Links and anything but a regular file are refused.
+SNAPSHOT_DIR=""
+cleanup() { if [ -n "$SNAPSHOT_DIR" ]; then rm -rf "$SNAPSHOT_DIR"; fi; }
+trap cleanup EXIT
+snapshot() { # snapshot SRC: copy to $SNAPSHOT_DIR/<name of SRC>
+  [ -n "$SNAPSHOT_DIR" ] || SNAPSHOT_DIR=$(mktemp -d) || fail "cannot create a temporary folder"
+  if [ -L "$1" ] || [ ! -f "$1" ]; then fail "$1 is not a regular file"; fi
+  head -c 2000001 -- "$1" > "$SNAPSHOT_DIR/$(basename "$1")" || fail "cannot read $1"
+}
+
 radius_group() {
   if getent group freerad >/dev/null 2>&1; then echo freerad; else echo root; fi
 }
@@ -76,6 +88,8 @@ restart_radius() {
 
 validate_candidate() {
   [ -f "$CANDIDATE" ] || fail "no candidate file ($CANDIDATE)"
+  snapshot "$CANDIDATE"
+  CANDIDATE="$SNAPSHOT_DIR/$(basename "$CANDIDATE")"
   size=$(wc -c < "$CANDIDATE")
   [ "$size" -lt 2000000 ] || fail "candidate file too large"
   patterns=$(mktemp)
@@ -98,6 +112,8 @@ EOF
 VIP_NEW=""
 
 validate_vip_candidate() {
+  snapshot "$VIP_CANDIDATE"
+  VIP_CANDIDATE="$SNAPSHOT_DIR/$(basename "$VIP_CANDIDATE")"
   size=$(wc -c < "$VIP_CANDIDATE")
   [ "$size" -lt 20000 ] || fail "VIP candidate file too large"
   patterns=$(mktemp)
@@ -171,11 +187,19 @@ ensure_vip_site_hooks() {
   say "added the Symantec VIP forwarding hooks to $SITE"
 }
 
-# The portal (web server user) writes the routing file; FreeRADIUS reads it (group)
+# The portal (web server user) writes the routing file; FreeRADIUS reads it (group).
+# Its parent belongs to the web server: never follow a link there (a chown through a link
+# would hand any root-owned folder to the web server). An existing real folder is left as is;
+# a missing one is created with its mode from the start and only the new entry itself is
+# given away (chown -h: a link swapped in meanwhile is not followed).
 ensure_route_dir() {
+  if [ -L "$ROUTE_DIR" ]; then fail "$ROUTE_DIR is a link: refused"; fi
+  [ -d "$ROUTE_DIR" ] && return 0
+  [ -e "$ROUTE_DIR" ] && fail "$ROUTE_DIR is not a folder"
   owner=www-data
   getent passwd "$owner" >/dev/null 2>&1 || owner=root
-  mkdir -p "$ROUTE_DIR" && chown "$owner":"$owner" "$ROUTE_DIR" && chmod 0750 "$ROUTE_DIR"
+  (umask 027; mkdir "$ROUTE_DIR") || fail "cannot create $ROUTE_DIR"
+  chown -h "$owner":"$owner" "$ROUTE_DIR"
 }
 
 install_vip() {
@@ -223,6 +247,7 @@ ensure_include() {
 case "${1:-}" in
   apply)
     [ $# -eq 1 ] || fail "no extra arguments allowed"
+    if [ -L "$ROUTE_DIR" ]; then fail "$ROUTE_DIR is a link: refused, nothing changed"; fi
     validate_candidate
     [ -f "$TARGET" ] && cp -p "$TARGET" "$TARGET.bak"
     [ -f "$CLIENTS" ] && cp -p "$CLIENTS" "$CLIENTS.bak-portal-apply"

@@ -136,6 +136,7 @@ final class Api
             case 'PATCH v1/users/{user}':
                 $need('users.write');
                 $current = $userOr404($name);
+                self::refuseMfaLinked($name);
                 $fields = [];
                 foreach (['display_name', 'email', 'sms', 'description', 'group'] as $field) {
                     $fields[$field] = array_key_exists($field, $body) ? mb_substr(trim((string) $body[$field]), 0, 255) : $current[$field];
@@ -159,6 +160,7 @@ final class Api
             case 'DELETE v1/users/{user}':
                 $need('users.write');
                 $userOr404($name);
+                self::refuseMfaLinked($name);
                 $users->delete($name);
                 (new VipMigration())->forget($name);
                 $audit->record('user.delete', 'success', $name, ['via' => 'api']);
@@ -185,6 +187,7 @@ final class Api
             case 'POST v1/users/{user}/enroll':
                 $need('tokens.write');
                 $userOr404($name);
+                self::refuseMfaLinked($name);
                 $uri = $users->enrollSoftwareToken($name);
                 (new VipMigration())->set([$name], 'sohobotp', 'api:' . $key['name'], 'authenticator enrolled');
                 $audit->record('user.token_enrolled', 'success', $name, ['type' => 'software TOTP', 'via' => 'api']);
@@ -241,6 +244,14 @@ final class Api
             'token' => '' !== $u['token_serial'] ? 'hardware ' . $u['token_serial'] : 'software ' . $u['algorithm'],
             'login_format' => $u['login_format'], 'last_login' => $u['last_login'], 'synchronized' => $u['synchronized'],
             'route' => (new VipMigration())->stateOf($u['user'])['state'] ?? null];
+    }
+
+    /** API keys never change a user that is an administrator's portal second factor. */
+    private static function refuseMfaLinked(string $name): void
+    {
+        if (null !== (new AdminRepository())->linkedToMfaUser($name)) {
+            throw new ApiError('forbidden', 403, 'This user is the second factor of a portal administrator: change it in the portal as a super administrator.');
+        }
     }
 
     private static function listedUser(array $u): array

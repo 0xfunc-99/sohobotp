@@ -713,6 +713,23 @@ $relArm['signature'] = base64_encode(sodium_crypto_sign_detached(AgentReleases::
 AgentReleases::add($relBin, $relArm);
 check('release: Windows on ARM release stored', null !== AgentReleases::find('0.3.0', 'windows', 'arm64'));
 
+// --- Sign-in installers: signed with the release key, checked by the portal that knows it
+$msi = tempnam(sys_get_temp_dir(), 'msi');
+file_put_contents($msi, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" . random_bytes(150000));
+$pkg = ['kind' => 'signin', 'arch' => 'amd64', 'version' => '1.0.4.0', 'sha256' => hash_file('sha256', $msi), 'size' => filesize($msi)];
+$signPkg = static fn (array $m, string $secret): array => $m + ['signature' => base64_encode(sodium_crypto_sign_detached(Portal\SigninPackages::message($m), $secret))];
+check('installer: package message as the agent signs it', "sohobotp-package-v1\nsignin\namd64\n1.0.4.0\n{$pkg['sha256']}\n{$pkg['size']}" === Portal\SigninPackages::message($pkg));
+check('installer: no signature refused', throws(static fn () => Portal\SigninPackages::add($msi, $pkg), ValidationException::class));
+check('installer: signed with another key refused', throws(static fn () => Portal\SigninPackages::add($msi, $signPkg($pkg, sodium_crypto_sign_secretkey(sodium_crypto_sign_keypair()))), ValidationException::class));
+check('installer: signature for another version refused', throws(static fn () => Portal\SigninPackages::add($msi, ['version' => '9.0.0.0'] + $signPkg($pkg, sodium_crypto_sign_secretkey($relKeys))), ValidationException::class));
+check('installer: signature for another processor refused', throws(static fn () => Portal\SigninPackages::add($msi, ['arch' => 'arm64'] + $signPkg($pkg, sodium_crypto_sign_secretkey($relKeys))), ValidationException::class));
+Portal\SigninPackages::add($msi, $signPkg($pkg, sodium_crypto_sign_secretkey($relKeys)));
+$pkgPolicy = Portal\SigninPackages::policy()['signin_packages']['amd64'] ?? [];
+check('installer: stored, and the policy carries the release signature', '1.0.4.0' === ($pkgPolicy['version'] ?? '') && sodium_crypto_sign_verify_detached(base64_decode($pkgPolicy['signature']), Portal\SigninPackages::message($pkg), $relPublic));
+(new Portal\JsonStore(Portal\SigninPackages::dir() . '/manifest.json'))->update(static function (array &$m): void { unset($m['signin/amd64']['signature']); });
+check('installer: one added before signatures were required is not offered to computers', !isset(Portal\SigninPackages::policy()['signin_packages']['amd64']) && isset(Portal\SigninPackages::all()['signin/amd64']));
+unlink($msi);
+
 // --- Group Policy kit (zip made by the portal)
 $unzip = static function (string $zip): array {
     $files = [];
