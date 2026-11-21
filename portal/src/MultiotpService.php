@@ -51,6 +51,9 @@ final class MultiotpService
             $multiotp->SetLinuxFileMode('0666');
         }
         $multiotp->ReadConfigData();
+        // the name authenticator apps show for the account (otpauth://totp/<issuer>:<user>):
+        // the engine's own default is "multiOTP"
+        $multiotp->SetIssuer(Config::issuer());
         return $multiotp;
     }
 
